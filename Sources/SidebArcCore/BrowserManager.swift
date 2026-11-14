@@ -1,5 +1,4 @@
 import AppKit
-import SQLite3
 import os
 
 struct BrowserInfo: Equatable {
@@ -9,7 +8,7 @@ struct BrowserInfo: Equatable {
 }
 
 struct BrowserProfile: Equatable {
-    let id: String          // Internal identifier (directory name for Chrome, relative path for Firefox selectable profiles, profile name for Firefox legacy)
+    let id: String          // Profile directory name (Chromium `--profile-directory`)
     let displayName: String // Human-readable name
 }
 
@@ -175,9 +174,7 @@ enum BrowserManager {
         let supported = [
             "com.google.chrome",
             "com.google.chrome.canary",
-            "net.imput.helium",
-            "org.mozilla.firefox",
-            "org.mozilla.firefoxdeveloperedition"
+            "net.imput.helium"
         ]
         return supported.contains(bundleId.lowercased())
     }
@@ -213,8 +210,6 @@ enum BrowserManager {
             result = detectChromeProfiles(dir: root.appendingPathComponent("Google/Chrome Canary"))
         case "net.imput.helium":
             result = detectChromeProfiles(dir: root.appendingPathComponent("net.imput.helium"))
-        case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
-            result = detectFirefoxProfiles(firefoxDir: root.appendingPathComponent("Firefox"))
         default:
             return .unavailable
         }
@@ -231,12 +226,7 @@ enum BrowserManager {
 
     /// Hint for the manual "Other…" entry.
     static func manualProfileHint(bundleId: String) -> String {
-        switch bundleId.lowercased() {
-        case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
-            return "Enter the profile name or its Root Directory, both shown in Firefox at about:profiles."
-        default:
-            return "Enter the browser profile directory name, e.g. “Profile 1”."
-        }
+        "Enter the browser profile directory name, e.g. “Profile 1”."
     }
 
     static func profileArguments(for bundleId: String, profile: String) -> [String] {
@@ -244,23 +234,6 @@ enum BrowserManager {
         switch lowered {
         case "com.google.chrome", "com.google.chrome.canary", "net.imput.helium":
             return ["--profile-directory=\(profile)"]
-        case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
-            // Absolute path (e.g. the Root Directory from about:profiles, entered manually)
-            if profile.hasPrefix("/") {
-                return ["-profile", profile]
-            }
-            // Relative path inside the Firefox folder: selectable profiles, or
-            // classic profiles.ini entries ("Profiles/xxxx.Name")
-            if profile.hasPrefix("Profiles/") {
-                let home = FileManager.default.homeDirectoryForCurrentUser
-                let absolutePath = home
-                    .appendingPathComponent("Library/Application Support/Firefox")
-                    .appendingPathComponent(profile)
-                    .path
-                return ["-profile", absolutePath]
-            }
-            // Classic profile name from profiles.ini
-            return ["-P", profile]
         default:
             return []
         }
@@ -315,90 +288,7 @@ enum BrowserManager {
         return profiles.isEmpty ? .unavailable : .found(sortedByName(profiles))
     }
 
-    /// Firefox lists profiles in two places, and both can be in use at once:
-    /// - classic profiles in `profiles.ini` (`[ProfileN]` with `Name`/`Path`),
-    ///   created by about:profiles;
-    /// - "selectable" profiles (Firefox's newer profile manager) in
-    ///   `Profile Groups/<StoreID>.sqlite`, linked from `profiles.ini` by `StoreID`.
-    /// Both are listed, deduplicated by profile path. Classic profiles keep their
-    /// name as id (opened with `-P name`); selectable ones use their path.
-    private static func detectFirefoxProfiles(firefoxDir: URL) -> ProfileDetection {
-        let ini: String
-        switch readFile(firefoxDir.appendingPathComponent("profiles.ini")) {
-        case .failure: return .accessDenied
-        case .success(nil): return .unavailable
-        case .success(let data?): ini = String(decoding: data, as: UTF8.self)
-        }
-
-        let sections = parseINI(ini)
-        var profiles: [BrowserProfile] = []
-        var seenPaths: Set<String> = []
-
-        let storeIds = Set(sections.compactMap { $0.values["storeid"] }.filter { !$0.isEmpty })
-        let profileGroupsDir = firefoxDir.appendingPathComponent("Profile Groups")
-        for storeId in storeIds.sorted() {
-            let dbPath = profileGroupsDir.appendingPathComponent("\(storeId).sqlite").path
-            for profile in readFirefoxProfileGroupDB(dbPath: dbPath) where seenPaths.insert(profile.id).inserted {
-                profiles.append(profile)
-            }
-        }
-
-        for section in sections where section.name.hasPrefix("Profile") {
-            guard let name = section.values["name"], !name.isEmpty else { continue }
-            if let path = section.values["path"], !seenPaths.insert(path).inserted { continue }
-            profiles.append(BrowserProfile(id: name, displayName: name))
-        }
-
-        return profiles.isEmpty ? .unavailable : .found(sortedByName(profiles))
-    }
-
-    /// Minimal INI parser: sections with lower-cased keys, values as written.
-    private static func parseINI(_ text: String) -> [(name: String, values: [String: String])] {
-        var sections: [(name: String, values: [String: String])] = []
-        for rawLine in text.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") && line.hasSuffix("]") {
-                sections.append((String(line.dropFirst().dropLast()), [:]))
-            } else if let equals = line.firstIndex(of: "="), !sections.isEmpty {
-                let key = line[..<equals].trimmingCharacters(in: .whitespaces).lowercased()
-                let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
-                sections[sections.count - 1].values[key] = value
-            }
-        }
-        return sections
-    }
-
     private static func sortedByName(_ profiles: [BrowserProfile]) -> [BrowserProfile] {
         profiles.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-    }
-
-    /// Reads the Profiles table from a Firefox Profile Groups SQLite database.
-    /// Returns profiles with id = relative path (e.g. "Profiles/xxxx.Name") and displayName = human-readable name.
-    private static func readFirefoxProfileGroupDB(dbPath: String) -> [BrowserProfile] {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_close(db) }
-
-        var stmt: OpaquePointer?
-        let query = "SELECT path, name FROM Profiles ORDER BY id"
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var profiles: [BrowserProfile] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let pathCStr = sqlite3_column_text(stmt, 0),
-                  let nameCStr = sqlite3_column_text(stmt, 1) else {
-                continue
-            }
-            let path = String(cString: pathCStr)
-            let name = String(cString: nameCStr)
-            profiles.append(BrowserProfile(id: path, displayName: name))
-        }
-
-        return profiles
     }
 }

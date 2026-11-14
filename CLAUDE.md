@@ -113,7 +113,7 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 - **Deleting a profile** moves its spaces to the first remaining profile and merges its favorites there (dedupe by `URLNormalization.key`, cap 12); what doesn't fit goes into a "Favorites (from <name>)" folder. The last profile can't be deleted. New spaces join the current space's profile.
 - **Never drop links:** migration, profile deletion and Arc import all use `Profile.appendFavorites`, which returns the leftovers; callers put them in a folder.
 - **UI:** Settings › Profiles (`ProfileSettingsView`: browser and browser-profile pickers, rename/delete); space menus › Profile ▸; link/favorite menus › Open in ▸ / Always open in ▸ (`BrowserMenus`); an override shows the browser icon as a badge (warning symbol if not installed).
-- **Browser-profile detection** (`BrowserManager.detectProfileList`) returns found / `accessDenied` / unavailable. Firefox lists classic `profiles.ini` profiles and "selectable" ones (`Profile Groups/<StoreID>.sqlite`) together, deduplicated by path. macOS app-data protection can block reading another browser's folder (seen with Firefox: EPERM, `com.apple.macl`); Settings then says so, and "Other…" accepts a Firefox profile name (`-P`) or its absolute Root Directory (`-profile`). Tests use a temp `supportRoot`, never the real folders.
+- **Browser-profile detection** (`BrowserManager.detectProfileList`) returns found / `accessDenied` / unavailable, from Chromium's `Local State` (Chrome, Chrome Canary, Helium only). Firefox browser profiles are **not supported** (removed on 2026-11-14: macOS app-data protection blocks reading `~/Library/Application Support/Firefox`); a Firefox profile *browser* works, without a browser profile. macOS can block other browsers' folders the same way; Settings then says so and "Other…" still lets you type the directory name. Tests use a temp `supportRoot`, never the real folders.
 - **Arc import** maps each Arc profile (`space.profile`, `topAppsContainerIDs` pairs) to the fork profile with the same name ("Default" for Arc's default) and imports its favorites (`AppModel.applyArcImport`).
 - **Agent API v2** (`NoteServer`, `skills/sidebarc`): `/api/profiles` (list, create, patch name/browser; no delete), `/api/profiles/:id/favorites`, `/api/favorites/:id` (move, unpin, delete), `profileId` on workspace payloads, `browser_bundle_id` on link patch. The endpoint file reports `schemaVersion: 2` (API version, not the data schema).
 
@@ -122,7 +122,7 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 **Services** (all MainActor singletons):
 - **FaviconService** - Async favicon fetching with disk caching and failure cooldown
 - **LinkTitleService** - HTML title extraction from URLs
-- **BrowserManager** - Browser resolution (`resolveTarget`), URL opening, installed browsers, browser-profile detection (Chrome, Chrome Canary, Helium, Firefox)
+- **BrowserManager** - Browser resolution (`resolveTarget`), URL opening, installed browsers, browser-profile detection (Chrome, Chrome Canary, Helium)
 
 **UI Components**:
 - **MainViewController** - Collection view-based hierarchical list with animations (reduced from 1352 to 596 lines through Phase 3 refactoring)
