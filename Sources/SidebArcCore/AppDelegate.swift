@@ -7,7 +7,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
     private var window: NSWindow?
     private var mainViewController: MainViewController?
-    private var preferencesWindowController: PreferencesWindowController?
     private var alwaysOnTopMenuItem: NSMenuItem?
     private var noteServer: NoteServer?
     private var scheduler: SchedulerService?

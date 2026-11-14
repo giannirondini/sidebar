@@ -3,6 +3,12 @@ import Foundation
 
 extension Notification.Name {
     static let defaultBrowserChanged = Notification.Name("defaultBrowserChanged")
+    static let alwaysOnTopSettingChanged = Notification.Name("alwaysOnTopSettingChanged")
+    static let attachmentSettingChanged = Notification.Name("attachmentSettingChanged")
+    static let sidebarPositionChanged = Notification.Name("sidebarPositionChanged")
+    static let toggleSidebarShortcutChanged = Notification.Name("toggleSidebarShortcutChanged")
+    static let tooltipsSettingChanged = Notification.Name("tooltipsSettingChanged")
+    static let swipeToSwitchSettingChanged = Notification.Name("swipeToSwitchSettingChanged")
 }
 
 enum UserDefaultsKeys {
