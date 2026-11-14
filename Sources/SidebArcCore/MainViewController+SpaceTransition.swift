@@ -364,8 +364,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
         spaceTransition = nil
         if commits || reloadHeldByTransition {
             reloadHeldByTransition = false
-            // The page already slid; don't animate the list a second time.
-            suppressNodeAnimations = true
+            // After a switch the page already slid (and the snapshot covers the
+            // reload); a cancelled swipe's held change goes through the normal diff.
+            suppressNodeAnimations = commits
             reloadData()
             suppressNodeAnimations = false
         }
