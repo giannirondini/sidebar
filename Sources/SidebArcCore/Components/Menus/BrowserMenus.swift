@@ -53,6 +53,14 @@ enum BrowserMenus {
         return item
     }
 
+    /// "Match Exact URL" (checked when on): focus an open tab only when its URL equals
+    /// the link's, not when it is a page below it (`TabURLMatcher`). Toggles.
+    static func exactMatchItem(isOn: Bool, set: @escaping (Bool) -> Void) -> NSMenuItem {
+        let item = ClosureMenuItem(title: "Match Exact URL", state: isOn ? .on : .off) { set(!isOn) }
+        item.toolTip = "Switch to an open tab only when it shows exactly this page, not a page below it."
+        return item
+    }
+
     /// "Profile ▸": assigns a space to a profile, or creates a new one for it.
     static func profileItem(
         profiles: [Profile],

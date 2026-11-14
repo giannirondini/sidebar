@@ -59,4 +59,19 @@ import Testing
         submenu.performActionForItem(at: 2)
         #expect(received == [nil, "com.apple.Safari"])
     }
+
+    @Test func exactMatchItemTogglesTheCurrentValue() {
+        var received: [Bool] = []
+        let menu = NSMenu()
+        menu.addItem(BrowserMenus.exactMatchItem(isOn: false) { received.append($0) })
+        menu.addItem(BrowserMenus.exactMatchItem(isOn: true) { received.append($0) })
+        menu.update()
+        let states = menu.items.map { $0.state }
+        let enabled = menu.items.map { $0.isEnabled }
+        #expect(states == [.off, .on])
+        #expect(enabled == [true, true])
+        menu.performActionForItem(at: 0)
+        menu.performActionForItem(at: 1)
+        #expect(received == [true, false])
+    }
 }

@@ -20,6 +20,11 @@ final class ProfileSettingsView: NSView {
         var resolvedBrowserName: String? = nil
         /// The profile names a browser that isn't installed on this Mac.
         let browserIsMissing: Bool
+        /// `resolvedBrowser` can report its tabs (`TabLocators`).
+        var tabFocusSupported: Bool = false
+        /// Another profile opens the same browser with a different browser profile
+        /// (`TabFocus.isAmbiguous`); focusing is then off unless switched on.
+        var tabFocusAmbiguous: Bool = false
     }
 
     var onAdd: (() -> Void)?
@@ -31,6 +36,8 @@ final class ProfileSettingsView: NSView {
     var onSetBrowserProfile: ((UUID, String, String?) -> Void)?
     /// (profile, browser bundle id): the user picked "Enter Profile…" to type a dir.
     var onEnterBrowserProfile: ((UUID, String) -> Void)?
+    /// (profile, on): the "Switch to open tabs" toggle.
+    var onSetFocusesOpenTabs: ((UUID, Bool) -> Void)?
 
     private let stack = NSStackView()
     private let addButton = SettingsActionButton(title: "Add Profile")
@@ -81,6 +88,7 @@ final class ProfileSettingsView: NSView {
             rowView.onSetBrowser = { [weak self] bundleId in self?.onSetBrowser?(row.profile.id, bundleId) }
             rowView.onSetBrowserProfile = { [weak self] bundleId, dir in self?.onSetBrowserProfile?(row.profile.id, bundleId, dir) }
             rowView.onEnterBrowserProfile = { [weak self] bundleId in self?.onEnterBrowserProfile?(row.profile.id, bundleId) }
+            rowView.onSetFocusesOpenTabs = { [weak self] isOn in self?.onSetFocusesOpenTabs?(row.profile.id, isOn) }
             stack.addArrangedSubview(rowView)
             rowView.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
@@ -111,10 +119,12 @@ private final class ProfileRowView: NSView {
     var onSetBrowser: ((String?) -> Void)?
     var onSetBrowserProfile: ((String, String?) -> Void)?
     var onEnterBrowserProfile: ((String) -> Void)?
+    var onSetFocusesOpenTabs: ((Bool) -> Void)?
 
     private let row: Row
     private let browserPopup = NSPopUpButton()
     private let dirPopup = NSPopUpButton()
+    private let tabFocusToggle = CustomToggle(title: "Switch to open tabs")
     private let canDelete: Bool
 
     typealias Row = ProfileSettingsView.Row
@@ -242,6 +252,8 @@ private final class ProfileRowView: NSView {
             }
         }
 
+        arranged.append(contentsOf: tabFocusViews())
+
         let column = NSStackView(views: arranged)
         column.orientation = .vertical
         column.alignment = .leading
@@ -258,6 +270,43 @@ private final class ProfileRowView: NSView {
         for view in arranged {
             view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         }
+    }
+
+    /// "Switch to open tabs": a click on a favorite (⌥-click on a list link) focuses
+    /// a matching open tab. Shown only for browsers that can report their tabs.
+    private func tabFocusViews() -> [NSView] {
+        let browserName = row.resolvedBrowserName ?? "This browser"
+        guard row.tabFocusSupported else {
+            guard row.resolvedBrowser != nil else { return [] }
+            return [note("\(browserName) can’t report its open tabs, so links always open a new tab.")]
+        }
+        // Set the state before the action, so it doesn't fire on build.
+        tabFocusToggle.isOn = TabFocus.isEnabled(profile: row.profile, ambiguous: row.tabFocusAmbiguous)
+        tabFocusToggle.target = self
+        tabFocusToggle.action = #selector(tabFocusChanged)
+        tabFocusToggle.translatesAutoresizingMaskIntoConstraints = false
+        tabFocusToggle.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+        var views: [NSView] = [tabFocusToggle]
+        if row.tabFocusAmbiguous {
+            let warning = note("Other profiles open \(browserName) with a different browser profile. macOS can’t tell which browser profile a tab belongs to, so a tab from another one may be focused (for example, the wrong account).")
+            warning.textColor = .systemOrange
+            views.append(warning)
+        } else {
+            views.append(note("Clicking a favorite switches to its open tab instead of opening a new one; ⌥-click does the opposite. ⌥-click a list link to switch to its tab."))
+        }
+        return views
+    }
+
+    private func note(_ text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = Self.secondaryTextColor
+        return label
+    }
+
+    @objc private func tabFocusChanged() {
+        onSetFocusesOpenTabs?(tabFocusToggle.isOn)
     }
 
     private func configure(popup: NSPopUpButton) {

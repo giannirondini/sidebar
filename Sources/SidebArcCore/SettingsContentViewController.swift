@@ -45,6 +45,7 @@ final class SettingsContentViewController: NSViewController {
     private let permissionStatusLabel = NSTextField(labelWithString: "")
     private let openSettingsButton = SettingsActionButton(title: "Open System Settings")
     private let refreshStatusButton = SettingsActionButton(title: "Refresh Status")
+    private let automationPermissionView = AutomationPermissionView()
 
     // Import & Export section
     private let importButton = SettingsActionButton(title: "Import from Arc Browser")
@@ -296,6 +297,9 @@ final class SettingsContentViewController: NSViewController {
         refreshStatusButton.action = #selector(refreshPermissionStatus)
         refreshStatusButton.translatesAutoresizingMaskIntoConstraints = false
 
+        automationPermissionView.translatesAutoresizingMaskIntoConstraints = false
+        automationPermissionView.onAllow = { [weak self] in self?.allowAutomation() }
+
         let separator4 = createSeparator()
 
         // Import & Export Section
@@ -357,6 +361,7 @@ final class SettingsContentViewController: NSViewController {
         contentView.addSubview(permissionStatusLabel)
         contentView.addSubview(openSettingsButton)
         contentView.addSubview(refreshStatusButton)
+        contentView.addSubview(automationPermissionView)
         contentView.addSubview(separator4)
         contentView.addSubview(importHeader)
         contentView.addSubview(importButton)
@@ -508,7 +513,12 @@ final class SettingsContentViewController: NSViewController {
             openSettingsButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
             openSettingsButton.heightAnchor.constraint(equalToConstant: 36),
 
+            // Automation (tab focus), below the Accessibility buttons
+            automationPermissionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            automationPermissionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
             // Separator 4
+            separator4.topAnchor.constraint(equalTo: automationPermissionView.bottomAnchor, constant: sectionSpacing),
             separator4.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
             separator4.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
             separator4.heightAnchor.constraint(equalToConstant: 1),
@@ -564,10 +574,11 @@ final class SettingsContentViewController: NSViewController {
         // Activate the appropriate constraint based on initial state
         separator1ToSelectorConstraint?.isActive = true
 
-        // Setup dynamic constraints for separator4 (permissions section)
-        // openSettingsButton is shown/hidden based on accessibility permission status
-        separator4ToOpenSettingsConstraint = separator4.topAnchor.constraint(equalTo: openSettingsButton.bottomAnchor, constant: sectionSpacing)
-        separator4ToRefreshButtonConstraint = separator4.topAnchor.constraint(equalTo: refreshStatusButton.bottomAnchor, constant: sectionSpacing)
+        // Setup dynamic constraints below the Accessibility buttons (permissions section)
+        // openSettingsButton is shown/hidden based on accessibility permission status;
+        // the Automation view (then separator4) follows whichever button is last.
+        separator4ToOpenSettingsConstraint = automationPermissionView.topAnchor.constraint(equalTo: openSettingsButton.bottomAnchor, constant: sectionSpacing)
+        separator4ToRefreshButtonConstraint = automationPermissionView.topAnchor.constraint(equalTo: refreshStatusButton.bottomAnchor, constant: sectionSpacing)
         // Default: openSettingsButton is visible
         separator4ToOpenSettingsConstraint?.isActive = true
 
@@ -662,6 +673,7 @@ final class SettingsContentViewController: NSViewController {
     }
 
     private func updatePermissionStatus() {
+        updateAutomationStatus()
         let hasPermission = WindowAttachmentService.shared.checkAccessibilityPermissions()
 
         if hasPermission {
@@ -849,6 +861,70 @@ final class SettingsContentViewController: NSViewController {
 
     @objc private func refreshPermissionStatus() {
         updatePermissionStatus()
+    }
+
+    // MARK: - Automation (switch to open tabs)
+
+    /// Browsers the profiles open that can report their tabs, plus the one a click
+    /// found without permission. Unique, compared case-insensitively.
+    private func tabFocusBrowsers() -> [String] {
+        guard let appModel else { return [] }
+        var ids = appModel.profiles.compactMap { BrowserManager.resolveTarget(link: nil, profile: $0).bundleId }
+        if let hint = UserDefaults.standard.string(forKey: UserDefaultsKeys.tabFocusPermissionHintBundleId) {
+            ids.append(hint)
+        }
+        var seen = Set<String>()
+        return ids.filter { TabLocators.isSupported(bundleId: $0) && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Checks without asking (off the main actor: the check blocks) and renders.
+    private func updateAutomationStatus() {
+        let browsers = tabFocusBrowsers()
+        let pids = browsers.map { TabFocusService.runningApplication(bundleId: $0)?.processIdentifier }
+        Task { [weak self] in
+            let permissions = await Self.checkAutomation(pids: pids, ask: false)
+            self?.showAutomationStatus(browsers: browsers, permissions: permissions)
+        }
+    }
+
+    private func showAutomationStatus(browsers: [String], permissions: [AutomationPermission]) {
+        let hintKey = UserDefaultsKeys.tabFocusPermissionHintBundleId
+        var hint = UserDefaults.standard.string(forKey: hintKey)
+        if let current = hint,
+           let index = browsers.firstIndex(where: { $0.caseInsensitiveCompare(current) == .orderedSame }),
+           permissions[index] == .granted {
+            UserDefaults.standard.removeObject(forKey: hintKey)
+            hint = nil
+        }
+        let entries = zip(browsers, permissions).map {
+            AutomationPermissionView.Entry(name: BrowserManager.appName(bundleId: $0) ?? $0, permission: $1)
+        }
+        automationPermissionView.update(entries: entries, hintBrowserName: hint.map { BrowserManager.appName(bundleId: $0) ?? $0 })
+    }
+
+    /// Asks macOS for every running browser that was never asked (one prompt at a
+    /// time), then opens System Settings › Automation if one was denied.
+    private func allowAutomation() {
+        let browsers = tabFocusBrowsers()
+        let pids = browsers.map { TabFocusService.runningApplication(bundleId: $0)?.processIdentifier }
+        Task { [weak self] in
+            let before = await Self.checkAutomation(pids: pids, ask: false)
+            let toAsk = zip(pids, before).map { $1 == .notDetermined ? $0 : nil }
+            let after = await Self.checkAutomation(pids: toAsk, ask: true)
+            let permissions = zip(before, after).map { $0 == .notDetermined ? $1 : $0 }
+            if permissions.contains(.denied),
+               let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                NSWorkspace.shared.open(url)
+            }
+            self?.showAutomationStatus(browsers: browsers, permissions: permissions)
+        }
+    }
+
+    /// `nil` pids (not running, or skipped) report `.notRunning`.
+    private nonisolated static func checkAutomation(pids: [pid_t?], ask: Bool) async -> [AutomationPermission] {
+        await Task.detached(priority: .userInitiated) {
+            pids.map { pid in pid.map { AutomationPermission.check(pid: $0, ask: ask) } ?? .notRunning }
+        }.value
     }
 
     @objc private func checkForUpdates() {
@@ -1244,12 +1320,18 @@ final class SettingsContentViewController: NSViewController {
             // Rebuild either way so a cancelled "Enter Profile…" doesn't stay selected.
             self.reloadWorkspaces()
         }
+        profileSettingsView.onSetFocusesOpenTabs = { [weak self] profileId, isOn in
+            self?.appModel?.setProfileFocusesOpenTabs(id: profileId, enabled: isOn)
+            self?.reloadWorkspaces()
+        }
     }
 
     private func reloadProfiles() {
         guard let appModel else { return }
+        let profileTargets = appModel.profiles.map { BrowserManager.resolveTarget(link: nil, profile: $0) }
         let rows = appModel.profiles.map { profile -> ProfileSettingsView.Row in
-            let resolved = BrowserManager.resolveTarget(link: nil, profile: profile).bundleId
+            let target = BrowserManager.resolveTarget(link: nil, profile: profile)
+            let resolved = target.bundleId
             let supports = resolved.map { BrowserManager.supportsProfiles(bundleId: $0) } ?? false
             let detection: BrowserManager.ProfileDetection = supports
                 ? resolved.map { BrowserManager.detectProfileList(bundleId: $0) } ?? .unavailable
@@ -1262,7 +1344,9 @@ final class SettingsContentViewController: NSViewController {
                 detectedBrowserProfiles: detection.profiles,
                 browserProfilesDenied: detection == .accessDenied,
                 resolvedBrowserName: resolved.flatMap { BrowserManager.appName(bundleId: $0) },
-                browserIsMissing: profile.browserBundleId.map { !BrowserManager.isInstalled(bundleId: $0) } ?? false
+                browserIsMissing: profile.browserBundleId.map { !BrowserManager.isInstalled(bundleId: $0) } ?? false,
+                tabFocusSupported: resolved.map { TabLocators.isSupported(bundleId: $0) } ?? false,
+                tabFocusAmbiguous: TabFocus.isAmbiguous(target: target, profileTargets: profileTargets)
             )
         }
         let globalName = BrowserManager.resolveDefaultBrowserBundleId().flatMap { BrowserManager.appName(bundleId: $0) }

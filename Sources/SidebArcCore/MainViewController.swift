@@ -919,7 +919,8 @@ final class MainViewController: NSViewController {
 
     // MARK: - Browser and profile menus
 
-    /// "Open in ▸" and "Always open in ▸" for a link or favorite of the current space.
+    /// "Open in ▸", "Always open in ▸" and, when the link's browser can report its
+    /// tabs, "Match Exact URL", for a link or favorite of the current space.
     private func browserMenuItems(for link: Link) -> [NSMenuItem] {
         let browsers = BrowserManager.installedBrowsers()
         let profileBrowser = BrowserManager.resolveTarget(link: nil, profile: model.currentProfile).bundleId
@@ -936,7 +937,14 @@ final class MainViewController: NSViewController {
         ) { [weak self] bundleId in
             self?.model.setLinkBrowserOverride(id: link.id, bundleId: bundleId)
         }
-        return [openIn, alwaysOpenIn]
+        let target = BrowserManager.resolveTarget(link: link, profile: model.currentProfile)
+        guard let browser = target.bundleId, TabLocators.isSupported(bundleId: browser) else {
+            return [openIn, alwaysOpenIn]
+        }
+        let exactMatch = BrowserMenus.exactMatchItem(isOn: link.exactTabMatch ?? false) { [weak self] exact in
+            self?.model.setLinkExactTabMatch(id: link.id, exact: exact)
+        }
+        return [openIn, alwaysOpenIn, exactMatch]
     }
 
     /// "Profile ▸" for a space: move it to another profile, or to a new one.
