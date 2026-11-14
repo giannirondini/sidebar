@@ -235,7 +235,7 @@ private final class ProfileRowView: NSView {
             if row.browserProfilesDenied {
                 let browserName = row.resolvedBrowserName ?? "the browser"
                 let note = NSTextField(wrappingLabelWithString:
-                    "macOS doesn’t let apps list \(browserName)’s profiles. Choose “Enter Profile…” and type the profile folder shown at chrome://version (last part of “Profile Path”).")
+                    "To use a \(browserName) profile, choose “Enter Profile…” and type its folder from chrome://version (last part of “Profile Path”, e.g. “Profile 1”). macOS doesn’t let apps list them.")
                 note.font = NSFont.systemFont(ofSize: 11)
                 note.textColor = Self.secondaryTextColor
                 arranged.append(note)
