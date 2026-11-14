@@ -29,6 +29,8 @@ protocol TabLocator: Sendable {
     func tabURLs(pid: pid_t, timeout: TimeInterval) throws -> [[String]]
 
     /// Selects `tab` and brings its window to the front of the browser's windows.
+    /// The window is addressed by its id, not its index: restoring a minimised
+    /// window or raising it renumbers the windows.
     /// Returns false, changing nothing, when that tab no longer shows `tab.url`
     /// (closed, moved or navigated since it was listed). The caller activates the app.
     func activate(_ tab: TabRef, pid: pid_t, timeout: TimeInterval) throws -> Bool
@@ -76,7 +78,7 @@ struct ChromiumTabLocator: TabLocator {
     }
 
     func activate(_ tab: TabRef, pid: pid_t, timeout: TimeInterval) throws -> Bool {
-        let window = AE.item(tab.windowIndex, of: AE.window)
+        let window = try AE.windowById(index: tab.windowIndex, pid: pid, timeout: timeout)
         let tabSpec = AE.item(tab.tabIndex, of: "CrTb", in: window)
         let current = try AE.get(AE.property("URL ", of: tabSpec), pid: pid, timeout: timeout).stringValue
         guard current == tab.url else { return false }
@@ -98,7 +100,7 @@ struct SafariTabLocator: TabLocator {
     }
 
     func activate(_ tab: TabRef, pid: pid_t, timeout: TimeInterval) throws -> Bool {
-        let window = AE.item(tab.windowIndex, of: AE.window)
+        let window = try AE.windowById(index: tab.windowIndex, pid: pid, timeout: timeout)
         let tabSpec = AE.item(tab.tabIndex, of: "bTab", in: window)
         let current = try AE.get(AE.property("pURL", of: tabSpec), pid: pid, timeout: timeout).stringValue
         guard current == tab.url else { return false }
@@ -163,6 +165,19 @@ enum AE {
     /// `<cls> <index> of <container>` (1-based); the application when `container` is nil.
     static func item(_ index: Int, of cls: String, in container: NSAppleEventDescriptor? = nil) -> NSAppleEventDescriptor {
         specifier(want: cls, from: container, form: "indx", selector: NSAppleEventDescriptor(int32: Int32(index)))
+    }
+
+    /// `<cls> id <id>`; `id` as the browser returned it (Chrome: text, Safari: integer).
+    static func byId(_ id: NSAppleEventDescriptor, of cls: String) -> NSAppleEventDescriptor {
+        specifier(want: cls, from: nil, form: "ID  ", selector: id)
+    }
+
+    /// Reads the id of `window <index>` and returns a specifier by that id, which
+    /// stays valid when the windows are reordered (un-minimise, raise).
+    static func windowById(index: Int, pid: pid_t, timeout: TimeInterval) throws -> NSAppleEventDescriptor {
+        let id = try get(property("ID  ", of: item(index, of: window)), pid: pid, timeout: timeout)
+        guard id.descriptorType != typeNull else { throw TabLocatorError.unexpectedReply }
+        return byId(id, of: window)
     }
 
     static func property(_ property: String, of container: NSAppleEventDescriptor) -> NSAppleEventDescriptor {

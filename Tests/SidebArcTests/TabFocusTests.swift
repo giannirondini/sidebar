@@ -213,6 +213,19 @@ import Testing
         #expect(item.forKeyword(AE.code("seld"))?.int32Value == 3)
     }
 
+    /// Activation addresses the window by id, so un-minimising or raising it
+    /// (which renumbers windows) can't redirect later events to another window.
+    @Test func windowByIdSpecifierKeepsTheReturnedId() throws {
+        for id in [NSAppleEventDescriptor(string: "1234"), NSAppleEventDescriptor(int32: 77)] {
+            let window = AE.byId(id, of: AE.window)
+            let tab = try #require(AE.item(2, of: "CrTb", in: window).coerce(toDescriptorType: AE.code("reco")))
+            let container = try #require(tab.forKeyword(AE.code("from"))?.coerce(toDescriptorType: AE.code("reco")))
+            #expect(container.forKeyword(AE.code("want"))?.typeCodeValue == AE.code("cwin"))
+            #expect(container.forKeyword(AE.code("form"))?.enumCodeValue == AE.code("ID  "))
+            #expect(container.forKeyword(AE.code("seld")) == id)
+        }
+    }
+
     @Test func parsesNestedURLLists() throws {
         func list(_ items: [NSAppleEventDescriptor]) -> NSAppleEventDescriptor {
             let list = NSAppleEventDescriptor.list()
