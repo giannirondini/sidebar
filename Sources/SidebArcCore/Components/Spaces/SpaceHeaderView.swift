@@ -19,6 +19,9 @@ final class SpaceHeaderView: BaseView {
 
     var isRenaming: Bool { titleField.isEditing }
 
+    /// The icon, to anchor the icon picker to.
+    var iconAnchorView: NSView { iconView }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()

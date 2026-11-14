@@ -89,7 +89,9 @@ final class MainViewController: NSViewController {
             self?.model.selectWorkspace(id: workspaceId)
         }
         spaceBar.onSpaceContextMenu = { [weak self] workspaceId, event in
-            self?.showWorkspaceContextMenu(for: workspaceId, at: event.locationInWindow)
+            guard let self else { return }
+            let anchor = self.spaceBar.buttonView(for: workspaceId) ?? self.spaceBar
+            self.showWorkspaceContextMenu(for: workspaceId, at: event.locationInWindow, iconAnchor: anchor)
         }
         spaceBar.onAddSpace = { [weak self] in
             self?.promptCreateWorkspace()
@@ -127,7 +129,8 @@ final class MainViewController: NSViewController {
         }
         spaceHeader.onContextMenu = { [weak self] event in
             guard let self else { return }
-            self.showWorkspaceContextMenu(for: self.model.currentWorkspace.id, at: event.locationInWindow)
+            self.showWorkspaceContextMenu(for: self.model.currentWorkspace.id, at: event.locationInWindow,
+                                          iconAnchor: self.spaceHeader.iconAnchorView)
         }
 
         // Paste button
@@ -549,7 +552,8 @@ final class MainViewController: NSViewController {
     // MARK: - Workspace Management
 
     /// The space menu for `workspaceId`. It acts on that space and never switches to it.
-    private func showWorkspaceContextMenu(for workspaceId: UUID, at point: NSPoint) {
+    /// - Parameter iconAnchor: what "Change Icon…" anchors its popover to (the clicked icon).
+    private func showWorkspaceContextMenu(for workspaceId: UUID, at point: NSPoint, iconAnchor: NSView) {
         guard let index = model.workspaces.firstIndex(where: { $0.id == workspaceId }) else { return }
         let workspace = model.workspaces[index]
         let count = model.workspaces.count
@@ -558,10 +562,8 @@ final class MainViewController: NSViewController {
                 self?.beginSpaceRename(workspaceId)
             },
             changeIcon: { [weak self] in
-                guard let self else { return }
-                let anchor = NSRect(origin: self.view.convert(point, from: nil), size: .zero)
-                self.showIconPicker(for: workspaceId, relativeTo: anchor, of: self.view,
-                                    hasCustomIcon: workspace.icon != nil, kind: .space)
+                self?.showIconPicker(for: workspaceId, relativeTo: iconAnchor,
+                                     hasCustomIcon: workspace.icon != nil, kind: .space)
             },
             setColor: { [weak self] colorId in
                 self?.model.updateWorkspaceColor(id: workspaceId, colorId: colorId)
@@ -611,10 +613,13 @@ final class MainViewController: NSViewController {
         }
     }
 
-    /// Esc closes Settings (field editors keep Esc for themselves while editing).
+    /// Esc closes Settings (field editors keep Esc for themselves while editing);
+    /// otherwise it goes on up the responder chain.
     override func cancelOperation(_ sender: Any?) {
         if model.isSettingsShown {
             model.closeSettings()
+        } else {
+            nextResponder?.tryToPerform(#selector(cancelOperation(_:)), with: sender)
         }
     }
 
@@ -647,6 +652,8 @@ final class MainViewController: NSViewController {
     }
 
     func promptCreateWorkspace() {
+        // The rename happens in the space header, which Settings hides.
+        model.closeSettings()
         let workspaceId = model.createWorkspace(name: "Untitled Workspace", colorId: .randomColor())
         scheduleWorkspaceInlineRename(for: workspaceId)
     }
@@ -955,10 +962,6 @@ final class MainViewController: NSViewController {
     }
 
     private func showIconPicker(for nodeId: UUID, relativeTo anchorView: NSView, hasCustomIcon: Bool, kind: IconPickerKind) {
-        showIconPicker(for: nodeId, relativeTo: anchorView.bounds, of: anchorView, hasCustomIcon: hasCustomIcon, kind: kind)
-    }
-
-    private func showIconPicker(for nodeId: UUID, relativeTo anchorRect: NSRect, of anchorView: NSView, hasCustomIcon: Bool, kind: IconPickerKind) {
         let popover = NSPopover()
         let pickerController = IconPickerPopoverController()
         pickerController.showRestoreButton = hasCustomIcon
@@ -999,7 +1002,7 @@ final class MainViewController: NSViewController {
         popover.contentViewController = pickerController
         popover.contentSize = NSSize(width: 280, height: 320)
         popover.behavior = .transient
-        popover.show(relativeTo: anchorRect, of: anchorView, preferredEdge: .minY)
+        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
     }
 
     // MARK: - Bulk Operations

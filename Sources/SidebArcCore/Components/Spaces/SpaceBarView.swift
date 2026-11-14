@@ -139,6 +139,12 @@ final class SpaceBarView: NSView {
         selectionPill.isHidden = selectedIndex == nil
     }
 
+    /// The button of a space, e.g. to anchor a popover to it.
+    func buttonView(for spaceId: UUID) -> NSView? {
+        guard let index = items.firstIndex(where: { $0.id == spaceId }), index < spaceButtons.count else { return nil }
+        return spaceButtons[index]
+    }
+
     private func scrollSelectedIntoView() {
         guard let index = items.firstIndex(where: { $0.id == selectedId }), index < spaceButtons.count else { return }
         documentView.scrollToVisible(spaceButtons[index].frame.insetBy(dx: -fadeWidth, dy: 0))
