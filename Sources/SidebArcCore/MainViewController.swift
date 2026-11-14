@@ -550,6 +550,12 @@ final class MainViewController: NSViewController {
             rename: { [weak self] in
                 self?.workspaceSwitcher.beginInlineRename(workspaceId: workspaceId)
             },
+            changeIcon: { [weak self] in
+                guard let self else { return }
+                let anchor = NSRect(origin: self.view.convert(point, from: nil), size: .zero)
+                self.showIconPicker(for: workspaceId, relativeTo: anchor, of: self.view,
+                                    hasCustomIcon: workspace.icon != nil, kind: .space)
+            },
             setColor: { [weak self] colorId in
                 self?.model.updateWorkspaceColor(id: workspaceId, colorId: colorId)
             },
@@ -916,12 +922,22 @@ final class MainViewController: NSViewController {
         case link
         case pinnedLink
         case note
+        /// A space's icon: emoji or SF Symbol only; "Remove Icon" goes back to the colour dot.
+        case space
     }
 
     private func showIconPicker(for nodeId: UUID, relativeTo anchorView: NSView, hasCustomIcon: Bool, kind: IconPickerKind) {
+        showIconPicker(for: nodeId, relativeTo: anchorView.bounds, of: anchorView, hasCustomIcon: hasCustomIcon, kind: kind)
+    }
+
+    private func showIconPicker(for nodeId: UUID, relativeTo anchorRect: NSRect, of anchorView: NSView, hasCustomIcon: Bool, kind: IconPickerKind) {
         let popover = NSPopover()
         let pickerController = IconPickerPopoverController()
         pickerController.showRestoreButton = hasCustomIcon
+        if kind == .space {
+            pickerController.allowsFavicons = false
+            pickerController.restoreButtonTitle = "Remove Icon"
+        }
 
         let applyIcon: (CustomIcon?) -> Void = { [weak self] icon in
             guard let self else { return }
@@ -932,6 +948,8 @@ final class MainViewController: NSViewController {
                 self.model.setPinnedLinkCustomIcon(id: nodeId, icon: icon)
             case .note:
                 self.model.setNoteCustomIcon(id: nodeId, icon: icon)
+            case .space:
+                self.model.setWorkspaceIcon(id: nodeId, icon: icon)
             }
         }
 
@@ -953,7 +971,7 @@ final class MainViewController: NSViewController {
         popover.contentViewController = pickerController
         popover.contentSize = NSSize(width: 280, height: 320)
         popover.behavior = .transient
-        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
+        popover.show(relativeTo: anchorRect, of: anchorView, preferredEdge: .minY)
     }
 
     // MARK: - Bulk Operations

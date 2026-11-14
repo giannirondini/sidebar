@@ -11,6 +11,10 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     private var gridTopToSearchConstraint: NSLayoutConstraint!
 
     var showRestoreButton: Bool = false
+    /// Title of the restore button ("Restore" brings back a link's favicon).
+    var restoreButtonTitle = "Restore"
+    /// Whether the Favicon tab is offered. Spaces take only emoji and SF Symbols.
+    var allowsFavicons = true
     var onIconSelected: ((CustomIcon) -> Void)?
     var onRestoreFavicon: (() -> Void)?
     var onFaviconPathSelected: ((String) -> Void)?
@@ -30,15 +34,19 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
         setupSearchField()
         setupGridView()
         setupRestoreButton()
-        loadCachedFavicons()
+        if allowsFavicons {
+            loadCachedFavicons()
+        }
         showTab(0)
     }
 
     private func setupSegmentedControl() {
-        segmentedControl.segmentCount = 3
+        segmentedControl.segmentCount = allowsFavicons ? 3 : 2
         segmentedControl.setLabel("Emoji", forSegment: 0)
         segmentedControl.setLabel("Icon", forSegment: 1)
-        segmentedControl.setLabel("Favicon", forSegment: 2)
+        if allowsFavicons {
+            segmentedControl.setLabel("Favicon", forSegment: 2)
+        }
         segmentedControl.selectedSegment = 0
         segmentedControl.segmentStyle = .texturedRounded
         segmentedControl.target = self
@@ -85,7 +93,7 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     }
 
     private func setupRestoreButton() {
-        restoreButton.title = "Restore"
+        restoreButton.title = restoreButtonTitle
         restoreButton.bezelStyle = .rounded
         restoreButton.target = self
         restoreButton.action = #selector(restoreTapped)

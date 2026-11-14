@@ -274,6 +274,13 @@ final class AppModel {
         }
     }
 
+    /// Sets the space's icon; `nil` goes back to the colour dot.
+    func setWorkspaceIcon(id: UUID, icon: CustomIcon?) {
+        updateWorkspace(id: id) { workspace in
+            workspace.icon = icon
+        }
+    }
+
     /// Sets (or clears, for nil/blank) the browser profile directory that `profileId`
     /// uses for `bundleId`. Affects every space in that profile.
     func updateBrowserProfile(profileId: UUID, bundleId: String, profile: String?) {

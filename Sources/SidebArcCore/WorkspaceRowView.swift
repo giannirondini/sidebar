@@ -96,6 +96,8 @@ final class WorkspaceRowView: BaseView {
 
     private let handleView = NSImageView()
     private let colorSquare = NSView()
+    /// The space's emoji or symbol, shown in place of the colour square when set.
+    private let iconView = NSImageView()
     private let editableTitle = InlineEditableTextField()
     private let profileLabel = NSTextField(labelWithString: "")
     private let setProfileButton: PaddedTextButton
@@ -192,6 +194,10 @@ final class WorkspaceRowView: BaseView {
 
         addSubview(handleView)
         addSubview(colorSquare)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.isHidden = true
+        addSubview(iconView)
         addSubview(editableTitle)
         addSubview(profileLabel)
         addSubview(setProfileButton)
@@ -217,6 +223,10 @@ final class WorkspaceRowView: BaseView {
             colorSquare.centerYAnchor.constraint(equalTo: centerYAnchor),
             colorSquare.widthAnchor.constraint(equalToConstant: style.colorSquareSize),
             colorSquare.heightAnchor.constraint(equalToConstant: style.colorSquareSize),
+            iconView.centerXAnchor.constraint(equalTo: colorSquare.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: colorSquare.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: style.colorSquareSize),
+            iconView.heightAnchor.constraint(equalToConstant: style.colorSquareSize),
 
             // Title (leading + center only, trailing is dynamic)
             editableTitle.leadingAnchor.constraint(equalTo: colorSquare.trailingAnchor, constant: style.titleLeading),
@@ -242,6 +252,7 @@ final class WorkspaceRowView: BaseView {
 
     func configure(workspaceName: String,
                    workspaceColor: NSColor,
+                   icon: CustomIcon?,
                    showDelete: Bool,
                    canDelete: Bool,
                    profileName: String?,
@@ -258,6 +269,11 @@ final class WorkspaceRowView: BaseView {
         }
 
         colorSquare.layer?.backgroundColor = workspaceColor.cgColor
+        let iconImage = icon.flatMap { SpaceIconView.image(for: $0, size: style.colorSquareSize) }
+        iconView.image = iconImage
+        iconView.contentTintColor = iconImage?.isTemplate == true ? style.titleColor : nil
+        iconView.isHidden = iconImage == nil
+        colorSquare.isHidden = iconImage != nil
         deleteButton.isEnabled = canDelete
         deleteButton.toolTip = canDelete ? nil : "Cannot delete the last workspace"
 

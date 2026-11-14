@@ -6,6 +6,7 @@ import AppKit
 enum SpaceMenu {
     struct Actions {
         var rename: () -> Void
+        var changeIcon: () -> Void
         var setColor: (WorkspaceColorId) -> Void
         /// `nil` when the space is already first.
         var moveLeft: (() -> Void)?
@@ -33,6 +34,7 @@ enum SpaceMenu {
         menu.autoenablesItems = false
 
         menu.addItem(ClosureMenuItem(title: "Rename Workspace…", action: actions.rename))
+        menu.addItem(ClosureMenuItem(title: "Change Icon…", action: actions.changeIcon))
 
         let colorItem = NSMenuItem(title: "Change Color", action: nil, keyEquivalent: "")
         let colorSubmenu = NSMenu()

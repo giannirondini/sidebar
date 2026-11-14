@@ -25,6 +25,42 @@ import Testing
         #expect(state == decoded)
     }
 
+    @Test func workspaceIconRoundTripsAndIsOptional() throws {
+        let state = makeState { [
+            Workspace(id: UUID(), name: "Me", colorId: .ocean, items: [], profileId: $0, icon: .emoji("🚀")),
+            Workspace(id: UUID(), name: "Work", colorId: .moss, items: [], profileId: $0, icon: .sfSymbol("briefcase")),
+            Workspace(id: UUID(), name: "Plain", colorId: .ember, items: [], profileId: $0),
+        ] }
+        let decoded = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
+        #expect(decoded == state)
+        #expect(decoded.workspaces.map(\.icon) == [.emoji("🚀"), .sfSymbol("briefcase"), nil])
+
+        // A v2 file written before `icon` existed has no key: it must decode, as nil.
+        let json = """
+        {"schemaVersion": 2,
+         "profiles": [{"id": "00000000-0000-0000-0000-000000000001", "name": "Default", "browserProfiles": {}, "favorites": []}],
+         "workspaces": [{"id": "00000000-0000-0000-0000-000000000002", "name": "Old", "colorId": "ocean", "items": [],
+                         "profileId": "00000000-0000-0000-0000-000000000001"}],
+         "isSettingsSelected": false}
+        """
+        let old = try JSONDecoder().decode(AppState.self, from: Data(json.utf8))
+        #expect(old.workspaces[0].icon == nil)
+    }
+
+    @Test func setWorkspaceIconPersistsAndClears() {
+        let store = makeStore()
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+        let id = model.currentWorkspace.id
+
+        model.setWorkspaceIcon(id: id, icon: .emoji("📚"))
+        #expect(model.currentWorkspace.icon == .emoji("📚"))
+        #expect(AppModel(store: store).currentWorkspace.icon == .emoji("📚"))
+
+        model.setWorkspaceIcon(id: id, icon: nil)
+        #expect(AppModel(store: store).currentWorkspace.icon == nil)
+    }
+
     @Test func testMoveNodeReorderAndNest() {
         let store = makeStore()
         store.save(DataStore.defaultState())

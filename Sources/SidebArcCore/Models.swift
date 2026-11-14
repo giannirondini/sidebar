@@ -118,6 +118,9 @@ struct Workspace: Codable, Identifiable, Equatable {
     var colorId: WorkspaceColorId
     var items: [Node]
     var profileId: UUID
+    /// Emoji or SF Symbol shown in the space bar and the space header; `nil` shows
+    /// the colour dot. Optional so v2 files decode (synthesized Codable has no defaults).
+    var icon: CustomIcon?
 }
 
 enum CustomIcon: Codable, Equatable, Sendable {

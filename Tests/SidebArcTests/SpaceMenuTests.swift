@@ -19,6 +19,7 @@ import Testing
     private func actions(_ recorder: Recorder, canMoveLeft: Bool = true, canMoveRight: Bool = true) -> SpaceMenu.Actions {
         SpaceMenu.Actions(
             rename: { recorder.calls.append("rename") },
+            changeIcon: { recorder.calls.append("icon") },
             setColor: { recorder.calls.append("color:\($0.rawValue)") },
             moveLeft: canMoveLeft ? { recorder.calls.append("left") } : nil,
             moveRight: canMoveRight ? { recorder.calls.append("right") } : nil,
@@ -45,17 +46,17 @@ import Testing
     @Test func itemsInOrder() {
         let menu = build(Recorder())
         #expect(menu.items.map(\.title) == [
-            "Rename Workspace…", "Change Color", "Profile", "", "Move Left", "Move Right", "", "Delete Workspace…",
+            "Rename Workspace…", "Change Icon…", "Change Color", "Profile", "", "Move Left", "Move Right", "", "Delete Workspace…",
         ])
     }
 
     @Test func everyItemRunsItsClosure() throws {
         let recorder = Recorder()
         let menu = build(recorder)
-        for title in ["Rename Workspace…", "Move Left", "Move Right", "Delete Workspace…"] {
+        for title in ["Rename Workspace…", "Change Icon…", "Move Left", "Move Right", "Delete Workspace…"] {
             menu.performActionForItem(at: try index(of: title, in: menu))
         }
-        #expect(recorder.calls == ["rename", "left", "right", "delete"])
+        #expect(recorder.calls == ["rename", "icon", "left", "right", "delete"])
     }
 
     @Test func colorSubmenuChecksCurrentAndSets() throws {
@@ -78,7 +79,7 @@ import Testing
 
         let only = build(Recorder(), canMoveLeft: false, canMoveRight: false)
         #expect(!only.items.contains { $0.title.hasPrefix("Move") })
-        #expect(only.items.map(\.title) == ["Rename Workspace…", "Change Color", "Profile", "", "Delete Workspace…"])
+        #expect(only.items.map(\.title) == ["Rename Workspace…", "Change Icon…", "Change Color", "Profile", "", "Delete Workspace…"])
     }
 
     @Test func deleteIsDisabledForTheLastSpace() throws {
