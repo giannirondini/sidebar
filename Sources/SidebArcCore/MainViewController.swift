@@ -541,119 +541,49 @@ final class MainViewController: NSViewController {
 
     // MARK: - Workspace Management
 
+    /// The space menu for `workspaceId`. It acts on that space and never switches to it.
     private func showWorkspaceContextMenu(for workspaceId: UUID, at point: NSPoint) {
-        // Temporarily select the workspace for context menu actions
-        let previousWorkspaceId = model.currentWorkspace.id
-        if previousWorkspaceId != workspaceId {
-            model.selectWorkspace(id: workspaceId)
-        }
-
-        let menu = NSMenu()
-        let canDelete = model.workspaces.count > 1
-        guard let workspaceIndex = model.workspaces.firstIndex(where: { $0.id == workspaceId }) else { return }
-        let canMoveLeft = workspaceIndex > 0
-        let canMoveRight = workspaceIndex < model.workspaces.count - 1
-
-        let renameItem = NSMenuItem(title: "Rename Workspace…", action: #selector(renameWorkspaceFromMenu), keyEquivalent: "")
-        renameItem.target = self
-        menu.addItem(renameItem)
-
-        let colorItem = NSMenuItem(title: "Change Color", action: nil, keyEquivalent: "")
-        let colorSubmenu = NSMenu()
-        for colorId in WorkspaceColorId.allCases {
-            let colorMenuItem = NSMenuItem(title: colorId.name, action: #selector(changeColorTo(_:)), keyEquivalent: "")
-            colorMenuItem.target = self
-            colorMenuItem.representedObject = colorId
-            colorMenuItem.image = createColorPreviewImage(color: colorId.color)
-            if colorId == model.currentWorkspace.colorId {
-                colorMenuItem.state = .on
+        guard let index = model.workspaces.firstIndex(where: { $0.id == workspaceId }) else { return }
+        let workspace = model.workspaces[index]
+        let count = model.workspaces.count
+        let actions = SpaceMenu.Actions(
+            rename: { [weak self] in
+                self?.workspaceSwitcher.beginInlineRename(workspaceId: workspaceId)
+            },
+            setColor: { [weak self] colorId in
+                self?.model.updateWorkspaceColor(id: workspaceId, colorId: colorId)
+            },
+            moveLeft: index > 0 ? { [weak self] in
+                self?.model.moveWorkspace(id: workspaceId, direction: .left)
+            } : nil,
+            moveRight: index < count - 1 ? { [weak self] in
+                self?.model.moveWorkspace(id: workspaceId, direction: .right)
+            } : nil,
+            delete: { [weak self] in
+                self?.confirmDeleteWorkspace(id: workspaceId)
             }
-            colorSubmenu.addItem(colorMenuItem)
-        }
-        colorItem.submenu = colorSubmenu
-        menu.addItem(colorItem)
-
-        menu.addItem(profileMenuItem(for: model.workspaces[workspaceIndex]))
-
-        if canMoveLeft || canMoveRight {
-            menu.addItem(NSMenuItem.separator())
-
-            if canMoveLeft {
-                let moveLeftItem = NSMenuItem(title: "Move Left", action: #selector(moveWorkspaceLeft), keyEquivalent: "")
-                moveLeftItem.target = self
-                menu.addItem(moveLeftItem)
-            }
-
-            if canMoveRight {
-                let moveRightItem = NSMenuItem(title: "Move Right", action: #selector(moveWorkspaceRight), keyEquivalent: "")
-                moveRightItem.target = self
-                menu.addItem(moveRightItem)
-            }
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        let deleteItem = NSMenuItem(title: "Delete Workspace…", action: #selector(deleteWorkspaceFromMenu), keyEquivalent: "")
-        deleteItem.target = self
-        deleteItem.isEnabled = canDelete
-        menu.addItem(deleteItem)
-
+        )
+        let menu = SpaceMenu.build(
+            workspace: workspace,
+            canDelete: count > 1,
+            profileItem: profileMenuItem(for: workspace),
+            actions: actions
+        )
         if view.window != nil {
             let pointInView = view.convert(point, from: nil)
             menu.popUp(positioning: nil, at: pointInView, in: view)
         }
     }
 
-    @objc private func renameWorkspaceFromMenu() {
-        let workspace = model.currentWorkspace
-        workspaceSwitcher.beginInlineRename(workspaceId: workspace.id)
-    }
-
-    @objc private func changeColorTo(_ sender: NSMenuItem) {
-        guard let colorId = sender.representedObject as? WorkspaceColorId else { return }
-        let workspace = model.currentWorkspace
-        model.updateWorkspaceColor(id: workspace.id, colorId: colorId)
-    }
-
-    private func createColorPreviewImage(color: NSColor, size: CGFloat = 12) -> NSImage {
-        let image = NSImage(size: NSSize(width: size, height: size))
-        image.lockFocus()
-
-        let rect = NSRect(x: 0, y: 0, width: size, height: size)
-        let path = NSBezierPath(ovalIn: rect)
-        color.setFill()
-        path.fill()
-
-        // Add subtle border
-        let borderColor = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 0.20)
-        borderColor.setStroke()
-        path.lineWidth = 1.5
-        path.stroke()
-
-        image.unlockFocus()
-        return image
-    }
-
-    @objc private func deleteWorkspaceFromMenu() {
-        let workspace = model.currentWorkspace
+    private func confirmDeleteWorkspace(id: UUID) {
         let alert = NSAlert()
         alert.messageText = "Delete Workspace"
         alert.informativeText = "This will delete the workspace and everything inside it."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
-            model.deleteWorkspace(id: workspace.id)
+            model.deleteWorkspace(id: id)
         }
-    }
-
-    @objc private func moveWorkspaceLeft() {
-        let workspace = model.currentWorkspace
-        model.moveWorkspace(id: workspace.id, direction: .left)
-    }
-
-    @objc private func moveWorkspaceRight() {
-        let workspace = model.currentWorkspace
-        model.moveWorkspace(id: workspace.id, direction: .right)
     }
 
     /// The workspace switcher view, exposed for swipe gesture exclusion.
