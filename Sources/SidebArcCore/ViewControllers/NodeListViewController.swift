@@ -649,7 +649,7 @@ extension NodeListViewController: NSCollectionViewDataSource {
                 isScheduled: link.scheduledOpenAt != nil,
                 scheduleBadgeBackgroundColor: workspaceColor.backgroundColor,
                 tooltipURL: link.url,
-                browserBadge: link.browserBundleId.flatMap { BrowserManager.appIcon(bundleId: $0) }
+                browserBadge: BrowserManager.overrideBadge(for: link.browserBundleId)
             )
 
             if shouldFetch, let url = URL(string: link.url) {

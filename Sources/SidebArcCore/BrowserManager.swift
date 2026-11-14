@@ -25,16 +25,23 @@ enum BrowserManager {
     /// Resolves where `link` opens for a space in `profile`.
     ///
     /// Browser precedence: **link override → profile's browser → global default**.
+    /// A configured browser that isn't installed is skipped, so the next level
+    /// applies (an uninstalled global default ends at the system handler in `open`).
     /// The profile directory is `profile.browserProfiles[browser]` when the browser
     /// is the profile's own; a per-link override to a *different* browser opens
     /// without a browser profile.
     static func resolveTarget(
         link: Link?,
         profile: Profile,
-        globalDefault: String? = resolveDefaultBrowserBundleId()
+        globalDefault: String? = resolveDefaultBrowserBundleId(),
+        installed: (String) -> Bool = { BrowserManager.isInstalled(bundleId: $0) }
     ) -> BrowserTarget {
-        let profileBrowser = profile.browserBundleId ?? globalDefault
-        let browser = link?.browserBundleId ?? profileBrowser
+        func available(_ id: String?) -> String? {
+            guard let id, installed(id) else { return nil }
+            return id
+        }
+        let profileBrowser = available(profile.browserBundleId) ?? globalDefault
+        let browser = available(link?.browserBundleId) ?? profileBrowser
         guard let browser else { return BrowserTarget(bundleId: nil, profileDir: nil) }
 
         // Bundle ids are case-insensitive; look the dir up under the profile's spelling,
@@ -94,6 +101,17 @@ enum BrowserManager {
         let icon = NSWorkspace.shared.icon(forFile: url.path)
         iconCache[bundleId] = icon
         return icon
+    }
+
+    /// Badge for a link's browser override: the browser's icon, or a warning
+    /// symbol when that browser isn't installed (the link then falls back, see
+    /// `resolveTarget`). nil when there is no override.
+    static func overrideBadge(for bundleId: String?) -> NSImage? {
+        guard let bundleId else { return nil }
+        if let icon = appIcon(bundleId: bundleId) { return icon }
+        let config = NSImage.SymbolConfiguration(paletteColors: [.systemOrange])
+        return NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Browser not installed")?
+            .withSymbolConfiguration(config)
     }
 
     static func defaultBrowserBundleId() -> String? {

@@ -56,7 +56,7 @@ final class PinnedTabTileView: BaseControl {
     func configure(link: Link, iconsDirectory: URL?) {
         tooltipShowTask?.cancel()
         tooltipShowTask = nil
-        let badge = link.browserBundleId.flatMap { BrowserManager.appIcon(bundleId: $0) }
+        let badge = BrowserManager.overrideBadge(for: link.browserBundleId)
         browserBadgeView.image = badge
         browserBadgeView.isHidden = badge == nil
         linkId = link.id
