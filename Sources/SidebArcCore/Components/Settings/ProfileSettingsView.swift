@@ -29,7 +29,7 @@ final class ProfileSettingsView: NSView {
     var onSetBrowser: ((UUID, String?) -> Void)?
     /// (profile, browser bundle id, browser profile dir or nil for none)
     var onSetBrowserProfile: ((UUID, String, String?) -> Void)?
-    /// (profile, browser bundle id): the user picked "Other…" to type a dir.
+    /// (profile, browser bundle id): the user picked "Enter Profile…" to type a dir.
     var onEnterBrowserProfile: ((UUID, String) -> Void)?
 
     private let stack = NSStackView()
@@ -225,7 +225,7 @@ private final class ProfileRowView: NSView {
                 dirPopup.select(dirPopup.lastItem)
             }
             dirPopup.menu?.addItem(.separator())
-            dirPopup.addItem(withTitle: "Other…")
+            dirPopup.addItem(withTitle: "Enter Profile…")
             dirPopup.lastItem?.representedObject = DirChoiceBox(.other)
             if current == nil { dirPopup.selectItem(at: 0) }
             dirPopup.action = #selector(dirChanged)
@@ -235,7 +235,7 @@ private final class ProfileRowView: NSView {
             if row.browserProfilesDenied {
                 let browserName = row.resolvedBrowserName ?? "the browser"
                 let note = NSTextField(wrappingLabelWithString:
-                    "macOS doesn’t let SidebArc read \(browserName)’s profile list. Allow SidebArc in System Settings › Privacy & Security › Full Disk Access, or choose Other… to enter the profile.")
+                    "macOS doesn’t let apps list \(browserName)’s profiles. Choose “Enter Profile…” and type the profile folder shown at chrome://version (last part of “Profile Path”).")
                 note.font = NSFont.systemFont(ofSize: 11)
                 note.textColor = Self.secondaryTextColor
                 arranged.append(note)

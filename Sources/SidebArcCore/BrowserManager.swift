@@ -217,16 +217,18 @@ enum BrowserManager {
         case .found(let profiles):
             logger.info("\(bundleId, privacy: .public): \(profiles.count) browser profile(s) detected")
         case .accessDenied:
-            logger.error("\(bundleId, privacy: .public): reading the browser profile list was denied (macOS privacy protection or file permissions)")
+            logger.notice("\(bundleId, privacy: .public): reading the browser profile list was denied (macOS privacy protection or file permissions); profiles can be entered by hand")
         case .unavailable:
             logger.info("\(bundleId, privacy: .public): no browser profile list found")
         }
         return result
     }
 
-    /// Hint for the manual "Other…" entry.
+    /// Hint for typing a browser profile by hand ("Enter Profile…"). macOS blocks
+    /// reading other browsers' data folders, so this is the normal path.
     static func manualProfileHint(bundleId: String) -> String {
-        "Enter the browser profile directory name, e.g. “Profile 1”."
+        let browser = appName(bundleId: bundleId) ?? "the browser"
+        return "In \(browser), open chrome://version and copy the last part of “Profile Path”, for example “Default” or “Profile 1”."
     }
 
     static func profileArguments(for bundleId: String, profile: String) -> [String] {

@@ -1234,14 +1234,14 @@ final class SettingsContentViewController: NSViewController {
             let browserName = BrowserManager.appName(bundleId: bundleId) ?? bundleId
             if let dir = TextPrompt.run(
                 message: "Browser Profile",
-                informative: "\(browserName): \(BrowserManager.manualProfileHint(bundleId: bundleId))",
+                informative: BrowserManager.manualProfileHint(bundleId: bundleId),
                 initial: current,
                 placeholder: nil,
                 confirmTitle: "Save"
             ) {
                 appModel.updateBrowserProfile(profileId: profileId, bundleId: bundleId, profile: dir)
             }
-            // Rebuild either way so a cancelled "Other…" doesn't stay selected.
+            // Rebuild either way so a cancelled "Enter Profile…" doesn't stay selected.
             self.reloadWorkspaces()
         }
     }
