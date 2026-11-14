@@ -51,6 +51,8 @@ swift build -c release
 - Optionally creates a DMG installer with `--dmg` flag
 - Optionally notarizes the DMG with `--production --dmg`
 
+**Signing and privacy grants:** ad-hoc builds pin the designated requirement to the bundle id (`adhoc_sign` in `scripts/lib/app-config.sh`); the default cdhash requirement made macOS drop the Accessibility and Automation grants on every rebuild. `--production` adds the hardened runtime and `scripts/SidebArc.entitlements` (`com.apple.security.automation.apple-events`). `NSAppleEventsUsageDescription` lives in `Bundler.toml` `[apps.SidebArc.plist]` and is also set by `patch_info_plist` (swift-bundler doesn't always merge plist keys); without it Apple Events are denied with no prompt.
+
 **Production Signing**: For distribution outside the Mac App Store, use `--production` flag with proper code signing credentials configured in `.notarization-config`. See [docs/PRODUCTION_SIGNING.md](docs/PRODUCTION_SIGNING.md) for setup.
 
 See [docs/BUILD_AND_CODESIGN.md](docs/BUILD_AND_CODESIGN.md) for detailed information about the build process, code signing, and verification.
@@ -95,11 +97,11 @@ The application follows a unidirectional data flow pattern:
 The data model is defined in `Models.swift`:
 
 - **AppState** - Root container: `schemaVersion` (currently 2), `profiles`, `workspaces`, selected workspace ID, `isSettingsSelected`
-- **Profile** - Groups spaces that share a browser setup and the Favorites grid: `name`, `browserBundleId` (nil = global default browser), `browserProfiles` (browser bundle id → browser profile dir), `favorites: [Link]` (max `Profile.maxFavorites` = 12)
+- **Profile** - Groups spaces that share a browser setup and the Favorites grid: `name`, `browserBundleId` (nil = global default browser), `browserProfiles` (browser bundle id → browser profile dir), `favorites: [Link]` (max `Profile.maxFavorites` = 12), `focusesOpenTabs: Bool?` (nil = automatic)
 - **Workspace** - Named, colored container with hierarchical `items` and a `profileId` (every space belongs to exactly one profile)
 - **Node** - Enum of `Folder`, `Link` or `Note`
   - `Folder` - Contains nested children and isExpanded state
-  - `Link` - URL, title, optional favicon path, custom icon, schedule, and `browserBundleId` (per-link browser override)
+  - `Link` - URL, title, optional favicon path, custom icon, schedule, `browserBundleId` (per-link browser override) and `exactTabMatch: Bool?`
   - `Note` - Title and custom icon; the body is a `.md` file in `Notes/`
 
 All models are Codable and use UUID-based identification. The Node enum uses custom encoding to serialize the tagged union structure.
@@ -117,12 +119,23 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 - **Arc import** maps each Arc profile (`space.profile`, `topAppsContainerIDs` pairs) to the fork profile with the same name ("Default" for Arc's default) and imports its favorites (`AppModel.applyArcImport`).
 - **Agent API v2** (`NoteServer`, `skills/sidebarc`): `/api/profiles` (list, create, patch name/browser; no delete), `/api/profiles/:id/favorites`, `/api/favorites/:id` (move, unpin, delete), `profileId` on workspace payloads, `browser_bundle_id` on link patch. The endpoint file reports `schemaVersion: 2` (API version, not the data schema).
 
+### Switching to open tabs (Phase 2)
+
+- A **favorite click** focuses an already open tab showing it; a **pinned-list click** opens new; **⌥-click** inverts (⌘-click in the list is multi-select). Open All Links, scheduled links, Open in ▸ and notes always open new. Entry point: `MainViewController.openClickedLink` → `TabFocusService.open`.
+- `TabFocus` (pure, unit-tested) decides; `TabLocator` (`ChromiumTabLocator` for Chrome/Brave, `SafariTabLocator`) lists tab URLs in one Apple Event and focuses a tab; `TabURLMatcher` matches. Raw Apple Events (`NSAppleEventDescriptor.sendEvent`, 300 ms timeout) sent **by pid** from a detached task: never `NSAppleScript` (main thread only) or `osascript` (child process); never send to a browser that isn't running (it would launch). Any failure opens normally.
+- **Matching:** same scheme/host/port; prefix = tab path at or below the link's on a segment boundary + the link's query items in the tab; exact (`Link.exactTabMatch`, "Match Exact URL") = same path and query. Fragment ignored; `www.` and http/https are **not** equal. `URLNormalization` (favorites dedupe) is separate and must not change.
+- **Browser profiles:** AppleScript can't tell which Chrome profile owns a window. `TabFocus.isAmbiguous` (profiles open the same browser with different browser-profile dirs) makes `Profile.focusesOpenTabs` default off (`nil` = automatic); Settings › Profiles warns when it's on.
+- **Permission:** the click path uses `AEDeterminePermissionToAutomateTarget(askUserIfNeeded: false)` and never prompts; Settings › Permissions shows per-browser status and asks ("Allow Browser Access…"). A click without permission stores `tabFocusPermissionHintBundleId` for a Settings hint.
+- **Not supported** (open new, no error): Firefox (no dictionary), Dia and Arc (own dictionaries, not verified; Dia is personal-Mac only), Edge/Vivaldi/Canary/Helium (not installed). Add a browser only after verifying it on a Mac: `TabLocators.locator(for:)`.
+- Manual checklist for real browsers: `docs/TAB_FOCUS_CHECKLIST.md`.
+
 ### Key Components
 
 **Services** (all MainActor singletons):
 - **FaviconService** - Async favicon fetching with disk caching and failure cooldown
 - **LinkTitleService** - HTML title extraction from URLs
 - **BrowserManager** - Browser resolution (`resolveTarget`), URL opening, installed browsers, browser-profile detection (Chrome, Chrome Canary, Helium)
+- **TabFocusService** - Click → focus an open tab or open new (`TabFocus`, `TabLocator`, `TabURLMatcher`)
 
 **UI Components**:
 - **MainViewController** - Collection view-based hierarchical list with animations (reduced from 1352 to 596 lines through Phase 3 refactoring)
@@ -260,6 +273,8 @@ WorkspaceColorId enum defines 8 color themes (Blush, Apricot, Butter, Leaf, Mint
 - Fixtures go in the suite's `init()` (a fresh instance per test), not `setUp`
 - ThemeConstants has comprehensive unit tests validating all design values
 - Opt-in acceptance tests run against real files only when an env var points at a **copy**: `SIDEBARC_V1_FIXTURE` (v1 `data.json` → migration, zero lost links) and `SIDEBARC_ARC_FIXTURE` (`StorableSidebar.json` → favorites per profile). They print counts only; never commit those files
+- `SIDEBARC_TAB_PROBE=<bundle id>` runs an opt-in, counts-only probe of a running browser's tabs with the real locator (needs Automation granted to the terminal; never asks, never focuses)
+- New fields on synthesized-Codable models (`Profile`, `Link`) must be `Optional`: synthesized decoding ignores default values, so a non-optional field fails every existing file. Otherwise add a `SchemaVn` mirror and migration
 - Menu items with closures use `ClosureMenuItem`. Never name an `@objc` action method `perform(_:)`: `#selector` resolves to NSObject's `performSelector:`, which throws inside AppKit's dispatch and is swallowed, so the item silently does nothing (`ClosureMenuItemTests` guards this)
 
 ## Refactoring History

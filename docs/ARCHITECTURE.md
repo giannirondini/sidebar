@@ -70,9 +70,14 @@ Sources/SidebArcCore/
 │   ├── FaviconService.swift           # Async favicon fetching
 │   ├── LinkTitleService.swift         # HTML title extraction
 │   ├── BrowserManager.swift           # Browser selection & URL opening
+│   ├── TabLocator.swift               # Lists/focuses browser tabs over Apple Events
+│   ├── TabFocus.swift                 # Pure "focus an open tab or open new?" decisions
+│   ├── TabFocusService.swift          # Runs TabFocus for clicks (off the main actor)
 │   └── ... (window attachment, Arc import)
 └── Utilities/
     ├── NodeFiltering.swift            # Recursive filtering
+    ├── TabURLMatcher.swift            # Which open tab shows a link
+    ├── URLNormalization.swift         # Favorites dedupe key
     └── Theme/
         └── ThemeConstants.swift       # Design system constants
 ```
@@ -131,6 +136,29 @@ The original bytes are copied to `Backups/pre-v2-migration-<timestamp>.json` (ou
 ## Profiles and browser routing
 
 A link opens in: **link override → profile's browser → global default**, skipping any browser that isn't installed (`BrowserManager.resolveTarget`). The browser profile directory comes from the profile's `browserProfiles` for that browser, unless a link override points at a different browser. Favorites belong to the profile, so every space in it shows the same grid; unpinning moves a favorite into the current space. Deleting a profile moves its spaces and favorites to the first remaining profile (leftovers go to a folder). Notes open in the space's profile browser too; window attachment uses the global default browser.
+
+## Switching to open tabs
+
+Clicking a favorite focuses a browser tab that already shows it instead of opening a duplicate; a pinned-list link does so on ⌥-click (⌥ inverts both defaults). Open All Links, scheduled links, Open in ▸ and notes always open a new tab.
+
+```
+click → TabFocusService.open (main actor)
+          resolveTarget → TabFocus.decide ─ openNew ──────────────► BrowserManager.open
+                              │ lookForTab(browser)
+          browser running? ── no ─────────────────────────────────► BrowserManager.open
+          detached task: TabFocus.locateAndFocus
+            AutomationPermission.check(ask: false) ─ not granted ─► open (+ Settings hint)
+            TabLocator.tabURLs        (1 Apple Event, 300 ms timeout)
+            TabURLMatcher.bestMatch   ─ none ─────────────────────► open
+            TabLocator.activate       (re-check URL, select tab, raise window)
+          main actor: NSRunningApplication.activate (yieldActivation on macOS 14+)
+```
+
+- **Locators** (`TabLocators.locator(for:)`, bundle ids compared case-insensitively): `ChromiumTabLocator` (Chrome, Brave) and `SafariTabLocator`. They send raw Apple Events built from four-char codes in each browser's dictionary (`NSAppleEventDescriptor.sendEvent(options:timeout:)`), addressed **by pid**, so an event never launches a closed browser. Not `NSAppleScript` (main thread only) or `osascript` (a child process: macOS attributes its privacy checks to SidebArc). Chromium incognito windows are listed empty. Activation re-reads the chosen tab's URL and gives up if it changed since the listing. Firefox has no scripting dictionary; Dia and Arc ship their own dictionaries and are not verified; Edge, Vivaldi, Canary and Helium aren't installed here: all of them open normally.
+- **Matching** (`TabURLMatcher`): same scheme, host (case-insensitive) and port; prefix mode needs the tab's path at or below the link's path on a segment boundary and every query item of the link in the tab; exact mode (`Link.exactTabMatch`, "Match Exact URL") needs the same path and query items. Fragment ignored; `www.` and http/https are **not** equal. Separate from `URLNormalization` (favorites dedupe), which is unchanged.
+- **Browser profiles**: AppleScript can't tell which Chrome profile owns a window. `TabFocus.isAmbiguous` is true when SidebArc's profiles open the same browser with different browser profiles; then `Profile.focusesOpenTabs` defaults to off (`nil` = automatic) and Settings › Profiles warns when it's switched on.
+- **Permission**: the click path checks Automation with `AEDeterminePermissionToAutomateTarget(askUserIfNeeded: false)` and never prompts; denied, never asked or a reset grant open normally. Settings › Permissions shows the status per browser and asks on "Allow Browser Access…". Needs `NSAppleEventsUsageDescription` (Bundler.toml + `patch_info_plist`) and, under the hardened runtime, the Apple Events entitlement ([BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md)).
+- **Tests**: `TabURLMatcherTests` (table), `TabFocusTests` (decisions, fake locator, Apple Event building, opt-in `SIDEBARC_TAB_PROBE`); real browsers: [TAB_FOCUS_CHECKLIST.md](TAB_FOCUS_CHECKLIST.md).
 
 ## Key Design Decisions
 

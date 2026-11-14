@@ -50,15 +50,15 @@ Steps:
 2. Syncs `VERSION` into `Bundler.toml`.
 3. `mint run swift-bundler bundle -c release`.
 4. **Unwraps the nested resource bundle** (`unwrap_nested_resource_bundles`). Swift 6.4's default `swiftbuild` build system already emits the SwiftPM resource bundle as a full macOS bundle, and swift-bundler v3 wraps it again (`…/Contents/Resources/Contents/Resources/NoteEditor`). Without this step the note editor is not found at runtime. `--build-system native` is not a way out: it is deprecated, and its warning on stdout breaks swift-bundler's `--show-bin-path` parsing.
-5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist (belt and braces; swift-bundler v3 already writes them).
-6. Code signs (ad-hoc, or Developer ID with `--production`).
+5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion` and `NSAppleEventsUsageDescription` in Info.plist (`patch_info_plist`; swift-bundler doesn't always merge `[apps.SidebArc.plist]`). Without the usage string macOS denies Apple Events without a prompt, so "switch to open tabs" never works.
+6. Code signs: ad-hoc with the requirement pinned to the bundle id (`adhoc_sign`, see below), or Developer ID with `--production` (hardened runtime + `scripts/SidebArc.entitlements`).
 7. Prints the bundle id, version and signing identifier; `--dmg` then calls `scripts/create-dmg.sh`.
 
 **Output**: `.build/bundler/SidebArc.app` (executable `Contents/MacOS/SidebArc`).
 
 ### `scripts/run.sh`
 
-Debug build, the same unwrap and Info.plist steps, ad-hoc signing, then `open`.
+Debug build, the same unwrap and Info.plist steps (`patch_info_plist`), ad-hoc signing (`adhoc_sign`), then `open`.
 
 ### `scripts/verify-build.sh`
 
@@ -69,7 +69,9 @@ Debug build, the same unwrap and Info.plist steps, ad-hoc signing, then `open`.
 Fails unless all of these hold:
 
 - Info.plist is valid; `CFBundleIdentifier` equals the `Bundler.toml` identifier; `CFBundleExecutable` equals the app name.
-- The code signature identifier equals the bundle id, and the signature verifies.
+- `NSAppleEventsUsageDescription` is in Info.plist.
+- The code signature identifier equals the bundle id, and the signature verifies. It also prints the designated requirement.
+- Under the hardened runtime (`--production`), the `com.apple.security.automation.apple-events` entitlement is present.
 - `Contents/MacOS/<app name>` exists.
 - The note editor is at `Contents/Resources/*.bundle/Contents/Resources/NoteEditor/index.html`. The bundle is matched by content, not name, the same rule as `NoteServer.resolveBundledResourcesURL()`. A missing editor once crashed the app at launch, and a double-wrapped bundle silently disables notes.
 - Regression guards: no `SUFeedURL` in Info.plist and no `Sparkle.framework` (the app has no in-app updater).
@@ -78,20 +80,24 @@ Fails unless all of these hold:
 
 macOS needs a valid signature whose identifier matches `CFBundleIdentifier` for:
 
-- **Accessibility** (window attachment) and, later, **Automation**: TCC tracks grants by bundle id plus signature.
+- **Accessibility** (window attachment) and **Automation** (switching to open tabs): TCC stores each grant with the app's designated requirement.
 - **Gatekeeper** when the app runs outside the App Store.
 
 ### Ad-hoc (development)
 
 ```bash
-codesign --force --deep --sign - .build/bundler/SidebArc.app
+codesign --force --deep --sign - \
+  -r='designated => identifier "io.github.giannirondini.sidebarc"' \
+  .build/bundler/SidebArc.app
 ```
 
-An ad-hoc signature changes on every build, so TCC may treat each rebuild as a new app and drop the Accessibility grant. If that happens, remove and re-add SidebArc in System Settings, or reset it (below). A stable self-signed identity for development is planned.
+By default an ad-hoc signature's designated requirement is the build's `cdhash`, which changes on every build, so TCC treated each rebuild as a new app and dropped its Accessibility and Automation grants. `adhoc_sign` (`scripts/lib/app-config.sh`) pins the requirement to the bundle id so grants should survive rebuilds; `codesign -d -r- .build/bundler/SidebArc.app` shows `designated => identifier "io.github.giannirondini.sidebarc"`. Development only: on this Mac any binary signed with that identifier matches the grants. If a grant still doesn't stick, reset it (below).
+
+Ad-hoc builds have no hardened runtime, so they need no entitlements.
 
 ### Developer ID (distribution)
 
-`./scripts/build.sh --production` reads `SIGNING_IDENTITY` from `.notarization-config` and signs with `--options runtime --timestamp`. Setup: [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+`./scripts/build.sh --production` reads `SIGNING_IDENTITY` from `.notarization-config` and signs with `--options runtime --entitlements scripts/SidebArc.entitlements --timestamp`. The entitlement `com.apple.security.automation.apple-events` is required: under the hardened runtime, Apple Events to browsers fail silently without it. Setup: [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
 
 ## Info.plist as built
 
@@ -103,6 +109,7 @@ CFBundleShortVersionString / CFBundleVersion   from VERSION
 CFBundleIconFile          AppIcon
 LSApplicationCategoryType public.app-category.productivity
 LSMinimumSystemVersion    13.0   (from Package.swift)
+NSAppleEventsUsageDescription  from [apps.SidebArc.plist] in Bundler.toml
 ```
 
 ## Runtime data
@@ -165,6 +172,16 @@ The resource bundle was not unwrapped. Rebuild with `./scripts/build.sh` (not a 
    tccutil reset Accessibility io.github.giannirondini.sidebarc
    ```
 3. macOS caches the check: quit and relaunch SidebArc, or use "Refresh Status" in Settings.
+
+### Clicking a favorite opens a duplicate instead of switching to the open tab
+
+1. Settings › Permissions › Automation shows each profile browser's status. "Not asked yet": click **Allow Browser Access…** with the browser running. "Not allowed": turn it on in System Settings › Privacy & Security › Automation › SidebArc.
+2. `./scripts/verify-build.sh` must show `NSAppleEventsUsageDescription` (and, for `--production`, the Apple Events entitlement).
+3. Reset the grant to be asked again:
+   ```bash
+   tccutil reset AppleEvents io.github.giannirondini.sidebarc
+   ```
+4. Logs: `log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "tabs"'` shows each lookup and its timing.
 
 ## References
 

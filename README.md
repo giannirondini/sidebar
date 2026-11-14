@@ -34,6 +34,7 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 - **Sidebar Attachment** - Automatically attaches to browser windows and follows them across spaces. If you prefer, you can still use SidebArc as a standalone bookmark manager window, not attaching it anywhere.
 - **Supported Browsers** - Chrome, Arc, Safari, Brave, etc.
 - **Always-on-Top Mode** - Pin the SidebArc window to stay visible on top of all apps.
+- **Switch to Open Tabs** - Clicking a favorite switches to the tab where it's already open instead of opening a duplicate (Chrome, Brave, Safari); ⌥-click a list link to do the same. Firefox and other browsers always open a new tab.
 - **Profiles** - Group spaces into profiles (e.g. Personal, Work). Each profile can open links in its own browser and browser profile, and shares one Favorites grid across its spaces. Any link can be set to always open in a specific browser.
 - **Arc Import** - Import pinned tabs, folders and Favorites directly from Arc browser via settings; Arc profiles map to SidebArc profiles.
 - **Browser Import** - Import bookmarks exported as HTML from Chrome, Safari or Firefox.
@@ -67,6 +68,17 @@ For the sidebar attachment feature to work, grant SidebArc accessibility permiss
 3. Enable the checkbox next to SidebArc
 
 Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. The app will prompt to grant accessibility permission if the "Attach to window as sidebar" option is selected.
+
+### Automation Permission (Switch to Open Tabs)
+
+To find a tab that's already open, SidebArc asks Chrome, Brave or Safari for their tab URLs over Apple Events. It never reads browser data folders.
+
+1. Open SidebArc **Settings** → **Permissions**, with the browser running
+2. Click **Allow Browser Access…** and allow SidebArc to control the browser
+
+Clicks never trigger the prompt. Without the permission, links open in a new tab as usual. To change it later: **System Settings** → **Privacy & Security** → **Automation** → **SidebArc**.
+
+If several profiles open the same browser with different browser profiles (e.g. Chrome "Default" and "Profile 1"), switching is off for them by default: macOS can't tell which browser profile a tab belongs to, so it might switch to the wrong account. Turn it on per profile in **Settings** → **Profiles**.
 
 ### Importing from Arc
 
