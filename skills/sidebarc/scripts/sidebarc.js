@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// arcmark.js — zero-dependency CLI for the Arcmark agent skill.
+// sidebarc.js — zero-dependency CLI for the SidebArc agent skill.
 //
-// Talks to the local HTTP server inside the running Arcmark.app via the
-// endpoint file written to ~/Library/Application Support/Arcmark/agent-endpoint.json.
+// Talks to the local HTTP server inside the running SidebArc.app via the
+// endpoint file written to ~/Library/Application Support/io.github.giannirondini.sidebarc/agent-endpoint.json.
 // All output is JSON to stdout. Errors print {error,code,...} to stderr and
 // exit non-zero.
 
@@ -16,7 +16,8 @@ const ENDPOINT_FILE = path.join(
   os.homedir(),
   'Library',
   'Application Support',
-  'Arcmark',
+  // Must match AppIdentity.dataDirectoryName (Constants.swift); AppIdentityTests checks it.
+  'io.github.giannirondini.sidebarc',
   'agent-endpoint.json'
 );
 
@@ -88,7 +89,7 @@ function readEndpoint() {
   } catch (e) {
     fail(
       'app_not_running',
-      'Arcmark does not appear to be running. Ask the user to launch Arcmark.app, then retry.',
+      'SidebArc does not appear to be running. Ask the user to launch SidebArc.app, then retry.',
       { endpointFile: ENDPOINT_FILE }
     );
   }
@@ -138,7 +139,7 @@ async function request(method, route, body) {
   try {
     res = await fetch(url, init);
   } catch (e) {
-    fail('http_failed', `Could not reach Arcmark at ${url}: ${e.message}`);
+    fail('http_failed', `Could not reach SidebArc at ${url}: ${e.message}`);
   }
   const text = await res.text();
   let json;
@@ -382,10 +383,10 @@ async function resolveContent(flags) {
 
 // ---------- Help ----------
 
-const HELP = `arcmark.js — organize bookmarks, folders, and notes in the Arcmark macOS app.
+const HELP = `sidebarc.js — organize bookmarks, folders, and notes in the SidebArc macOS app.
 
 Usage:
-  arcmark.js <command> [args] [flags]
+  sidebarc.js <command> [args] [flags]
 
 State:
   state                                Dump the full AppState JSON.
@@ -441,7 +442,7 @@ async function main() {
   const command = argv[0];
   const handler = COMMANDS[command];
   if (!handler) {
-    fail('unknown_command', `Unknown command: ${command}`, { hint: 'Run `arcmark.js help` for the full list.' });
+    fail('unknown_command', `Unknown command: ${command}`, { hint: 'Run `sidebarc.js help` for the full list.' });
   }
   const args = parseArgs(argv.slice(1));
   try {

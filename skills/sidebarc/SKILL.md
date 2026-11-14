@@ -1,27 +1,28 @@
 ---
-name: arcmark
+name: sidebarc
 description: >
-  Organize bookmarks, folders, and markdown notes in the Arcmark macOS app.
-  ALWAYS use this skill when the user asks to save a link, create a folder,
-  move bookmarks between workspaces, take notes, or otherwise tidy their
-  Arcmark sidebar.
-last-updated: 2026-05-18
-allowed-tools: Bash(./scripts/arcmark.js:*)
+  Organize bookmarks, bookmark folders, and markdown notes in the SidebArc
+  macOS app. Use this skill when the user asks to save a link, organize or
+  move bookmarks between SidebArc workspaces, take notes in SidebArc, or
+  otherwise tidy their SidebArc sidebar. Not for creating files or folders
+  on disk or in a code project.
+last-updated: 2026-11-14
+allowed-tools: Bash(./scripts/sidebarc.js:*)
 ---
 
-# Arcmark Agent Skill
+# SidebArc Agent Skill
 
-Arcmark is a macOS sidebar app for organizing bookmarks and short markdown
+SidebArc is a macOS sidebar app for organizing bookmarks and short markdown
 notes inside named, color-coded **workspaces**. This skill lets you create
 and rearrange that content on the user's behalf — atomically, with no manual
 file editing.
 
 ## Setup / prerequisites
 
-- **Arcmark must be running.** All commands talk to a local HTTP server inside
+- **SidebArc must be running.** All commands talk to a local HTTP server inside
   the running app.
 - If a command exits with `code: "app_not_running"`, **stop and ask the user
-  to launch Arcmark.app** before retrying. Do not loop on retries.
+  to launch SidebArc.app** before retrying. Do not loop on retries.
 - You do not need network access; everything is on `127.0.0.1`.
 
 ## Glossary
@@ -56,11 +57,11 @@ file editing.
 
 ## Workflow
 
-1. **Find ids first.** Run `arcmark.js state` (or `arcmark.js workspaces:list`
-   plus `arcmark.js tree WORKSPACE_ID`) to discover the workspace, folder,
+1. **Find ids first.** Run `sidebarc.js state` (or `sidebarc.js workspaces:list`
+   plus `sidebarc.js tree WORKSPACE_ID`) to discover the workspace, folder,
    and node UUIDs you need. Never invent or guess ids.
    - When the user says "this workspace", "the current one", "the one I'm
-     in", or "here", resolve it with `arcmark.js workspaces:current`. The
+     in", or "here", resolve it with `sidebarc.js workspaces:current`. The
      response is `{ selected, settingsSelected, workspace: { id, name, colorId } | null }`.
      If `selected` is false (e.g. the user is on the Settings screen),
      ask which workspace to use instead of guessing.
@@ -82,7 +83,7 @@ documents:
   here-docs:
 
   ```bash
-  ./scripts/arcmark.js notes:write NOTE_ID --content - <<'EOF'
+  ./scripts/sidebarc.js notes:write NOTE_ID --content - <<'EOF'
   # Heading
   Paragraph with **markdown**.
   EOF
@@ -160,30 +161,30 @@ Group two existing links into a new folder inside the Reading workspace:
 
 ```bash
 # 1. Find the ids.
-./scripts/arcmark.js workspaces:list
+./scripts/sidebarc.js workspaces:list
 # -> [{"id":"...reading...","name":"Reading", ...}]
 
-./scripts/arcmark.js tree READING_WS_ID
+./scripts/sidebarc.js tree READING_WS_ID
 # Pick out the two link ids from the tree output.
 
 # 2. Create the folder.
-FOLDER_ID=$(./scripts/arcmark.js folders:create \
+FOLDER_ID=$(./scripts/sidebarc.js folders:create \
   --workspace READING_WS_ID --name "Research" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
 # 3. Move each link into it.
-./scripts/arcmark.js nodes:move LINK_ID_1 --to-parent "$FOLDER_ID"
-./scripts/arcmark.js nodes:move LINK_ID_2 --to-parent "$FOLDER_ID"
+./scripts/sidebarc.js nodes:move LINK_ID_1 --to-parent "$FOLDER_ID"
+./scripts/sidebarc.js nodes:move LINK_ID_2 --to-parent "$FOLDER_ID"
 ```
 
 Create a note in Reading and fill it with markdown from stdin:
 
 ```bash
-NOTE_ID=$(./scripts/arcmark.js notes:create \
+NOTE_ID=$(./scripts/sidebarc.js notes:create \
   --workspace READING_WS_ID --title "Weekly plan" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
-./scripts/arcmark.js notes:write "$NOTE_ID" --content - <<'EOF'
+./scripts/sidebarc.js notes:write "$NOTE_ID" --content - <<'EOF'
 # Weekly plan
 
 - Finish the report
@@ -194,10 +195,10 @@ EOF
 Save a link in Work, then move it to a Reading subfolder:
 
 ```bash
-LINK_ID=$(./scripts/arcmark.js links:create \
+LINK_ID=$(./scripts/sidebarc.js links:create \
   --workspace WORK_WS_ID --url "https://anthropic.com" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
-./scripts/arcmark.js nodes:move "$LINK_ID" \
+./scripts/sidebarc.js nodes:move "$LINK_ID" \
   --to-workspace READING_WS_ID --to-parent RESEARCH_FOLDER_ID
 ```
