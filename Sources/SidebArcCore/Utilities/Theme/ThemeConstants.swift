@@ -255,6 +255,12 @@ struct ThemeConstants {
 
         /// Maximum number of rows in the pinned tabs grid
         static let pinnedTileMaxRows: Int = 3
+
+        /// Height of the bottom space bar (`SpaceBarView`)
+        static let spaceBarHeight: CGFloat = buttonHeight
+
+        /// Side of each square button in the space bar (gear, space icons, `+`)
+        static let spaceBarButtonSize: CGFloat = 28
     }
 
     // MARK: - Animation

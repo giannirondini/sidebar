@@ -141,6 +141,12 @@ import Testing
         #expect(ThemeConstants.Sizing.rowHeight > 0)
     }
 
+    @Test func testSpaceBarSizing() {
+        // Buttons fit the bar and leave room around a medium icon.
+        #expect(ThemeConstants.Sizing.spaceBarButtonSize <= ThemeConstants.Sizing.spaceBarHeight)
+        #expect(ThemeConstants.Sizing.spaceBarButtonSize > ThemeConstants.Sizing.iconMedium)
+    }
+
     // MARK: - Animation Tests
 
     @Test func testAnimationDurationsArePositive() {

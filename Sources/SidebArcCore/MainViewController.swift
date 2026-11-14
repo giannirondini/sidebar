@@ -11,7 +11,7 @@ final class MainViewController: NSViewController {
     private let settingsViewController = SettingsContentViewController()
 
     // UI Components
-    private let workspaceSwitcher = WorkspaceSwitcherView(style: .defaultStyle)
+    private let spaceBar = SpaceBarView()
     private let searchField = SearchBarView(style: .defaultSearch)
     private let pinnedTabsView = PinnedTabsView()
     private let spaceHeader = SpaceHeaderView()
@@ -83,21 +83,17 @@ final class MainViewController: NSViewController {
     }
 
     private func setupUI() {
-        // Workspace switcher
-        workspaceSwitcher.translatesAutoresizingMaskIntoConstraints = false
-        workspaceSwitcher.onWorkspaceSelected = { [weak self] workspaceId in
+        // Space bar (bottom): gear, one icon per space, +
+        spaceBar.onSpaceSelected = { [weak self] workspaceId in
             self?.model.selectWorkspace(id: workspaceId)
         }
-        workspaceSwitcher.onWorkspaceRightClick = { [weak self] workspaceId, point in
-            self?.showWorkspaceContextMenu(for: workspaceId, at: point)
+        spaceBar.onSpaceContextMenu = { [weak self] workspaceId, event in
+            self?.showWorkspaceContextMenu(for: workspaceId, at: event.locationInWindow)
         }
-        workspaceSwitcher.onAddWorkspace = { [weak self] in
+        spaceBar.onAddSpace = { [weak self] in
             self?.promptCreateWorkspace()
         }
-        workspaceSwitcher.onWorkspaceRename = { [weak self] workspaceId, newName in
-            self?.model.renameWorkspace(id: workspaceId, newName: newName)
-        }
-        workspaceSwitcher.onSettingsSelected = { [weak self] in
+        spaceBar.onSettings = { [weak self] in
             self?.toggleSettings()
         }
 
@@ -147,10 +143,6 @@ final class MainViewController: NSViewController {
         settingsViewController.view.isHidden = true
 
         // Layout
-        let topBar = NSView()
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-        topBar.addSubview(workspaceSwitcher)
-
         let bottomBar = NSView()
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
         bottomBar.addSubview(pasteButton)
@@ -183,8 +175,8 @@ final class MainViewController: NSViewController {
         swipeClipContainer = clipContainer
         clipContainer.addSubview(contentStack)
 
-        // Outer stack: topBar, searchField, then the swipe clip container
-        let stack = NSStackView(views: [topBar, searchField, clipContainer])
+        // Outer stack: search field, the swipe clip container, then the space bar
+        let stack = NSStackView(views: [searchField, clipContainer, spaceBar])
         stack.orientation = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -194,11 +186,6 @@ final class MainViewController: NSViewController {
         view.addSubview(settingsViewController.view)
 
         NSLayoutConstraint.activate([
-            workspaceSwitcher.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
-            workspaceSwitcher.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
-            workspaceSwitcher.topAnchor.constraint(equalTo: topBar.topAnchor),
-            workspaceSwitcher.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
-
             pasteButton.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
             pasteButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
             pasteButton.topAnchor.constraint(equalTo: bottomBar.topAnchor),
@@ -216,13 +203,14 @@ final class MainViewController: NSViewController {
             // Clip container fills width of outer stack
             clipContainer.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             clipContainer.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+            spaceBar.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            spaceBar.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
 
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: LayoutConstants.windowPadding),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -LayoutConstants.windowPadding),
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: LayoutConstants.windowPadding),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutConstants.windowPadding),
 
-            topBar.heightAnchor.constraint(equalToConstant: 30),
             bottomBar.heightAnchor.constraint(equalToConstant: pasteButton.style.height)
         ])
 
@@ -241,8 +229,10 @@ final class MainViewController: NSViewController {
         NSLayoutConstraint.activate([
             settingsViewController.view.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             settingsViewController.view.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
-            settingsViewController.view.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 10),
-            settingsViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -LayoutConstants.windowPadding)
+            // Settings takes the place of search and the space content; the space bar
+            // (and its gear, the way back) stays visible below it.
+            settingsViewController.view.topAnchor.constraint(equalTo: stack.topAnchor),
+            settingsViewController.view.bottomAnchor.constraint(equalTo: spaceBar.topAnchor, constant: -stack.spacing)
         ])
     }
 
@@ -472,26 +462,13 @@ final class MainViewController: NSViewController {
     }
 
     private func reloadWorkspaceMenu() {
-        let workspaces = model.workspaces
-
-        workspaceSwitcher.workspaces = workspaces.map { workspace in
-            WorkspaceSwitcherView.WorkspaceItem(
-                id: workspace.id,
-                name: workspace.name,
-                colorId: workspace.colorId
-            )
-        }
-
-        workspaceSwitcher.isSettingsSelected = model.isSettingsShown
-
-        if model.isSettingsShown {
-            workspaceSwitcher.selectedWorkspaceId = nil
-            workspaceSwitcher.workspaceColor = .settingsBackground
-        } else {
-            let selectedId = model.currentWorkspace.id
-            workspaceSwitcher.selectedWorkspaceId = selectedId
-            workspaceSwitcher.workspaceColor = model.currentWorkspace.colorId
-        }
+        spaceBar.update(
+            items: model.workspaces.map {
+                SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, colorId: $0.colorId)
+            },
+            selectedId: model.currentWorkspace.id,
+            isSettingsShown: model.isSettingsShown
+        )
 
         handlePendingWorkspaceRename()
     }
@@ -621,8 +598,8 @@ final class MainViewController: NSViewController {
         }
     }
 
-    /// The workspace switcher view, exposed for swipe gesture exclusion.
-    var workspaceSwitcherView: NSView { workspaceSwitcher }
+    /// The space bar, exposed for swipe gesture exclusion.
+    var spaceBarView: NSView { spaceBar }
 
     /// The gear: opens Settings, or closes it when it is already shown.
     func toggleSettings() {
@@ -651,7 +628,6 @@ final class MainViewController: NSViewController {
         if currentIndex > 0 {
             let prevId = workspaces[currentIndex - 1].id
             model.selectWorkspace(id: prevId)
-            workspaceSwitcher.scrollToWorkspace(id: prevId)
         }
     }
 
@@ -666,7 +642,6 @@ final class MainViewController: NSViewController {
         if currentIndex < workspaces.count - 1 {
             let nextId = workspaces[currentIndex + 1].id
             model.selectWorkspace(id: nextId)
-            workspaceSwitcher.scrollToWorkspace(id: nextId)
         }
     }
 

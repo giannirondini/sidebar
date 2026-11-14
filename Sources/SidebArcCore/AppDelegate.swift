@@ -341,8 +341,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func setupSwipeGesture() {
         SwipeGestureService.shared.delegate = mainViewController
-        if let switcher = mainViewController?.workspaceSwitcherView {
-            SwipeGestureService.shared.addExcludedView(switcher)
+        if let spaceBar = mainViewController?.spaceBarView {
+            SwipeGestureService.shared.addExcludedView(spaceBar)
         }
 
         let enabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.swipeToSwitchEnabled)
