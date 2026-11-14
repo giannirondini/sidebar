@@ -63,6 +63,11 @@ struct Profile: Codable, Identifiable, Equatable {
     var browserProfiles: [String: String]
     /// The Favorites tile grid, shared by every space in this profile.
     var favorites: [Link]
+    /// Whether clicks look for an already open browser tab to focus (`TabFocus`).
+    /// `nil` = automatic: on, unless the browser is ambiguous (another profile uses
+    /// a different browser profile of the same browser; see `TabFocus.isAmbiguous`).
+    /// Optional so existing v2 files decode (synthesized Codable has no defaults).
+    var focusesOpenTabs: Bool?
 
     static let defaultName = "Default"
     static let maxFavorites = ThemeConstants.Sizing.pinnedTileColumns * ThemeConstants.Sizing.pinnedTileMaxRows
@@ -72,13 +77,15 @@ struct Profile: Codable, Identifiable, Equatable {
         name: String,
         browserBundleId: String? = nil,
         browserProfiles: [String: String] = [:],
-        favorites: [Link] = []
+        favorites: [Link] = [],
+        focusesOpenTabs: Bool? = nil
     ) {
         self.id = id
         self.name = name
         self.browserBundleId = browserBundleId
         self.browserProfiles = browserProfiles
         self.favorites = favorites
+        self.focusesOpenTabs = focusesOpenTabs
     }
 
     static func makeDefault() -> Profile {
@@ -168,6 +175,9 @@ struct Link: Codable, Identifiable, Equatable, Sendable {
     var scheduledOpenAt: Date?
     /// Per-link browser override ("Always open in ▸"); `nil` follows the space's profile.
     var browserBundleId: String?
+    /// Focus an open tab only when its URL equals this link's (`TabURLMatcher`), not
+    /// when it is merely below it. `nil` = false; optional so v2 files decode.
+    var exactTabMatch: Bool?
 }
 
 struct Folder: Codable, Identifiable, Equatable, Sendable {

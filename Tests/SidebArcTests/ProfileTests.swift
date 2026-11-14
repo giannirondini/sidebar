@@ -132,6 +132,35 @@ import Testing
         #expect(model.pinnedLinkById(favorite)?.browserBundleId == nil)
     }
 
+    @Test func focusesOpenTabsSetAndReset() {
+        let id = model.createProfile(name: "Work")
+        #expect(model.profile(id: id)?.focusesOpenTabs == nil)
+        model.setProfileFocusesOpenTabs(id: id, enabled: false)
+        #expect(model.profile(id: id)?.focusesOpenTabs == false)
+        model.setProfileFocusesOpenTabs(id: id, enabled: true)
+        #expect(model.profile(id: id)?.focusesOpenTabs == true)
+        model.setProfileFocusesOpenTabs(id: id, enabled: nil)
+        #expect(model.profile(id: id)?.focusesOpenTabs == nil)
+    }
+
+    @Test func exactTabMatchOnListLinksAndFavorites() {
+        let listLink = model.addLink(urlString: "https://list.com", title: "List", parentId: nil)
+        let favorite = pinNewLink("https://fav.com")
+
+        model.setLinkExactTabMatch(id: listLink, exact: true)
+        model.setLinkExactTabMatch(id: favorite, exact: true)
+        guard case .link(let updated) = model.nodeById(listLink) else {
+            Issue.record("Expected list link")
+            return
+        }
+        #expect(updated.exactTabMatch == true)
+        #expect(model.pinnedLinkById(favorite)?.exactTabMatch == true)
+
+        // Off is stored as nil (the default), so the key stays out of the JSON.
+        model.setLinkExactTabMatch(id: favorite, exact: false)
+        #expect(model.pinnedLinkById(favorite)?.exactTabMatch == nil)
+    }
+
     // MARK: - Arc import mapping
 
     private func link(_ url: String) -> Link {

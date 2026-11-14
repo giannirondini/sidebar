@@ -91,6 +91,12 @@ final class AppModel {
         updateProfile(id: id) { $0.browserBundleId = bundleId }
     }
 
+    /// Turns tab focusing on or off for the profile; `nil` restores the automatic
+    /// default (see `Profile.focusesOpenTabs`).
+    func setProfileFocusesOpenTabs(id: UUID, enabled: Bool?) {
+        updateProfile(id: id) { $0.focusesOpenTabs = enabled }
+    }
+
     func assignWorkspace(_ workspaceId: UUID, toProfile profileId: UUID) {
         guard state.profiles.contains(where: { $0.id == profileId }) else { return }
         updateWorkspace(id: workspaceId) { $0.profileId = profileId }
@@ -210,6 +216,22 @@ final class AppModel {
         updateNode(id: id) { node in
             if case .link(var link) = node {
                 link.browserBundleId = bundleId
+                node = .link(link)
+            }
+        }
+    }
+
+    /// Sets "Match Exact URL" for a link in any space's list or any profile's
+    /// favorites. `false` is stored as nil, the default.
+    func setLinkExactTabMatch(id: UUID, exact: Bool) {
+        let value: Bool? = exact ? true : nil
+        if favoriteLocation(id: id) != nil {
+            updateFavorite(id: id) { $0.exactTabMatch = value }
+            return
+        }
+        updateNode(id: id) { node in
+            if case .link(var link) = node {
+                link.exactTabMatch = value
                 node = .link(link)
             }
         }

@@ -327,6 +327,28 @@ import Testing
         #expect(!encoded.contains("browserBundleId"))
     }
 
+    /// Phase 2 fields are optional: a v2 file written before them still decodes,
+    /// and nil values are left out of the JSON (no schema bump).
+    @Test func testTabFocusFieldsAreOptionalInJSON() throws {
+        let linkJSON = #"{"id": "00000000-0000-0000-0000-000000000021", "title": "T", "url": "https://t.com"}"#
+        let link = try JSONDecoder().decode(Link.self, from: Data(linkJSON.utf8))
+        #expect(link.exactTabMatch == nil)
+        let encodedLink = try #require(String(data: JSONEncoder().encode(link), encoding: .utf8))
+        #expect(!encodedLink.contains("exactTabMatch"))
+
+        let profileJSON = #"{"id": "00000000-0000-0000-0000-000000000022", "name": "P", "browserProfiles": {}, "favorites": []}"#
+        let profile = try JSONDecoder().decode(Profile.self, from: Data(profileJSON.utf8))
+        #expect(profile.focusesOpenTabs == nil)
+        let encodedProfile = try #require(String(data: JSONEncoder().encode(profile), encoding: .utf8))
+        #expect(!encodedProfile.contains("focusesOpenTabs"))
+
+        var changed = profile
+        changed.focusesOpenTabs = false
+        changed.favorites = [Link(id: UUID(), title: "F", url: "https://f.com", exactTabMatch: true)]
+        let roundTrip = try JSONDecoder().decode(Profile.self, from: JSONEncoder().encode(changed))
+        #expect(roundTrip == changed)
+    }
+
     @Test func testRepairCreatesProfileAndFixesDanglingProfileIds() {
         let orphan = Workspace(id: UUID(), name: "Orphan", colorId: .ember, items: [], profileId: UUID())
         let repaired = AppState(profiles: [], workspaces: [orphan], selectedWorkspaceId: orphan.id, isSettingsSelected: false).repaired()
