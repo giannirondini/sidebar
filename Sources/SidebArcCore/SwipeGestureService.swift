@@ -8,8 +8,12 @@ enum SwipeDirection: Sendable {
 protocol SwipeGestureServiceDelegate: AnyObject {
     func swipeGestureDidBegin(_ service: SwipeGestureService)
     func swipeGestureDidUpdate(_ service: SwipeGestureService, translationX: CGFloat)
+    /// Legacy mode only: the drag passed the trigger distance while the finger was down.
     func swipeGestureDidComplete(_ service: SwipeGestureService, direction: SwipeDirection)
     func swipeGestureDidCancel(_ service: SwipeGestureService)
+    /// The finger lifted after a horizontal drag (not in legacy mode): the delegate
+    /// decides with `SpaceSwipe.outcome`. `velocityX` is in points per second.
+    func swipeGestureDidEnd(_ service: SwipeGestureService, translationX: CGFloat, velocityX: CGFloat)
 }
 
 /// Detects horizontal trackpad swipes via global+local NSEvent monitors.
@@ -35,6 +39,9 @@ final class SwipeGestureService {
     private var gestureDecided = false
     private var isHorizontalGesture = false
     private var hasTriggered = false
+    private var velocity = SwipeVelocityEstimator()
+    /// Legacy: trigger mid-gesture at `triggerThreshold`. New: decide when the finger lifts.
+    private let triggersMidGesture = SpaceTransitionMode.isLegacy
 
     private let directionLockThreshold: CGFloat = 15
     private let triggerThreshold: CGFloat = 150
@@ -90,8 +97,10 @@ final class SwipeGestureService {
             handleBegan(event)
         case .changed:
             handleChanged(event)
-        case .ended, .cancelled:
-            handleEnded()
+        case .ended:
+            handleEnded(event)
+        case .cancelled:
+            handleCancelled()
         default:
             if event.momentumPhase != [] {
                 return
@@ -117,6 +126,7 @@ final class SwipeGestureService {
 
         resetState()
         isTracking = true
+        velocity.begin(at: event.timestamp)
         notifyDelegate { $0.swipeGestureDidBegin(self) }
     }
 
@@ -125,6 +135,7 @@ final class SwipeGestureService {
 
         accumulatedDeltaX += event.scrollingDeltaX
         accumulatedDeltaY += event.scrollingDeltaY
+        velocity.add(time: event.timestamp, deltaX: event.scrollingDeltaX)
 
         if !gestureDecided {
             let totalMovement = abs(accumulatedDeltaX) + abs(accumulatedDeltaY)
@@ -146,20 +157,35 @@ final class SwipeGestureService {
         let translationX = accumulatedDeltaX
         notifyDelegate { $0.swipeGestureDidUpdate(self, translationX: translationX) }
 
-        if abs(accumulatedDeltaX) > triggerThreshold {
+        if triggersMidGesture, abs(accumulatedDeltaX) > triggerThreshold {
             hasTriggered = true
             let direction: SwipeDirection = accumulatedDeltaX < 0 ? .left : .right
             notifyDelegate { $0.swipeGestureDidComplete(self, direction: direction) }
         }
     }
 
-    private func handleEnded() {
+    private func handleEnded(_ event: NSEvent) {
         guard isTracking else { return }
 
         if !hasTriggered && gestureDecided && isHorizontalGesture {
-            notifyDelegate { $0.swipeGestureDidCancel(self) }
+            if triggersMidGesture {
+                notifyDelegate { $0.swipeGestureDidCancel(self) }
+            } else {
+                let translationX = accumulatedDeltaX
+                let velocityX = velocity.velocity(at: event.timestamp)
+                notifyDelegate { $0.swipeGestureDidEnd(self, translationX: translationX, velocityX: velocityX) }
+            }
         }
 
+        resetState()
+    }
+
+    /// The system cancelled the gesture (not a release): always go back.
+    private func handleCancelled() {
+        guard isTracking else { return }
+        if !hasTriggered && gestureDecided && isHorizontalGesture {
+            notifyDelegate { $0.swipeGestureDidCancel(self) }
+        }
         resetState()
     }
 

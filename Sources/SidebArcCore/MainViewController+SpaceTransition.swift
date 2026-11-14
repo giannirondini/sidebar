@@ -1,0 +1,337 @@
+import AppKit
+import os
+
+/// One space switch in progress (Phase 3a.5).
+///
+/// The live content and a snapshot of the target space sit side by side in the
+/// swipe clip and move by the same offset: 1:1 with the finger while tracking,
+/// then a spring (`SpaceSwipe.Spring`) to the end. The background colour and the
+/// space bar's pill follow the same progress and the same spring. A swipe, a
+/// space bar click and ⌘⌥←/→ all go through here.
+@MainActor
+final class SpaceTransition {
+    enum Phase {
+        case tracking
+        case settling(commits: Bool)
+    }
+
+    let fromWorkspace: Workspace
+    let fromIndex: Int
+    /// The space being revealed; nil past the first or last space (rubber band).
+    var target: (workspace: Workspace, index: Int)?
+    /// +1: the target is on the left (finger right, previous space); -1: on the right.
+    var side: CGFloat = 1
+    var previewView: NSView?
+    /// Snapshots taken during this transition, so a drag that wiggles across its
+    /// start doesn't render the same space again.
+    var snapshots: [UUID: NSView] = [:]
+    /// Current horizontal offset of the content (points).
+    var offset: CGFloat = 0
+    var phase: Phase = .tracking
+
+    init(fromWorkspace: Workspace, fromIndex: Int) {
+        self.fromWorkspace = fromWorkspace
+        self.fromIndex = fromIndex
+    }
+}
+
+extension MainViewController: SwipeGestureServiceDelegate {
+    private static let transitionAnimationKey = "spaceTransition"
+    private static let transitionLogger = Logger(subsystem: AppIdentity.logSubsystem, category: "transition")
+
+    // MARK: - Gesture (dispatches to the legacy swipe when that flag is set)
+
+    func swipeGestureDidBegin(_ service: SwipeGestureService) {
+        if SpaceTransitionMode.isLegacy { return legacySwipeDidBegin(service) }
+        // A new gesture during a settle: land the previous switch first.
+        if spaceTransition != nil {
+            finishSpaceTransitionNow()
+        }
+    }
+
+    func swipeGestureDidUpdate(_ service: SwipeGestureService, translationX: CGFloat) {
+        if SpaceTransitionMode.isLegacy { return legacySwipeDidUpdate(service, translationX: translationX) }
+        trackSpaceSwipe(translation: translationX)
+    }
+
+    func swipeGestureDidComplete(_ service: SwipeGestureService, direction: SwipeDirection) {
+        if SpaceTransitionMode.isLegacy { legacySwipeDidComplete(service, direction: direction) }
+    }
+
+    func swipeGestureDidCancel(_ service: SwipeGestureService) {
+        if SpaceTransitionMode.isLegacy { return legacySwipeDidCancel(service) }
+        endSpaceSwipe(translation: 0, velocity: 0, forceStay: true)
+    }
+
+    func swipeGestureDidEnd(_ service: SwipeGestureService, translationX: CGFloat, velocityX: CGFloat) {
+        endSpaceSwipe(translation: translationX, velocity: velocityX, forceStay: false)
+    }
+
+    // MARK: - Entry points
+
+    /// A click on a space bar icon or ⌘⌥←/→: slide to `id` with the same spring as
+    /// a swipe. Instant (no transition) in legacy mode, from Settings, for the
+    /// current space, or while the window isn't visible.
+    func requestSpaceSwitch(to id: UUID) {
+        if spaceTransition != nil {
+            finishSpaceTransitionNow()
+        }
+        let workspaces = model.workspaces
+        guard !SpaceTransitionMode.isLegacy,
+              !model.isSettingsShown,
+              view.window?.isVisible == true,
+              let fromIndex = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }),
+              let toIndex = workspaces.firstIndex(where: { $0.id == id }),
+              fromIndex != toIndex
+        else {
+            model.selectWorkspace(id: id)
+            return
+        }
+        let transition = SpaceTransition(fromWorkspace: workspaces[fromIndex], fromIndex: fromIndex)
+        spaceTransition = transition
+        // Further away than one space still slides one page, from its side.
+        prepareTarget(of: transition, target: (workspaces[toIndex], toIndex), side: toIndex < fromIndex ? 1 : -1)
+        settle(transition, commits: true, releaseVelocity: 0)
+    }
+
+    private func trackSpaceSwipe(translation: CGFloat) {
+        guard !model.isSettingsShown else { return }
+        if let transition = spaceTransition, case .settling = transition.phase {
+            finishSpaceTransitionNow()
+        }
+        let transition: SpaceTransition
+        if let existing = spaceTransition {
+            transition = existing
+        } else {
+            let workspaces = model.workspaces
+            guard let index = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return }
+            transition = SpaceTransition(fromWorkspace: workspaces[index], fromIndex: index)
+            spaceTransition = transition
+        }
+
+        let width = swipeClipContainer.bounds.width
+        let side: CGFloat = translation >= 0 ? 1 : -1
+        let workspaces = model.workspaces
+        let targetIndex = transition.fromIndex - Int(side)
+        let target = workspaces.indices.contains(targetIndex) ? (workspaces[targetIndex], targetIndex) : nil
+        if target?.1 != transition.target?.index || side != transition.side {
+            prepareTarget(of: transition, target: target, side: side)
+        }
+
+        let offset = target == nil
+            ? SpaceSwipe.rubberBand(translation, dimension: width)
+            : max(-width, min(width, translation))
+        apply(offset: offset, to: transition)
+    }
+
+    private func endSpaceSwipe(translation: CGFloat, velocity: CGFloat, forceStay: Bool) {
+        guard let transition = spaceTransition, case .tracking = transition.phase else { return }
+        let outcome = forceStay ? .stay : SpaceSwipe.outcome(
+            translation: translation,
+            velocity: velocity,
+            width: swipeClipContainer.bounds.width,
+            canGoPrevious: transition.fromIndex > 0,
+            canGoNext: transition.fromIndex < model.workspaces.count - 1
+        )
+        let commits = outcome != .stay && transition.target != nil
+        // Past the ends the page doesn't follow the finger 1:1, so the release speed doesn't apply.
+        settle(transition, commits: commits, releaseVelocity: transition.target == nil ? 0 : velocity)
+    }
+
+    // MARK: - Moving the page
+
+    /// Places a snapshot of `target` next to the content, on `side`; removes any
+    /// previous one. `target == nil` (past an end) shows nothing there.
+    private func prepareTarget(of transition: SpaceTransition, target: (Workspace, Int)?, side: CGFloat) {
+        transition.previewView?.removeFromSuperview()
+        transition.previewView = nil
+        transition.side = side
+        transition.target = target.map { (workspace: $0.0, index: $0.1) }
+        guard let workspace = target?.0 else { return }
+
+        let preview = transition.snapshots[workspace.id] ?? makeSpaceSnapshotView(for: workspace)
+        transition.snapshots[workspace.id] = preview
+        let width = swipeClipContainer.bounds.width
+        preview.frame.origin = NSPoint(x: -side * width, y: 0)
+        preview.layer?.transform = CATransform3DMakeTranslation(transition.offset, 0, 0)
+        swipeClipContainer.addSubview(preview, positioned: .below, relativeTo: workspaceContentStack)
+        transition.previewView = preview
+    }
+
+    /// Tracking: moves the page, the colour and the pill to `offset` at once.
+    private func apply(offset: CGFloat, to transition: SpaceTransition) {
+        transition.offset = offset
+        let progress = self.progress(of: transition)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let transform = CATransform3DMakeTranslation(offset, 0, 0)
+        workspaceContentStack.layer?.transform = transform
+        transition.previewView?.layer?.transform = transform
+        view.layer?.backgroundColor = blendedBackground(transition, progress: progress).cgColor
+        CATransaction.commit()
+        spaceBar.setSelectionProgress(toward: transition.target?.workspace.id, progress: progress)
+    }
+
+    /// How far the page is toward the target, 0…1 (0 past an end).
+    private func progress(of transition: SpaceTransition) -> CGFloat {
+        let width = swipeClipContainer.bounds.width
+        guard transition.target != nil, width > 0 else { return 0 }
+        return min(1, abs(transition.offset) / width)
+    }
+
+    private func blendedBackground(_ transition: SpaceTransition, progress: CGFloat) -> NSColor {
+        let from = transition.fromWorkspace.colorId.backgroundColor
+        guard let to = transition.target?.workspace.colorId.backgroundColor, progress > 0 else { return from }
+        return from.usingColorSpace(.sRGB)?.blended(withFraction: progress, of: to.usingColorSpace(.sRGB) ?? to) ?? to
+    }
+
+    /// Springs the page (and colour and pill) from where it is to the target
+    /// (`commits`) or back. All animations start in one transaction, so they stay in step.
+    private func settle(_ transition: SpaceTransition, commits: Bool, releaseVelocity: CGFloat) {
+        transition.phase = .settling(commits: commits)
+        let width = swipeClipContainer.bounds.width
+        let start = transition.offset
+        let end = commits ? transition.side * width : 0
+        let spring = SpaceSwipe.Spring.standard
+        let initialVelocity = spring.initialVelocity(releaseVelocity: releaseVelocity, remaining: end - start)
+
+        func springAnimation(_ keyPath: String, from: Any, to: Any) -> CASpringAnimation {
+            let animation = CASpringAnimation(keyPath: keyPath)
+            animation.mass = 1
+            animation.stiffness = spring.stiffness
+            animation.damping = spring.damping
+            animation.initialVelocity = initialVelocity
+            animation.fromValue = from
+            animation.toValue = to
+            animation.duration = animation.settlingDuration
+            return animation
+        }
+
+        let startColor = blendedBackground(transition, progress: progress(of: transition))
+        let endColor = commits
+            ? transition.target?.workspace.colorId.backgroundColor ?? startColor
+            : transition.fromWorkspace.colorId.backgroundColor
+        let pillSpaceId = commits ? transition.target?.workspace.id : transition.fromWorkspace.id
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak self, weak transition] in
+            guard let self, let transition, self.spaceTransition === transition else { return }
+            self.finish(transition)
+        }
+        // Final values first (layout passes keep them), then the explicit springs.
+        let endTransform = CATransform3DMakeTranslation(end, 0, 0)
+        for layer in [workspaceContentStack.layer, transition.previewView?.layer].compactMap({ $0 }) {
+            layer.transform = endTransform
+            layer.add(springAnimation("transform.translation.x", from: start, to: end), forKey: Self.transitionAnimationKey)
+        }
+        view.layer?.backgroundColor = endColor.cgColor
+        view.layer?.add(springAnimation("backgroundColor", from: startColor.cgColor, to: endColor.cgColor),
+                        forKey: Self.transitionAnimationKey)
+        if let pillSpaceId {
+            spaceBar.settleSelection(on: pillSpaceId) { from, to in
+                springAnimation("transform.translation.x", from: from, to: to)
+            }
+        }
+        CATransaction.commit()
+        transition.offset = end
+    }
+
+    /// Lands the current transition immediately (a new click or gesture arrived):
+    /// a settle jumps to its end, a drag still being tracked goes back.
+    func finishSpaceTransitionNow() {
+        guard let transition = spaceTransition else { return }
+        if case .tracking = transition.phase {
+            transition.phase = .settling(commits: false)
+        }
+        finish(transition)
+    }
+
+    private func finish(_ transition: SpaceTransition) {
+        let commits: Bool
+        if case .settling(let value) = transition.phase { commits = value } else { commits = false }
+
+        workspaceContentStack.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+        view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        workspaceContentStack.layer?.transform = CATransform3DIdentity
+        CATransaction.commit()
+        transition.previewView?.removeFromSuperview()
+        spaceBar.endSelectionTransition()
+
+        if commits, let target = transition.target {
+            // Still "in transition", so this change is held rather than reloaded twice.
+            model.selectWorkspace(id: target.workspace.id)
+        }
+        spaceTransition = nil
+        if commits || reloadHeldByTransition {
+            reloadHeldByTransition = false
+            // The page already slid; don't animate the list a second time.
+            suppressNodeAnimations = true
+            reloadData()
+            suppressNodeAnimations = false
+        }
+        if commits {
+            // The snapshot showed the new space from the top; land there too.
+            let clipView = nodeListViewController.scrollView.contentView
+            clipView.scroll(to: .zero)
+            nodeListViewController.scrollView.reflectScrolledClipView(clipView)
+        }
+    }
+
+    // MARK: - Snapshot of a space's page
+
+    /// A bitmap of `workspace`'s page (header, scheduled links, list, bottom row),
+    /// rendered in the real content views and then restored. The model is not touched.
+    private func makeSpaceSnapshotView(for workspace: Workspace) -> NSView {
+        let started = CACurrentMediaTime()
+        let current = model.currentWorkspace
+        let clipView = nodeListViewController.scrollView.contentView
+        let savedScroll = clipView.bounds.origin
+
+        renderSpaceContent(workspace)
+        clipView.scroll(to: .zero)
+        workspaceContentStack.layoutSubtreeIfNeeded()
+        let bounds = workspaceContentStack.bounds
+        var image: NSImage?
+        if let bitmap = workspaceContentStack.bitmapImageRepForCachingDisplay(in: bounds) {
+            workspaceContentStack.cacheDisplay(in: bounds, to: bitmap)
+            image = NSImage(size: bounds.size)
+            image?.addRepresentation(bitmap)
+        }
+
+        renderSpaceContent(current)
+        workspaceContentStack.layoutSubtreeIfNeeded()
+        clipView.scroll(to: savedScroll)
+        nodeListViewController.scrollView.reflectScrolledClipView(clipView)
+
+        let milliseconds = (CACurrentMediaTime() - started) * 1000
+        let rows = workspace.items.count
+        Self.transitionLogger.debug("snapshot of a space with \(rows, privacy: .public) top-level items took \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms")
+
+        let container = NSView(frame: NSRect(origin: .zero, size: swipeClipContainer.bounds.size))
+        container.wantsLayer = true
+        let imageView = NSImageView(frame: container.bounds)
+        imageView.imageScaling = .scaleNone
+        imageView.imageAlignment = .alignTopLeft
+        imageView.image = image
+        container.addSubview(imageView)
+        return container
+    }
+
+    /// Shows `workspace`'s page content in the content views (what `reloadData`
+    /// shows for the current space), without animation.
+    private func renderSpaceContent(_ workspace: Workspace) {
+        let searching = searchCoordinator.isSearchActive
+        configureSpaceHeader(for: workspace)
+        if searching {
+            scheduledLinksAccordion.isHidden = true
+        } else {
+            scheduledLinksAccordion.update(entries: model.scheduledLinks(in: workspace.id))
+        }
+        nodeListViewController.workspaceColor = workspace.colorId
+        let items = searching ? workspace.items : ScheduledLinkFiltering.hideScheduled(workspace.items)
+        nodeListViewController.reloadData(with: searchCoordinator.filter(nodes: items), forceExpand: searching, animated: false)
+    }
+}

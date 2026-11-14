@@ -11,7 +11,7 @@ final class MainViewController: NSViewController {
     private let settingsViewController = SettingsContentViewController()
 
     // UI Components
-    private let spaceBar = SpaceBarView()
+    let spaceBar = SpaceBarView()
     private let searchField = SearchBarView(style: .defaultSearch)
     let pinnedTabsView = PinnedTabsView()
     private let spaceHeader = SpaceHeaderView()
@@ -37,6 +37,12 @@ final class MainViewController: NSViewController {
     private var pendingWorkspaceRenameId: UUID?
     var isSwipeAnimating = false
     var suppressNodeAnimations = false          // Suppresses collection view animations during swipe transitions
+    /// The space switch in progress (MainViewController+SpaceTransition).
+    var spaceTransition: SpaceTransition?
+    /// A model change arrived during a space transition; reload once it finishes.
+    /// Reloading mid-transition would reset the colour, snap the bar's pill and
+    /// swap the list under the moving page.
+    var reloadHeldByTransition = false
     var swipeColorAnimationFromColor: NSColor?  // Set before workspace switch to trigger animated color transition
 
     init(model: AppModel) {
@@ -86,7 +92,7 @@ final class MainViewController: NSViewController {
     private func setupUI() {
         // Space bar (bottom): gear, one icon per space, +
         spaceBar.onSpaceSelected = { [weak self] workspaceId in
-            self?.model.selectWorkspace(id: workspaceId)
+            self?.requestSpaceSwitch(to: workspaceId)
         }
         spaceBar.onSpaceContextMenu = { [weak self] workspaceId, event in
             guard let self else { return }
@@ -405,11 +411,19 @@ final class MainViewController: NSViewController {
     private func bindModel() {
         model.onChange = { [weak self] in
             guard let self else { return }
+            if self.spaceTransition != nil {
+                self.reloadHeldByTransition = true
+                return
+            }
             if self.isReloadScheduled { return }
             self.isReloadScheduled = true
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.isReloadScheduled = false
+                if self.spaceTransition != nil {
+                    self.reloadHeldByTransition = true
+                    return
+                }
                 self.reloadData()
             }
         }
@@ -623,32 +637,35 @@ final class MainViewController: NSViewController {
         }
     }
 
-    /// ⌘⌥←: the previous space. Stops at the first space; does nothing in Settings.
+    /// ⌘⌥←: the previous space, with the space transition. Stops at the first
+    /// space; does nothing in Settings.
     func navigateToPreviousWorkspace() {
-        let workspaces = model.workspaces
-        if model.isSettingsShown {
-            return
-        }
-        let currentId = model.currentWorkspace.id
-        guard let currentIndex = workspaces.firstIndex(where: { $0.id == currentId }) else { return }
-        if currentIndex > 0 {
-            let prevId = workspaces[currentIndex - 1].id
-            model.selectWorkspace(id: prevId)
-        }
+        guard let id = adjacentSpaceId(step: -1) else { return }
+        requestSpaceSwitch(to: id)
     }
 
-    /// ⌘⌥→: the next space. Stops at the last space; does nothing in Settings.
+    /// ⌘⌥→: the next space, with the space transition. Stops at the last space;
+    /// does nothing in Settings.
     func navigateToNextWorkspace() {
+        guard let id = adjacentSpaceId(step: 1) else { return }
+        requestSpaceSwitch(to: id)
+    }
+
+    /// The space `step` places from the current one (-1 = previous), if any;
+    /// nil in Settings.
+    func adjacentSpaceId(step: Int) -> UUID? {
+        guard !model.isSettingsShown else { return nil }
         let workspaces = model.workspaces
-        if model.isSettingsShown {
-            return
-        }
-        let currentId = model.currentWorkspace.id
-        guard let currentIndex = workspaces.firstIndex(where: { $0.id == currentId }) else { return }
-        if currentIndex < workspaces.count - 1 {
-            let nextId = workspaces[currentIndex + 1].id
-            model.selectWorkspace(id: nextId)
-        }
+        guard let index = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }),
+              workspaces.indices.contains(index + step) else { return nil }
+        return workspaces[index + step].id
+    }
+
+    /// Selects the adjacent space at once, without a transition (the legacy swipe
+    /// animates by itself, then calls this).
+    func selectAdjacentSpace(step: Int) {
+        guard let id = adjacentSpaceId(step: step) else { return }
+        model.selectWorkspace(id: id)
     }
 
     func promptCreateWorkspace() {

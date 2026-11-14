@@ -4,17 +4,17 @@ import AppKit
 // `defaults write io.github.giannirondini.sidebarc legacySpaceTransition -bool YES`
 // until the new transition is accepted; then this file is deleted.
 
-// MARK: - SwipeGestureServiceDelegate
+// MARK: - Legacy swipe (dispatched from the SwipeGestureServiceDelegate methods)
 
-extension MainViewController: SwipeGestureServiceDelegate {
+extension MainViewController {
 
-    func swipeGestureDidBegin(_ service: SwipeGestureService) {
+    func legacySwipeDidBegin(_ service: SwipeGestureService) {
         guard !isSwipeAnimating else { return }
         workspaceContentStack.layer?.removeAllAnimations()
         removeSwipePreview()
     }
 
-    func swipeGestureDidUpdate(_ service: SwipeGestureService, translationX: CGFloat) {
+    func legacySwipeDidUpdate(_ service: SwipeGestureService, translationX: CGFloat) {
         guard !isSwipeAnimating else { return }
         guard let layer = workspaceContentStack.layer else { return }
 
@@ -44,7 +44,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         CATransaction.commit()
     }
 
-    func swipeGestureDidComplete(_ service: SwipeGestureService, direction: SwipeDirection) {
+    func legacySwipeDidComplete(_ service: SwipeGestureService, direction: SwipeDirection) {
         guard !isSwipeAnimating else { return }
         guard let layer = workspaceContentStack.layer else { return }
 
@@ -146,8 +146,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
             // Switch workspace
             switch direction {
-            case .right: self.navigateToPreviousWorkspace()
-            case .left: self.navigateToNextWorkspace()
+            case .right: self.selectAdjacentSpace(step: -1)
+            case .left: self.selectAdjacentSpace(step: 1)
             }
 
             // Synchronously update UI with new workspace data
@@ -163,7 +163,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         })
     }
 
-    func swipeGestureDidCancel(_ service: SwipeGestureService) {
+    func legacySwipeDidCancel(_ service: SwipeGestureService) {
         animateSnapBack()
     }
 

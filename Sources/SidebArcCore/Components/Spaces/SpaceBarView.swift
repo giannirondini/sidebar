@@ -42,6 +42,9 @@ final class SpaceBarView: NSView {
     private var spaceButtons: [SpaceBarButton] = []
     private var selectedId: UUID?
     private var isSettingsShown = false
+    /// While a space transition settles, the pill's frame belongs to its target.
+    private var pillTargetId: UUID?
+    private static let pillAnimationKey = "spaceTransition"
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -139,6 +142,46 @@ final class SpaceBarView: NSView {
         selectionPill.isHidden = selectedIndex == nil
     }
 
+    // MARK: - Selection during a space transition
+
+    private func buttonFrame(for spaceId: UUID) -> NSRect? {
+        guard let index = items.firstIndex(where: { $0.id == spaceId }), index < spaceButtons.count else { return nil }
+        return spaceButtons[index].frame
+    }
+
+    /// While a swipe is tracked: the pill sits `progress` (0…1) of the way from
+    /// the selected space's icon toward `targetId`'s (nil: stays put).
+    func setSelectionProgress(toward targetId: UUID?, progress: CGFloat) {
+        guard let selectedId, let from = buttonFrame(for: selectedId) else { return }
+        let to = targetId.flatMap { buttonFrame(for: $0) } ?? from
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        selectionPill.frame = from
+        selectionPill.layer?.transform = CATransform3DMakeTranslation((to.minX - from.minX) * progress, 0, 0)
+        CATransaction.commit()
+    }
+
+    /// Moves the pill from where it is now to `spaceId`'s icon with `animation`,
+    /// which receives the start and end x offsets (`transform.translation.x`).
+    /// Call inside the transition's `CATransaction` so it runs in step with the page.
+    func settleSelection(on spaceId: UUID, animation: (_ from: CGFloat, _ to: CGFloat) -> CAAnimation) {
+        guard !isSettingsShown, let target = buttonFrame(for: spaceId), let layer = selectionPill.layer else { return }
+        let presented = layer.presentation()?.transform.m41 ?? layer.transform.m41
+        let currentX = selectionPill.frame.minX + presented
+        pillTargetId = spaceId
+        layer.removeAnimation(forKey: Self.pillAnimationKey)
+        selectionPill.frame = target
+        layer.transform = CATransform3DIdentity
+        layer.add(animation(currentX - target.minX, 0), forKey: Self.pillAnimationKey)
+    }
+
+    /// Ends a settle: the pill rests on its target; the next `update` takes over.
+    func endSelectionTransition() {
+        selectionPill.layer?.removeAnimation(forKey: Self.pillAnimationKey)
+        selectionPill.layer?.transform = CATransform3DIdentity
+        pillTargetId = nil
+    }
+
     /// The button of a space, e.g. to anchor a popover to it.
     func buttonView(for spaceId: UUID) -> NSView? {
         guard let index = items.firstIndex(where: { $0.id == spaceId }), index < spaceButtons.count else { return nil }
@@ -174,8 +217,8 @@ final class SpaceBarView: NSView {
         for (index, button) in spaceButtons.enumerated() {
             button.frame = NSRect(x: startX + CGFloat(index) * (buttonSize + gap), y: y, width: buttonSize, height: buttonSize)
         }
-        if let index = items.firstIndex(where: { $0.id == selectedId }), index < spaceButtons.count {
-            selectionPill.frame = spaceButtons[index].frame
+        if let pillId = pillTargetId ?? selectedId, let frame = buttonFrame(for: pillId) {
+            selectionPill.frame = frame
         }
         updateFadeMask()
     }
