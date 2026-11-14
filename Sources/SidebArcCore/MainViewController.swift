@@ -111,7 +111,7 @@ final class MainViewController: NSViewController {
         // Pinned tabs
         pinnedTabsView.onLinkClicked = { [weak self] linkId in
             guard let self, let link = self.model.pinnedLinkById(linkId) else { return }
-            self.openLink(link)
+            self.openClickedLink(link, source: .favorite)
         }
         pinnedTabsView.onLinkRightClicked = { [weak self] linkId, event in
             self?.showPinnedTabContextMenu(for: linkId, at: event)
@@ -263,7 +263,7 @@ final class MainViewController: NSViewController {
             guard let self, let node = self.model.nodeById(nodeId) else { return }
             switch node {
             case .link(let link):
-                self.openLink(link)
+                self.openClickedLink(link, source: .list)
             case .note(let note):
                 self.openNote(note)
             case .folder:
@@ -808,8 +808,21 @@ final class MainViewController: NSViewController {
         model.cancelSchedule(id: linkId)
     }
 
+    /// Opens a new tab. Used by Open All Links, scheduled rows and menus.
     private func openLink(_ link: Link) {
         BrowserManager.open(link: link, in: model.currentProfile)
+    }
+
+    /// A click on a favorite or a list link: may focus an already open matching tab
+    /// instead (favorites by default, list links with ⌥; see `TabFocus`).
+    private func openClickedLink(_ link: Link, source: LinkClickSource) {
+        TabFocusService.shared.open(
+            link: link,
+            in: model.currentProfile,
+            allProfiles: model.profiles,
+            source: source,
+            invert: NSEvent.modifierFlags.contains(.option)
+        )
     }
 
     // MARK: - URL Utilities

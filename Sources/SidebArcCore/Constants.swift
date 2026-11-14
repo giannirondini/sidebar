@@ -23,6 +23,9 @@ enum UserDefaultsKeys {
     static let toggleSidebarShortcut = "toggleSidebarShortcut"
     static let tooltipsEnabled = "tooltipsEnabled"
     static let swipeToSwitchEnabled = "swipeToSwitchEnabled"
+    /// Bundle id of the browser whose Automation permission was missing when a click
+    /// looked for an open tab; Settings › Permissions shows a hint until it's resolved.
+    static let tabFocusPermissionHintBundleId = "tabFocusPermissionHintBundleId"
 }
 
 /// Fork identity. `bundleIdentifier` must match `identifier` in Bundler.toml
