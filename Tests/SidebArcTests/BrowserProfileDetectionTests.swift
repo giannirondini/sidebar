@@ -49,4 +49,14 @@ import Testing
         #expect(!BrowserManager.supportsProfiles(bundleId: "org.mozilla.firefox"))
         #expect(BrowserManager.profileArguments(for: "org.mozilla.firefox", profile: "work").isEmpty)
     }
+
+    @Test func launchArgumentsOnlyForSupportedBrowserProfiles() throws {
+        let url = try #require(URL(string: "https://example.com/a?b=1"))
+        #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: chrome, profileDir: "Profile 1"))
+                == ["--profile-directory=Profile 1", "https://example.com/a?b=1"])
+        #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: chrome, profileDir: nil)) == nil)
+        #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: chrome, profileDir: "")) == nil)
+        #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: "org.mozilla.firefox", profileDir: "work")) == nil)
+        #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: nil, profileDir: "Profile 1")) == nil)
+    }
 }

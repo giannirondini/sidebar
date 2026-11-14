@@ -129,35 +129,44 @@ enum BrowserManager {
             return
         }
 
-        // No profile: use existing NSWorkspace approach
-        guard let profile = target.profileDir, !profile.isEmpty else {
-            let config = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config, completionHandler: nil)
+        guard let arguments = launchArguments(url: url, target: target) else {
+            // No browser profile: hand the URL to the browser through LaunchServices.
+            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error {
+                    logger.error("Opening a link in \(bundleId, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
             return
         }
 
-        // With profile: execute browser binary directly (works even when browser is already running)
-        guard let bundle = Bundle(url: appURL),
-              let executablePath = bundle.executablePath else {
-            let config = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config, completionHandler: nil)
-            return
+        // With a browser profile: launch a new instance through LaunchServices with the
+        // profile switch and the URL as arguments (like `open -na Browser --args …`).
+        // - Browser closed: that instance is the browser, started in the right profile.
+        // - Browser running: Chromium hands the URL to the running instance and exits.
+        // Never spawn the executable as our child process: macOS then attributes its
+        // privacy checks to SidebArc, which can't read the browser's data folder
+        // (macOS 27 app-data protection), and a closed Chrome exits at once (status 21)
+        // without a window, a crash report or a log line.
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        configuration.arguments = arguments
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+            if let error {
+                logger.error("Launching \(bundleId, privacy: .public) with a browser profile failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
+    }
 
-        let args = profileArguments(for: bundleId, profile: profile)
-        guard !args.isEmpty else {
-            // Browser doesn't support profiles, open normally
-            let config = NSWorkspace.OpenConfiguration()
-            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config, completionHandler: nil)
-            return
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = args + [url.absoluteString]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
+    /// Command-line arguments for opening `url` in `target`'s browser profile, or nil
+    /// when the URL should simply be handed to the browser (no profile, or a browser
+    /// without profile support).
+    static func launchArguments(url: URL, target: BrowserTarget) -> [String]? {
+        guard let bundleId = target.bundleId,
+              let profile = target.profileDir, !profile.isEmpty else { return nil }
+        let profileArgs = profileArguments(for: bundleId, profile: profile)
+        guard !profileArgs.isEmpty else { return nil }
+        return profileArgs + [url.absoluteString]
     }
 
     static func isRunning(bundleId: String) -> Bool {
