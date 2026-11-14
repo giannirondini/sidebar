@@ -43,6 +43,8 @@ final class MainViewController: NSViewController {
     /// Reloading mid-transition would reset the colour, snap the bar's pill and
     /// swap the list under the moving page.
     var reloadHeldByTransition = false
+    /// The last switch's snapshot, fading out over the freshly drawn list.
+    var landingCover: NSView?
     var swipeColorAnimationFromColor: NSColor?  // Set before workspace switch to trigger animated color transition
 
     init(model: AppModel) {

@@ -105,6 +105,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
             model.selectWorkspace(id: id)
             return
         }
+        removeLandingCover()
         let transition = SpaceTransition(fromWorkspace: workspaces[fromIndex], fromIndex: fromIndex)
         spaceTransition = transition
         // A rename belongs to the space being left (and would show in the snapshot).
@@ -125,6 +126,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         } else {
             let workspaces = model.workspaces
             guard let index = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return }
+            removeLandingCover()
             transition = SpaceTransition(fromWorkspace: workspaces[index], fromIndex: index)
             spaceTransition = transition
             spaceHeader.cancelInlineRename()
@@ -340,11 +342,25 @@ extension MainViewController: SwipeGestureServiceDelegate {
         view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         pinnedTabsView.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         let fadeInFavorites = commits && changesFavorites(transition)
+        // On a switch the target's snapshot stays over the content, in place, until
+        // the reloaded list has drawn (`collectionView.reloadData()` only rebuilds
+        // rows on the next layout and display); otherwise the old list shows for a
+        // frame and the new one pops in.
+        let cover = commits ? transition.previewView : nil
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         workspaceContentStack.layer?.transform = CATransform3DIdentity
+        if let cover {
+            cover.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+            cover.removeFromSuperview()
+            cover.frame.origin = .zero
+            cover.layer?.transform = CATransform3DIdentity
+            cover.layer?.opacity = 1
+            swipeClipContainer.addSubview(cover, positioned: .above, relativeTo: workspaceContentStack)
+        } else {
+            transition.previewView?.removeFromSuperview()
+        }
         CATransaction.commit()
-        transition.previewView?.removeFromSuperview()
         spaceBar.endSelectionTransition()
 
         // Unless something else changed the selection meanwhile (a new space, the
@@ -361,30 +377,59 @@ extension MainViewController: SwipeGestureServiceDelegate {
             reloadData()
             suppressNodeAnimations = false
         }
-        if fadeInFavorites {
-            // The new profile's grid (possibly another height) is in place: fade it in.
-            let fadeIn = CABasicAnimation(keyPath: "opacity")
-            fadeIn.fromValue = 0
-            fadeIn.toValue = 1
-            fadeIn.duration = ThemeConstants.Animation.durationFast
-            fadeIn.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            pinnedTabsView.layer?.opacity = 1
-            pinnedTabsView.layer?.add(fadeIn, forKey: Self.transitionAnimationKey)
-            CATransaction.commit()
-        } else {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            pinnedTabsView.layer?.opacity = 1
-            CATransaction.commit()
-        }
         if commits {
             // The snapshot showed the new space from the top; land there too.
             let clipView = nodeListViewController.scrollView.contentView
             clipView.scroll(to: .zero)
             nodeListViewController.scrollView.reflectScrolledClipView(clipView)
         }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pinnedTabsView.layer?.opacity = 1
+        if fadeInFavorites {
+            // The new profile's grid (possibly another height) is in place: fade it in.
+            pinnedTabsView.layer?.add(fade(from: 0, to: 1), forKey: Self.transitionAnimationKey)
+        }
+        CATransaction.commit()
+
+        if let cover {
+            landingCover = cover
+            view.layoutSubtreeIfNeeded()
+            view.displayIfNeeded()
+            // Next turn of the run loop: the list's new rows are on screen by then.
+            // The fade hides any pixel the snapshot and the live list don't share.
+            DispatchQueue.main.async { [weak self] in
+                guard self?.landingCover === cover else { return }
+                CATransaction.begin()
+                CATransaction.setCompletionBlock { [weak self] in
+                    cover.removeFromSuperview()
+                    if self?.landingCover === cover { self?.landingCover = nil }
+                }
+                cover.layer?.opacity = 0
+                cover.layer?.add(Self.fade(from: 1, to: 0), forKey: Self.transitionAnimationKey)
+                CATransaction.commit()
+            }
+        }
+    }
+
+    /// A new transition starts: the previous landing's snapshot must not linger over it.
+    private func removeLandingCover() {
+        landingCover?.removeFromSuperview()
+        landingCover = nil
+    }
+
+    private func fade(from: Float, to: Float) -> CABasicAnimation {
+        Self.fade(from: from, to: to)
+    }
+
+    private static func fade(from: Float, to: Float) -> CABasicAnimation {
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = ThemeConstants.Animation.durationFast
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        return animation
     }
 
     // MARK: - Snapshot of a space's page
@@ -417,7 +462,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         let rows = workspace.items.count
         Self.transitionLogger.debug("snapshot of a space with \(rows, privacy: .public) top-level items took \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms")
 
-        let container = NSView(frame: NSRect(origin: .zero, size: swipeClipContainer.bounds.size))
+        let container = SnapshotView(frame: NSRect(origin: .zero, size: swipeClipContainer.bounds.size))
         container.wantsLayer = true
         let imageView = NSImageView(frame: container.bounds)
         imageView.imageScaling = .scaleNone
@@ -441,4 +486,10 @@ extension MainViewController: SwipeGestureServiceDelegate {
         let items = searching ? workspace.items : ScheduledLinkFiltering.hideScheduled(workspace.items)
         nodeListViewController.reloadData(with: searchCoordinator.filter(nodes: items), forceExpand: searching, animated: false)
     }
+}
+
+/// A space page snapshot. Never takes clicks: while it fades out over the live
+/// content after a switch, clicks must reach the real list underneath.
+private final class SnapshotView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
