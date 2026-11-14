@@ -55,6 +55,9 @@ final class SettingsContentViewController: NSViewController {
     private let versionLabel = NSTextField(labelWithString: "")
     private let checkForUpdatesButton = SettingsActionButton(title: "Check for Updates")
 
+    // Profiles Section
+    private let profileSettingsView = ProfileSettingsView()
+
     // Reference to AppModel (will be set from MainViewController)
     weak var appModel: AppModel? {
         didSet {
@@ -89,6 +92,7 @@ final class SettingsContentViewController: NSViewController {
         super.viewDidLoad()
         setupScrollView()
         setupWorkspaceCollectionView()
+        setupProfileSettingsView()
         setupUI()
         loadPreferences()
         loadBrowsers()
@@ -251,7 +255,7 @@ final class SettingsContentViewController: NSViewController {
         let separator2 = createSeparator()
 
         // Browser Section
-        let browserHeader = createSectionHeader("Browser")
+        let browserHeader = createSectionHeader("Default Browser")
 
         // Browser popup container with styled background
         browserPopupContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -270,6 +274,11 @@ final class SettingsContentViewController: NSViewController {
         if #available(macOS 14.0, *) {
             browserPopup.contentTintColor = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 0.80)
         }
+
+        // Profiles Section
+        let separatorProfiles = createSeparator()
+        let profilesHeader = createSectionHeader("Profiles")
+        profileSettingsView.translatesAutoresizingMaskIntoConstraints = false
 
         let separator3 = createSeparator()
 
@@ -340,6 +349,9 @@ final class SettingsContentViewController: NSViewController {
         contentView.addSubview(browserHeader)
         contentView.addSubview(browserPopupContainer)
         browserPopupContainer.addSubview(browserPopup)
+        contentView.addSubview(separatorProfiles)
+        contentView.addSubview(profilesHeader)
+        contentView.addSubview(profileSettingsView)
         contentView.addSubview(separator3)
         contentView.addSubview(permissionsHeader)
         contentView.addSubview(permissionStatusLabel)
@@ -455,10 +467,25 @@ final class SettingsContentViewController: NSViewController {
             browserPopup.trailingAnchor.constraint(equalTo: browserPopupContainer.trailingAnchor, constant: -12),
             browserPopup.centerYAnchor.constraint(equalTo: browserPopupContainer.centerYAnchor),
 
+            // Separator Profiles
+            separatorProfiles.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separatorProfiles.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separatorProfiles.topAnchor.constraint(equalTo: browserPopupContainer.bottomAnchor, constant: sectionSpacing),
+            separatorProfiles.heightAnchor.constraint(equalToConstant: 1),
+
+            // Profiles Header
+            profilesHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            profilesHeader.topAnchor.constraint(equalTo: separatorProfiles.bottomAnchor, constant: sectionSpacing),
+
+            // Profile list
+            profileSettingsView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            profileSettingsView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            profileSettingsView.topAnchor.constraint(equalTo: profilesHeader.bottomAnchor, constant: sectionHeaderSpacing),
+
             // Separator 3
             separator3.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
             separator3.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            separator3.topAnchor.constraint(equalTo: browserPopupContainer.bottomAnchor, constant: sectionSpacing),
+            separator3.topAnchor.constraint(equalTo: profileSettingsView.bottomAnchor, constant: sectionSpacing),
             separator3.heightAnchor.constraint(equalToConstant: 1),
 
             // Permissions Header
@@ -1028,6 +1055,11 @@ final class SettingsContentViewController: NSViewController {
         workspaceCollectionView.collectionViewLayout?.invalidateLayout()
 
         workspaceCollectionView.reloadData()
+
+        // Profile rows read browser profile files; only rebuild them while Settings is shown.
+        if appModel.state.isSettingsSelected {
+            reloadProfiles()
+        }
     }
 
     private func handleWorkspaceDelete(id: UUID) {
@@ -1111,18 +1143,7 @@ final class SettingsContentViewController: NSViewController {
         colorItem.submenu = colorSubmenu
         menu.addItem(colorItem)
 
-        // Browser profile options
-        let hasProfileForCurrentBrowser = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).profileDir != nil
-        let profileTitle = hasProfileForCurrentBrowser ? "Edit Browser Profile..." : "Set Browser Profile..."
-        let profileItem = NSMenuItem(title: profileTitle, action: #selector(setContextWorkspaceProfile), keyEquivalent: "")
-        profileItem.target = self
-        menu.addItem(profileItem)
-
-        if hasProfileForCurrentBrowser {
-            let clearProfileItem = NSMenuItem(title: "Clear Browser Profile", action: #selector(clearContextWorkspaceProfile), keyEquivalent: "")
-            clearProfileItem.target = self
-            menu.addItem(clearProfileItem)
-        }
+        menu.addItem(profileMenuItem(for: workspace))
 
         // Delete option
         menu.addItem(.separator())
@@ -1163,150 +1184,128 @@ final class SettingsContentViewController: NSViewController {
         handleWorkspaceDelete(id: workspaceId)
     }
 
-    @objc private func setContextWorkspaceProfile() {
-        guard let workspaceId = contextWorkspaceId else { return }
-        handleWorkspaceProfile(id: workspaceId)
-    }
-
-    @objc private func clearContextWorkspaceProfile() {
-        guard let workspaceId = contextWorkspaceId,
-              let appModel,
-              let workspace = appModel.workspaces.first(where: { $0.id == workspaceId }) else { return }
-        guard let bundleId = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).bundleId else { return }
-        appModel.updateBrowserProfile(profileId: workspace.profileId, bundleId: bundleId, profile: nil)
-        reloadWorkspaces()
-    }
-
+    /// The profile button on a space row: pops up the same "Profile" choices.
     private func handleWorkspaceProfile(id: UUID) {
-        guard let appModel = appModel else { return }
-        guard let workspace = appModel.workspaces.first(where: { $0.id == id }) else { return }
-        guard let window = view.window else { return }
-        let spaceProfileId = workspace.profileId
-        let browserProfiles = appModel.profile(for: workspace).browserProfiles
+        guard let appModel, let workspace = appModel.workspaces.first(where: { $0.id == id }),
+              let submenu = profileMenuItem(for: workspace).submenu,
+              let window = view.window else { return }
+        let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        submenu.popUp(positioning: nil, at: point, in: view)
+    }
 
-        let bundleId = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).bundleId ?? ""
-        let browserSupportsProfiles = BrowserManager.supportsProfiles(bundleId: bundleId)
+    private func profileMenuItem(for workspace: Workspace) -> NSMenuItem {
+        BrowserMenus.profileItem(
+            profiles: appModel?.profiles ?? [],
+            currentProfileId: workspace.profileId,
+            assign: { [weak self] profileId in
+                self?.appModel?.assignWorkspace(workspace.id, toProfile: profileId)
+                self?.reloadWorkspaces()
+            },
+            newProfile: { [weak self] in
+                guard let self, let appModel = self.appModel,
+                      let name = TextPrompt.run(
+                        message: "New Profile",
+                        informative: "“\(workspace.name)” will move to the new profile.",
+                        initial: "Profile \(appModel.profiles.count + 1)",
+                        confirmTitle: "Create"
+                      ) else { return }
+                let profileId = appModel.createProfile(name: name)
+                appModel.assignWorkspace(workspace.id, toProfile: profileId)
+                self.reloadWorkspaces()
+            }
+        )
+    }
 
-        let alert = NSAlert()
-        alert.messageText = "Browser Profile"
-        alert.alertStyle = .informational
+    // MARK: - Profiles
 
-        if !browserSupportsProfiles {
-            alert.addButton(withTitle: "OK")
-            alert.informativeText = "The current browser does not support profile switching. Profile settings are supported for Chrome, Helium, and Firefox."
-            let warningLabel = NSTextField(labelWithString: "Links will open normally without a profile.")
-            warningLabel.font = NSFont.systemFont(ofSize: 11)
-            warningLabel.textColor = .secondaryLabelColor
-            alert.accessoryView = warningLabel
-            alert.beginSheetModal(for: window) { _ in }
-            return
+    private func setupProfileSettingsView() {
+        profileSettingsView.onAdd = { [weak self] in
+            guard let self, let appModel = self.appModel,
+                  let name = TextPrompt.run(
+                    message: "New Profile",
+                    informative: "Assign spaces to it from their right-click menu, under Profile.",
+                    initial: "Profile \(appModel.profiles.count + 1)",
+                    confirmTitle: "Create"
+                  ) else { return }
+            appModel.createProfile(name: name)
+            self.reloadWorkspaces()
+        }
+        profileSettingsView.onRename = { [weak self] profileId in
+            guard let self, let appModel = self.appModel, let profile = appModel.profile(id: profileId),
+                  let name = TextPrompt.run(message: "Rename Profile", initial: profile.name, confirmTitle: "Rename") else { return }
+            appModel.renameProfile(id: profileId, newName: name)
+            self.reloadWorkspaces()
+        }
+        profileSettingsView.onDelete = { [weak self] profileId in
+            self?.confirmDeleteProfile(id: profileId)
+        }
+        profileSettingsView.onSetBrowser = { [weak self] profileId, bundleId in
+            self?.appModel?.setProfileBrowser(id: profileId, bundleId: bundleId)
+            self?.reloadWorkspaces()
+        }
+        profileSettingsView.onSetBrowserProfile = { [weak self] profileId, bundleId, dir in
+            self?.appModel?.updateBrowserProfile(profileId: profileId, bundleId: bundleId, profile: dir)
+            self?.reloadWorkspaces()
+        }
+        profileSettingsView.onEnterBrowserProfile = { [weak self] profileId, bundleId in
+            guard let self, let appModel = self.appModel else { return }
+            let current = appModel.profile(id: profileId)?.browserProfiles[bundleId] ?? ""
+            let browserName = BrowserManager.appName(bundleId: bundleId) ?? bundleId
+            if let dir = TextPrompt.run(
+                message: "Browser Profile",
+                informative: "Enter the \(browserName) profile identifier (its directory name).",
+                initial: current,
+                placeholder: "e.g. Profile 1",
+                confirmTitle: "Save"
+            ) {
+                appModel.updateBrowserProfile(profileId: profileId, bundleId: bundleId, profile: dir)
+            }
+            // Rebuild either way so a cancelled "Other…" doesn't stay selected.
+            self.reloadWorkspaces()
+        }
+    }
+
+    private func reloadProfiles() {
+        guard let appModel else { return }
+        let rows = appModel.profiles.map { profile -> ProfileSettingsView.Row in
+            let resolved = BrowserManager.resolveTarget(link: nil, profile: profile).bundleId
+            let supports = resolved.map { BrowserManager.supportsProfiles(bundleId: $0) } ?? false
+            return ProfileSettingsView.Row(
+                profile: profile,
+                spaceCount: appModel.workspaces(inProfile: profile.id).count,
+                resolvedBrowser: resolved,
+                supportsBrowserProfiles: supports,
+                detectedBrowserProfiles: supports ? resolved.map { BrowserManager.detectProfiles(bundleId: $0) } ?? [] : [],
+                browserIsMissing: profile.browserBundleId.map { !BrowserManager.isInstalled(bundleId: $0) } ?? false
+            )
+        }
+        let globalName = BrowserManager.resolveDefaultBrowserBundleId().flatMap { BrowserManager.appName(bundleId: $0) }
+        profileSettingsView.update(rows: rows, browsers: browsers, globalDefaultName: globalName, canDelete: appModel.profiles.count > 1)
+    }
+
+    private func confirmDeleteProfile(id: UUID) {
+        guard let appModel, let profile = appModel.profile(id: id),
+              let target = appModel.profileDeletionTarget(for: id),
+              let window = view.window else { return }
+        let spaceCount = appModel.workspaces(inProfile: id).count
+        let moved: String
+        switch spaceCount {
+        case 0: moved = "Its favorites move"
+        case 1: moved = "Its space and favorites move"
+        default: moved = "Its \(spaceCount) spaces and favorites move"
         }
 
-        alert.addButton(withTitle: "Save")
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(profile.name)”?"
+        alert.informativeText = "\(moved) to “\(target.name)”. Favorites that don’t fit there go into a folder, so no links are lost."
+        alert.alertStyle = .informational
         alert.addButton(withTitle: "Cancel")
-
-        let detectedProfiles = BrowserManager.detectProfiles(bundleId: bundleId)
-        let containerWidth: CGFloat = 260
-
-        if detectedProfiles.isEmpty {
-            // Fallback: manual text input
-            let container = NSView(frame: NSRect(x: 0, y: 0, width: containerWidth, height: 60))
-
-            let helpLabel = NSTextField(labelWithString: "Enter the browser profile identifier:")
-            helpLabel.font = NSFont.systemFont(ofSize: 11)
-            helpLabel.textColor = .secondaryLabelColor
-            helpLabel.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(helpLabel)
-
-            let textField = NSTextField()
-            textField.placeholderString = "e.g., Profile 1"
-            textField.stringValue = browserProfiles[bundleId] ?? ""
-            textField.font = NSFont.systemFont(ofSize: 13)
-            textField.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(textField)
-
-            NSLayoutConstraint.activate([
-                helpLabel.topAnchor.constraint(equalTo: container.topAnchor),
-                helpLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                helpLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-                textField.topAnchor.constraint(equalTo: helpLabel.bottomAnchor, constant: 6),
-                textField.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                textField.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            ])
-
-            alert.accessoryView = container
-            alert.informativeText = "No profiles were auto-detected. You can enter a profile identifier manually."
-
-            alert.beginSheetModal(for: window) { [weak self] response in
-                if response == .alertFirstButtonReturn {
-                    let value = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let profile = value.isEmpty ? nil : value
-                    appModel.updateBrowserProfile(profileId: spaceProfileId, bundleId: bundleId, profile: profile)
-                    self?.reloadWorkspaces()
-                }
-            }
-        } else {
-            // Detected profiles: show popup button
-            let container = NSView(frame: NSRect(x: 0, y: 0, width: containerWidth, height: 56))
-
-            let popup = NSPopUpButton()
-            popup.translatesAutoresizingMaskIntoConstraints = false
-            popup.font = NSFont.systemFont(ofSize: 13)
-
-            // Add "Default (no profile)" option
-            popup.addItem(withTitle: "Default (no profile)")
-            popup.menu?.items.first?.representedObject = nil as String?
-
-            for profile in detectedProfiles {
-                popup.addItem(withTitle: profile.displayName)
-                popup.menu?.items.last?.representedObject = profile.id
-            }
-
-            // Pre-select current profile for this browser
-            if let currentProfile = browserProfiles[bundleId] {
-                for (index, profile) in detectedProfiles.enumerated() {
-                    if profile.id == currentProfile {
-                        popup.selectItem(at: index + 1) // +1 for "Default" item
-                        break
-                    }
-                }
-            }
-
-            container.addSubview(popup)
-
-            let helpLabel = NSTextField(labelWithString: "Select a browser profile for this workspace.")
-            helpLabel.font = NSFont.systemFont(ofSize: 11)
-            helpLabel.textColor = .secondaryLabelColor
-            helpLabel.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(helpLabel)
-
-            NSLayoutConstraint.activate([
-                popup.topAnchor.constraint(equalTo: container.topAnchor),
-                popup.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                popup.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-                helpLabel.topAnchor.constraint(equalTo: popup.bottomAnchor, constant: 6),
-                helpLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                helpLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            ])
-
-            alert.accessoryView = container
-            alert.informativeText = "Applies to every space in the “\(appModel.profile(for: workspace).name)” profile."
-
-            alert.beginSheetModal(for: window) { [weak self] response in
-                if response == .alertFirstButtonReturn {
-                    let selectedIndex = popup.indexOfSelectedItem
-                    if selectedIndex == 0 {
-                        // "Default (no profile)"
-                        appModel.updateBrowserProfile(profileId: spaceProfileId, bundleId: bundleId, profile: nil)
-                    } else {
-                        let browserProfileDir = detectedProfiles[selectedIndex - 1].id
-                        appModel.updateBrowserProfile(profileId: spaceProfileId, bundleId: bundleId, profile: browserProfileDir)
-                    }
-                    self?.reloadWorkspaces()
-                }
-            }
+        alert.addButton(withTitle: "Delete")
+        alert.buttons.last?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            appModel.deleteProfile(id: id)
+            self?.reloadWorkspaces()
         }
     }
 

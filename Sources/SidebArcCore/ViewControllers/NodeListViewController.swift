@@ -57,6 +57,8 @@ final class NodeListViewController: NSViewController {
     var onChangeIconRequested: ((UUID, NSView) -> Void)?
     var onLinkScheduled: ((UUID, Date) -> Void)?
     var onLinkScheduleCleared: ((UUID) -> Void)?
+    /// "Open in ▸" / "Always open in ▸" items for a link's context menu.
+    var linkBrowserMenuItems: ((Link) -> [NSMenuItem])?
 
     // Data provider closure
     var nodeProvider: (() -> [Node])?
@@ -646,7 +648,8 @@ extension NodeListViewController: NSCollectionViewDataSource {
                 isSelected: isSelected,
                 isScheduled: link.scheduledOpenAt != nil,
                 scheduleBadgeBackgroundColor: workspaceColor.backgroundColor,
-                tooltipURL: link.url
+                tooltipURL: link.url,
+                browserBadge: link.browserBundleId.flatMap { BrowserManager.appIcon(bundleId: $0) }
             )
 
             if shouldFetch, let url = URL(string: link.url) {
@@ -956,6 +959,9 @@ extension NodeListViewController: NSMenuDelegate {
                 pinItem.title = "Maximum pinned tabs reached"
             }
             menu.addItem(pinItem)
+            if case .link(let link) = node, let browserItems = linkBrowserMenuItems?(link), !browserItems.isEmpty {
+                browserItems.forEach { menu.addItem($0) }
+            }
             menu.addItem(NSMenuItem.separator())
 
             let rename = NSMenuItem(title: "Rename…", action: #selector(contextRename), keyEquivalent: "")

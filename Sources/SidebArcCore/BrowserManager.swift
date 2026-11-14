@@ -72,6 +72,30 @@ enum BrowserManager {
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    static func isInstalled(bundleId: String) -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
+    }
+
+    /// Display name of an installed app, or nil when it isn't installed.
+    static func appName(bundleId: String) -> String? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
+        let bundle = Bundle(url: url)
+        return (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? url.deletingPathExtension().lastPathComponent
+    }
+
+    nonisolated(unsafe) private static var iconCache: [String: NSImage] = [:]
+
+    /// App icon of an installed browser (cached), or nil when it isn't installed.
+    static func appIcon(bundleId: String) -> NSImage? {
+        if let cached = iconCache[bundleId] { return cached }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        iconCache[bundleId] = icon
+        return icon
+    }
+
     static func defaultBrowserBundleId() -> String? {
         guard let probeURL = URL(string: "http://example.com") else { return nil }
         guard let appURL = NSWorkspace.shared.urlForApplication(toOpen: probeURL) else { return nil }

@@ -7,6 +7,8 @@ final class NodeRowView: BaseView {
     private let clockBadgeContainer = NSView()
     private let clockBadgeHoverOverlay = NSView()
     private let clockIconView = NSImageView()
+    /// App icon of the link's browser override, at the icon's top-trailing corner.
+    private let browserBadgeView = NSImageView()
     private var isSelected = false
     private var showsDeleteButton = false
     private var isScheduled = false
@@ -77,6 +79,10 @@ final class NodeRowView: BaseView {
         addSubview(editableTitle)
         addSubview(deleteButton)
         addSubview(clockBadgeContainer)
+        browserBadgeView.translatesAutoresizingMaskIntoConstraints = false
+        browserBadgeView.imageScaling = .scaleProportionallyUpOrDown
+        browserBadgeView.isHidden = true
+        addSubview(browserBadgeView)
         clockBadgeContainer.addSubview(clockBadgeHoverOverlay)
         clockBadgeContainer.addSubview(clockIconView)
 
@@ -117,7 +123,12 @@ final class NodeRowView: BaseView {
             clockIconView.centerXAnchor.constraint(equalTo: clockBadgeContainer.centerXAnchor),
             clockIconView.centerYAnchor.constraint(equalTo: clockBadgeContainer.centerYAnchor),
             clockIconView.widthAnchor.constraint(equalToConstant: Self.scheduleBadgeIconSize),
-            clockIconView.heightAnchor.constraint(equalToConstant: Self.scheduleBadgeIconSize)
+            clockIconView.heightAnchor.constraint(equalToConstant: Self.scheduleBadgeIconSize),
+
+            browserBadgeView.centerXAnchor.constraint(equalTo: iconView.trailingAnchor),
+            browserBadgeView.centerYAnchor.constraint(equalTo: iconView.topAnchor),
+            browserBadgeView.widthAnchor.constraint(equalToConstant: Self.scheduleBadgeSize),
+            browserBadgeView.heightAnchor.constraint(equalToConstant: Self.scheduleBadgeSize)
         ])
 
     }
@@ -131,7 +142,8 @@ final class NodeRowView: BaseView {
                    isSelected: Bool,
                    isScheduled: Bool = false,
                    scheduleBadgeBackgroundColor: NSColor? = nil,
-                   tooltipURL: String? = nil) {
+                   tooltipURL: String? = nil,
+                   browserBadge: NSImage? = nil) {
         tooltipShowTask?.cancel()
         tooltipShowTask = nil
         self.tooltipURL = tooltipURL
@@ -151,6 +163,9 @@ final class NodeRowView: BaseView {
         }
         editableTitle.font = titleFont
         editableTitle.textColor = metrics.titleColor
+
+        browserBadgeView.image = browserBadge
+        browserBadgeView.isHidden = browserBadge == nil
 
         iconView.image = icon
         if let icon {

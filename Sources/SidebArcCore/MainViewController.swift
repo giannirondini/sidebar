@@ -363,6 +363,10 @@ final class MainViewController: NSViewController {
             self?.model.canPinMore ?? false
         }
 
+        nodeListViewController.linkBrowserMenuItems = { [weak self] link in
+            self?.browserMenuItems(for: link) ?? []
+        }
+
         nodeListViewController.onLinkScheduled = { [weak self] id, date in
             self?.model.scheduleLink(id: id, at: date)
         }
@@ -568,6 +572,8 @@ final class MainViewController: NSViewController {
         }
         colorItem.submenu = colorSubmenu
         menu.addItem(colorItem)
+
+        menu.addItem(profileMenuItem(for: model.workspaces[workspaceIndex]))
 
         if canMoveLeft || canMoveRight {
             menu.addItem(NSMenuItem.separator())
@@ -883,6 +889,10 @@ final class MainViewController: NSViewController {
         unpinItem.representedObject = linkId
         menu.addItem(unpinItem)
 
+        if let link = model.pinnedLinkById(linkId) {
+            browserMenuItems(for: link).forEach { menu.addItem($0) }
+        }
+
         menu.addItem(NSMenuItem.separator())
 
         let changeIcon = NSMenuItem(title: "Change Icon…", action: #selector(changePinnedTabIcon(_:)), keyEquivalent: "")
@@ -891,6 +901,50 @@ final class MainViewController: NSViewController {
         menu.addItem(changeIcon)
 
         NSMenu.popUpContextMenu(menu, with: event, for: pinnedTabsView)
+    }
+
+    // MARK: - Browser and profile menus
+
+    /// "Open in ▸" and "Always open in ▸" for a link or favorite of the current space.
+    private func browserMenuItems(for link: Link) -> [NSMenuItem] {
+        let browsers = BrowserManager.installedBrowsers()
+        let profileBrowser = BrowserManager.resolveTarget(link: nil, profile: model.currentProfile).bundleId
+        let openIn = BrowserMenus.openInItem(browsers: browsers) { [weak self] bundleId in
+            guard let self else { return }
+            var oneOff = link
+            oneOff.browserBundleId = bundleId
+            BrowserManager.open(link: oneOff, in: self.model.currentProfile)
+        }
+        let alwaysOpenIn = BrowserMenus.alwaysOpenInItem(
+            browsers: browsers,
+            current: link.browserBundleId,
+            profileBrowserName: profileBrowser.flatMap { BrowserManager.appName(bundleId: $0) }
+        ) { [weak self] bundleId in
+            self?.model.setLinkBrowserOverride(id: link.id, bundleId: bundleId)
+        }
+        return [openIn, alwaysOpenIn]
+    }
+
+    /// "Profile ▸" for a space: move it to another profile, or to a new one.
+    private func profileMenuItem(for workspace: Workspace) -> NSMenuItem {
+        BrowserMenus.profileItem(
+            profiles: model.profiles,
+            currentProfileId: workspace.profileId,
+            assign: { [weak self] profileId in
+                self?.model.assignWorkspace(workspace.id, toProfile: profileId)
+            },
+            newProfile: { [weak self] in
+                guard let self,
+                      let name = TextPrompt.run(
+                        message: "New Profile",
+                        informative: "“\(workspace.name)” will move to the new profile.",
+                        initial: "Profile \(self.model.profiles.count + 1)",
+                        confirmTitle: "Create"
+                      ) else { return }
+                let profileId = self.model.createProfile(name: name)
+                self.model.assignWorkspace(workspace.id, toProfile: profileId)
+            }
+        )
     }
 
     @objc private func unpinTab(_ sender: NSMenuItem) {

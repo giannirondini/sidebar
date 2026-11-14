@@ -18,7 +18,8 @@ final class NodeCollectionViewItem: NSCollectionViewItem {
                    isSelected: Bool,
                    isScheduled: Bool = false,
                    scheduleBadgeBackgroundColor: NSColor? = nil,
-                   tooltipURL: String? = nil) {
+                   tooltipURL: String? = nil,
+                   browserBadge: NSImage? = nil) {
         view.alphaValue = 1
         view.layer?.transform = CATransform3DIdentity
         rowView.setIndentation(depth: depth, metrics: metrics)
@@ -32,7 +33,8 @@ final class NodeCollectionViewItem: NSCollectionViewItem {
             isSelected: isSelected,
             isScheduled: isScheduled,
             scheduleBadgeBackgroundColor: scheduleBadgeBackgroundColor,
-            tooltipURL: tooltipURL
+            tooltipURL: tooltipURL,
+            browserBadge: browserBadge
         )
     }
 

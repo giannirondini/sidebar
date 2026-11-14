@@ -4,6 +4,8 @@ import AppKit
 final class PinnedTabTileView: BaseControl {
 
     private let faviconView = NSImageView()
+    /// App icon of the favorite's browser override, at the tile's top-trailing corner.
+    private let browserBadgeView = NSImageView()
     private(set) var linkId: UUID?
     private var linkURL: String?
     private var tooltipShowTask: DispatchWorkItem?
@@ -31,8 +33,19 @@ final class PinnedTabTileView: BaseControl {
         faviconView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(faviconView)
 
+        browserBadgeView.translatesAutoresizingMaskIntoConstraints = false
+        browserBadgeView.imageScaling = .scaleProportionallyUpOrDown
+        browserBadgeView.isHidden = true
+        addSubview(browserBadgeView)
+
         let iconSize = ThemeConstants.Sizing.iconLarge
+        let badgeSize = ThemeConstants.Sizing.iconSmall
         NSLayoutConstraint.activate([
+            browserBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: ThemeConstants.Spacing.tiny),
+            browserBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ThemeConstants.Spacing.tiny),
+            browserBadgeView.widthAnchor.constraint(equalToConstant: badgeSize),
+            browserBadgeView.heightAnchor.constraint(equalToConstant: badgeSize),
+
             faviconView.centerXAnchor.constraint(equalTo: centerXAnchor),
             faviconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             faviconView.widthAnchor.constraint(equalToConstant: iconSize),
@@ -43,6 +56,9 @@ final class PinnedTabTileView: BaseControl {
     func configure(link: Link, iconsDirectory: URL?) {
         tooltipShowTask?.cancel()
         tooltipShowTask = nil
+        let badge = link.browserBundleId.flatMap { BrowserManager.appIcon(bundleId: $0) }
+        browserBadgeView.image = badge
+        browserBadgeView.isHidden = badge == nil
         linkId = link.id
         linkURL = link.url
 
