@@ -264,6 +264,29 @@ struct ThemeConstants {
         static let spaceBarButtonSize: CGFloat = 28
     }
 
+    // MARK: - Space Transition
+
+    /// Switching spaces (swipe, space bar click, ⌘⌥←/→): see `SpaceSwipe`.
+    struct SpaceTransition {
+        /// A release past this fraction of the width switches, whatever the speed.
+        static let commitFraction: CGFloat = 0.3
+
+        /// A release at least this fast (pt/s) in the drag's direction switches.
+        static let flickVelocity: CGFloat = 300
+
+        /// Time window (s) before the finger lifts used to measure release speed.
+        static let velocityWindow: TimeInterval = 0.08
+
+        /// Rubber-band stiffness at the first and last space (UIScrollView's 0.55).
+        static let rubberBandCoefficient: CGFloat = 0.55
+
+        /// Spring period (s): how long the settle takes, roughly.
+        static let springResponse: Double = 0.32
+
+        /// 1 = critically damped: no bounce past the target.
+        static let springDampingRatio: Double = 1.0
+    }
+
     // MARK: - Animation
 
     /// Standard animation timing values for smooth transitions.
