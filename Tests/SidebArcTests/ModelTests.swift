@@ -8,11 +8,17 @@ import Testing
         return DataStore(baseDirectory: temp)
     }
 
+    /// One profile holding every given workspace.
+    private func makeState(_ workspaces: (UUID) -> [Workspace], favorites: [Link] = []) -> AppState {
+        let profile = Profile(name: "Default", favorites: favorites)
+        let list = workspaces(profile.id)
+        return AppState(profiles: [profile], workspaces: list, selectedWorkspaceId: list.first?.id, isSettingsSelected: false)
+    }
+
     @Test func testJSONRoundTrip() throws {
         let link = Link(id: UUID(), title: "Example", url: "https://example.com", faviconPath: nil)
         let folder = Folder(id: UUID(), name: "Folder", children: [.link(link)], isExpanded: true)
-        let workspace = Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder)])
-        let state = AppState(schemaVersion: 1, workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        let state = makeState { [Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder)], profileId: $0)] }
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
@@ -121,7 +127,7 @@ import Testing
         #expect(model.workspaces[3].name == "Third")
     }
 
-    // MARK: - Pinned Links Tests
+    // MARK: - Favorites (pinned links, shared per profile)
 
     @Test func testPinLink() {
         let store = makeStore()
@@ -130,13 +136,13 @@ import Testing
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         #expect(model.currentWorkspace.items.count == 1)
-        #expect(model.currentWorkspace.pinnedLinks.count == 0)
+        #expect(model.currentProfile.favorites.count == 0)
 
         model.pinLink(id: linkId)
         #expect(model.currentWorkspace.items.count == 0)
-        #expect(model.currentWorkspace.pinnedLinks.count == 1)
-        #expect(model.currentWorkspace.pinnedLinks[0].id == linkId)
-        #expect(model.currentWorkspace.pinnedLinks[0].title == "A")
+        #expect(model.currentProfile.favorites.count == 1)
+        #expect(model.currentProfile.favorites[0].id == linkId)
+        #expect(model.currentProfile.favorites[0].title == "A")
     }
 
     @Test func testUnpinLink() {
@@ -146,11 +152,11 @@ import Testing
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.pinLink(id: linkId)
-        #expect(model.currentWorkspace.pinnedLinks.count == 1)
+        #expect(model.currentProfile.favorites.count == 1)
         #expect(model.currentWorkspace.items.count == 0)
 
         model.unpinLink(id: linkId)
-        #expect(model.currentWorkspace.pinnedLinks.count == 0)
+        #expect(model.currentProfile.favorites.count == 0)
         #expect(model.currentWorkspace.items.count == 1)
         if case .link(let link) = model.currentWorkspace.items.last {
             #expect(link.id == linkId)
@@ -165,7 +171,7 @@ import Testing
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
-        let max = Workspace.maxPinnedLinks
+        let max = Profile.maxFavorites
         var linkIds: [UUID] = []
         for i in 0..<(max + 1) {
             let id = model.addLink(urlString: "https://\(i).com", title: "Link \(i)", parentId: nil)
@@ -176,13 +182,13 @@ import Testing
         for i in 0..<max {
             model.pinLink(id: linkIds[i])
         }
-        #expect(model.currentWorkspace.pinnedLinks.count == max)
+        #expect(model.currentProfile.favorites.count == max)
         #expect(model.currentWorkspace.items.count == 1)
         #expect(!model.canPinMore)
 
         // Attempt to pin one more - should be rejected
         model.pinLink(id: linkIds[max])
-        #expect(model.currentWorkspace.pinnedLinks.count == max)
+        #expect(model.currentProfile.favorites.count == max)
         #expect(model.currentWorkspace.items.count == 1)
     }
 
@@ -199,8 +205,8 @@ import Testing
         }
 
         model.pinLink(id: linkId)
-        #expect(model.currentWorkspace.pinnedLinks.count == 1)
-        #expect(model.currentWorkspace.pinnedLinks[0].title == "Nested")
+        #expect(model.currentProfile.favorites.count == 1)
+        #expect(model.currentProfile.favorites[0].title == "Nested")
 
         // Verify link was removed from the folder
         if let folderNode = model.nodeById(folderId), case .folder(let folder) = folderNode {
@@ -217,164 +223,168 @@ import Testing
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         model.pinLink(id: folderId)
-        #expect(model.currentWorkspace.pinnedLinks.count == 0)
+        #expect(model.currentProfile.favorites.count == 0)
         #expect(model.currentWorkspace.items.count == 1)
     }
 
-    @Test func testJSONRoundTripWithPinnedLinks() throws {
-        let link = Link(id: UUID(), title: "Pinned", url: "https://pinned.com", faviconPath: nil)
-        let treeLink = Link(id: UUID(), title: "Tree", url: "https://tree.com", faviconPath: nil)
-        let workspace = Workspace(
-            id: UUID(),
-            name: "Test",
-            colorId: .ember,
-            items: [.link(treeLink)],
-            pinnedLinks: [link]
+    @Test func testNewWorkspaceJoinsCurrentProfile() {
+        let store = makeStore()
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+
+        let firstProfileId = model.currentProfile.id
+        let newId = model.createWorkspace(name: "B", colorId: .defaultColor())
+        let created = model.workspaces.first(where: { $0.id == newId })
+        #expect(created?.profileId == firstProfileId)
+    }
+
+    @Test func testFavoritesAreSharedBySpacesInTheSameProfile() {
+        let store = makeStore()
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+
+        let spaceA = model.currentWorkspace.id
+        let linkId = model.addLink(urlString: "https://shared.com", title: "Shared", parentId: nil)
+        model.pinLink(id: linkId)
+
+        let spaceB = model.createWorkspace(name: "B", colorId: .defaultColor())
+        model.selectWorkspace(id: spaceB)
+        #expect(model.currentProfile.favorites.map(\.id) == [linkId])
+
+        // Unpinning from B lands the link in B's list, not in A's.
+        model.unpinLink(id: linkId)
+        #expect(model.currentProfile.favorites.isEmpty)
+        #expect(model.currentWorkspace.items.map(\.id) == [linkId])
+        #expect(model.workspaces.first(where: { $0.id == spaceA })?.items.isEmpty == true)
+    }
+
+    @Test func testFavoritesAreNotSharedAcrossProfiles() {
+        let personal = Profile(name: "Personal")
+        let work = Profile(name: "Work")
+        let spaceA = Workspace(id: UUID(), name: "A", colorId: .ember, items: [], profileId: personal.id)
+        let spaceB = Workspace(id: UUID(), name: "B", colorId: .ocean, items: [], profileId: work.id)
+        let store = makeStore()
+        store.save(AppState(profiles: [personal, work], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id, isSettingsSelected: false))
+        let model = AppModel(store: store)
+        model.selectWorkspace(id: spaceA.id)
+
+        let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
+        model.pinLink(id: linkId)
+        #expect(model.currentProfile.id == personal.id)
+        #expect(model.currentProfile.favorites.count == 1)
+
+        model.selectWorkspace(id: spaceB.id)
+        #expect(model.currentProfile.id == work.id)
+        #expect(model.currentProfile.favorites.isEmpty)
+    }
+
+    @Test func testFavoriteUpdateReachesProfileOfAnotherSpace() {
+        // Favicon fetches complete asynchronously, possibly after a switch to another profile.
+        let personal = Profile(name: "Personal")
+        let work = Profile(name: "Work")
+        let favorite = Link(id: UUID(), title: "Fav", url: "https://fav.com", faviconPath: nil)
+        var workWithFavorite = work
+        workWithFavorite.favorites = [favorite]
+        let spaceA = Workspace(id: UUID(), name: "A", colorId: .ember, items: [], profileId: personal.id)
+        let spaceB = Workspace(id: UUID(), name: "B", colorId: .ocean, items: [], profileId: work.id)
+        let store = makeStore()
+        store.save(AppState(profiles: [personal, workWithFavorite], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id, isSettingsSelected: false))
+        let model = AppModel(store: store)
+        model.selectWorkspace(id: spaceA.id)
+
+        model.updatePinnedLinkFaviconPath(id: favorite.id, path: "/tmp/icon.png")
+        #expect(model.profile(id: work.id)?.favorites.first?.faviconPath == "/tmp/icon.png")
+    }
+
+    @Test func testJSONRoundTripWithProfilesAndFavorites() throws {
+        var override = Link(id: UUID(), title: "Tree", url: "https://tree.com", faviconPath: nil)
+        override.browserBundleId = "com.apple.Safari"
+        let favorite = Link(id: UUID(), title: "Pinned", url: "https://pinned.com", faviconPath: nil)
+        let profile = Profile(
+            name: "Work",
+            browserBundleId: "com.google.Chrome",
+            browserProfiles: ["com.google.chrome": "Profile 1", "org.mozilla.firefox": "default"],
+            favorites: [favorite]
         )
-        let state = AppState(schemaVersion: 1, workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        let workspace = Workspace(id: UUID(), name: "Test", colorId: .ember, items: [.link(override)], profileId: profile.id)
+        let state = AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
-        #expect(decoded.workspaces[0].pinnedLinks.count == 1)
-        #expect(decoded.workspaces[0].pinnedLinks[0].title == "Pinned")
-        #expect(decoded.workspaces[0].items.count == 1)
+        #expect(decoded.schemaVersion == AppState.currentSchemaVersion)
+        #expect(decoded.profiles[0].favorites.map(\.title) == ["Pinned"])
+        #expect(decoded.profiles[0].browserProfiles["com.google.chrome"] == "Profile 1")
         #expect(state == decoded)
     }
 
-    @Test func testBackwardCompatibilityNoPinnedLinks() throws {
-        // Simulate old JSON format without pinnedLinks field
-        let json = """
-        {
-            "schemaVersion": 1,
-            "workspaces": [{
-                "id": "00000000-0000-0000-0000-000000000001",
-                "name": "Old Workspace",
-                "colorId": "ember",
-                "items": []
-            }],
-            "selectedWorkspaceId": "00000000-0000-0000-0000-000000000001",
-            "isSettingsSelected": false
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(AppState.self, from: data)
+    @Test func testLinkBrowserOverrideIsOptionalInJSON() throws {
+        let json = #"{"id": "00000000-0000-0000-0000-000000000020", "title": "T", "url": "https://t.com"}"#
+        let link = try JSONDecoder().decode(Link.self, from: Data(json.utf8))
+        #expect(link.browserBundleId == nil)
 
-        #expect(decoded.workspaces[0].pinnedLinks.count == 0)
-        #expect(decoded.workspaces[0].name == "Old Workspace")
+        let encoded = try #require(String(data: JSONEncoder().encode(link), encoding: .utf8))
+        #expect(!encoded.contains("browserBundleId"))
+    }
+
+    @Test func testRepairCreatesProfileAndFixesDanglingProfileIds() {
+        let orphan = Workspace(id: UUID(), name: "Orphan", colorId: .ember, items: [], profileId: UUID())
+        let repaired = AppState(profiles: [], workspaces: [orphan], selectedWorkspaceId: orphan.id, isSettingsSelected: false).repaired()
+        #expect(repaired.profiles.count == 1)
+        #expect(repaired.workspaces[0].profileId == repaired.profiles[0].id)
+
+        let keep = Profile(name: "Keep")
+        let second = Workspace(id: UUID(), name: "Dangling", colorId: .ember, items: [], profileId: UUID())
+        let fixed = AppState(profiles: [keep], workspaces: [second], selectedWorkspaceId: nil, isSettingsSelected: false).repaired()
+        #expect(fixed.profiles == [keep])
+        #expect(fixed.workspaces[0].profileId == keep.id)
     }
 
     // MARK: - Browser Profile Tests
 
-    @Test func testJSONRoundTripWithBrowserProfiles() throws {
-        let workspace = Workspace(
-            id: UUID(),
-            name: "Work",
-            colorId: .ocean,
-            items: [],
-            pinnedLinks: [],
-            browserProfiles: ["com.google.chrome": "Profile 1", "org.mozilla.firefox": "default"]
-        )
-        let state = AppState(schemaVersion: 1, workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
-
-        let data = try JSONEncoder().encode(state)
-        let decoded = try JSONDecoder().decode(AppState.self, from: data)
-
-        #expect(decoded.workspaces[0].browserProfiles["com.google.chrome"] == "Profile 1")
-        #expect(decoded.workspaces[0].browserProfiles["org.mozilla.firefox"] == "default")
-        #expect(state == decoded)
-    }
-
-    @Test func testBackwardCompatibilityNoBrowserProfile() throws {
-        // Simulate old JSON format without any browser profile fields
-        let json = """
-        {
-            "schemaVersion": 1,
-            "workspaces": [{
-                "id": "00000000-0000-0000-0000-000000000002",
-                "name": "Legacy Workspace",
-                "colorId": "moss",
-                "items": [],
-                "pinnedLinks": []
-            }],
-            "selectedWorkspaceId": "00000000-0000-0000-0000-000000000002",
-            "isSettingsSelected": false
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(AppState.self, from: data)
-
-        #expect(decoded.workspaces[0].browserProfiles.isEmpty)
-        #expect(decoded.workspaces[0].name == "Legacy Workspace")
-    }
-
-    @Test func testBackwardCompatibilityOldBrowserProfileFormat() throws {
-        // Simulate old JSON format with browserProfile + browserProfileBundleId
-        let json = """
-        {
-            "schemaVersion": 1,
-            "workspaces": [{
-                "id": "00000000-0000-0000-0000-000000000003",
-                "name": "Migrated Workspace",
-                "colorId": "ocean",
-                "items": [],
-                "pinnedLinks": [],
-                "browserProfile": "Profile 1",
-                "browserProfileBundleId": "com.google.chrome"
-            }],
-            "selectedWorkspaceId": "00000000-0000-0000-0000-000000000003",
-            "isSettingsSelected": false
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(AppState.self, from: data)
-
-        #expect(decoded.workspaces[0].browserProfiles["com.google.chrome"] == "Profile 1")
-        #expect(decoded.workspaces[0].browserProfiles.count == 1)
-    }
-
-    @Test func testUpdateWorkspaceBrowserProfile() {
+    @Test func testUpdateBrowserProfileAppliesToEverySpaceInProfile() throws {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
-        let workspaceId = model.currentWorkspace.id
-        #expect(model.currentWorkspace.browserProfiles.isEmpty)
+        let profileId = model.currentProfile.id
+        let other = model.createWorkspace(name: "B", colorId: .defaultColor())
+        #expect(model.currentProfile.browserProfiles.isEmpty)
 
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "Profile 2")
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 2")
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: "Profile 2")
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == "Profile 2")
+        let otherSpace = try #require(model.workspaces.first(where: { $0.id == other }))
+        #expect(model.profile(for: otherSpace).browserProfiles["com.google.chrome"] == "Profile 2")
     }
 
-    @Test func testClearWorkspaceBrowserProfile() {
+    @Test func testClearBrowserProfile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
-        let workspaceId = model.currentWorkspace.id
+        let profileId = model.currentProfile.id
 
-        // Set profile
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "Profile 1")
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 1")
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: "Profile 1")
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == "Profile 1")
 
-        // Clear profile
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: nil)
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == nil)
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: nil)
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == nil)
     }
 
-    @Test func testUpdateWorkspaceBrowserProfileTrimsWhitespace() {
+    @Test func testUpdateBrowserProfileTrimsWhitespace() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
-        let workspaceId = model.currentWorkspace.id
+        let profileId = model.currentProfile.id
 
         // Empty string should result in no entry
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "   ")
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == nil)
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: "   ")
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == nil)
 
         // Whitespace-padded string should be trimmed
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: " Profile 1 ")
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 1")
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: " Profile 1 ")
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == "Profile 1")
     }
 
     // MARK: - Open Folder Links Tests
@@ -706,10 +716,10 @@ import Testing
         model.pinLink(id: linkId)
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: .sfSymbol("heart.fill"))
-        #expect(model.currentWorkspace.pinnedLinks[0].customIcon == .sfSymbol("heart.fill"))
+        #expect(model.currentProfile.favorites[0].customIcon == .sfSymbol("heart.fill"))
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: nil)
-        #expect(model.currentWorkspace.pinnedLinks[0].customIcon == nil)
+        #expect(model.currentProfile.favorites[0].customIcon == nil)
     }
 
     // MARK: - Note Tests
@@ -717,8 +727,9 @@ import Testing
     @Test func testNoteJSONRoundTrip() throws {
         let note = Note(id: UUID(), title: "My Note", customIcon: .emoji("📝"))
         let folder = Folder(id: UUID(), name: "Folder", children: [.note(note)], isExpanded: true)
-        let workspace = Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder), .note(Note(id: UUID(), title: "Top-level", customIcon: nil))])
-        let state = AppState(schemaVersion: 1, workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        let state = makeState {
+            [Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder), .note(Note(id: UUID(), title: "Top-level", customIcon: nil))], profileId: $0)]
+        }
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
@@ -734,7 +745,7 @@ import Testing
     }
 
     @Test func testBackwardCompatibilityNoNotes() throws {
-        // Pre-Note schema: items contain only folder/link entries. Decoding must succeed.
+        // Pre-Note schema (v1): items contain only folder/link entries. Decoding must succeed.
         let json = """
         {
             "schemaVersion": 1,
@@ -752,7 +763,7 @@ import Testing
         }
         """
         let data = json.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(AppState.self, from: data)
+        let decoded = try JSONDecoder().decode(SchemaV1.AppState.self, from: data)
         #expect(decoded.workspaces[0].items.count == 1)
         if case .link(let link) = decoded.workspaces[0].items[0] {
             #expect(link.title == "Legacy Link")
@@ -965,21 +976,19 @@ import Testing
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
-        let workspaceId = model.currentWorkspace.id
+        let profileId = model.currentProfile.id
 
-        // Set Chrome profile
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "Profile 1")
-        // Set Firefox profile
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "org.mozilla.firefox", profile: "default")
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: "Profile 1")
+        model.updateBrowserProfile(profileId: profileId, bundleId: "org.mozilla.firefox", profile: "default")
 
-        #expect(model.currentWorkspace.browserProfiles.count == 2)
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 1")
-        #expect(model.currentWorkspace.browserProfiles["org.mozilla.firefox"] == "default")
+        #expect(model.currentProfile.browserProfiles.count == 2)
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == "Profile 1")
+        #expect(model.currentProfile.browserProfiles["org.mozilla.firefox"] == "default")
 
         // Clear Chrome profile, Firefox should remain
-        model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: nil)
-        #expect(model.currentWorkspace.browserProfiles.count == 1)
-        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == nil)
-        #expect(model.currentWorkspace.browserProfiles["org.mozilla.firefox"] == "default")
+        model.updateBrowserProfile(profileId: profileId, bundleId: "com.google.chrome", profile: nil)
+        #expect(model.currentProfile.browserProfiles.count == 1)
+        #expect(model.currentProfile.browserProfiles["com.google.chrome"] == nil)
+        #expect(model.currentProfile.browserProfiles["org.mozilla.firefox"] == "default")
     }
 }

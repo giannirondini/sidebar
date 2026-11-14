@@ -39,8 +39,21 @@ final class DataStore {
         do {
             let data = try Data(contentsOf: dataURL)
             let decoder = JSONDecoder()
-            let state = try decoder.decode(AppState.self, from: data)
-            return state
+            let version = try decoder.decode(SchemaVersionProbe.self, from: data).schemaVersion
+            if version < 2 {
+                let migrated = SchemaMigration.v1ToV2(try decoder.decode(SchemaV1.AppState.self, from: data))
+                // Persist right away so profile ids are stable across launches, but only
+                // once a copy of the v1 file is safe outside the rotating backups.
+                if writePreMigrationCopy(data, fromVersion: version) {
+                    save(migrated)
+                    logger.info("Migrated data.json from schema v\(version) to v2")
+                }
+                return migrated
+            }
+            if version > AppState.currentSchemaVersion {
+                logger.warning("data.json has schema v\(version), newer than v\(AppState.currentSchemaVersion); unknown fields will be lost on save")
+            }
+            return try decoder.decode(AppState.self, from: data).repaired()
         } catch {
             // Leave data.json untouched so a newer-schema or corrupt file can be
             // recovered (e.g. by re-upgrading); it is only overwritten on the
@@ -114,6 +127,20 @@ final class DataStore {
         }
     }
 
+    /// Copies the pre-migration file to `Backups/pre-v<n+1>-migration-<ts>.json`.
+    /// The name doesn't start with `data-`, so `pruneBackups` never rotates it away.
+    private func writePreMigrationCopy(_ data: Data, fromVersion version: Int) -> Bool {
+        let timestamp = backupTimestampFormatter.string(from: Date())
+        let url = backupsDirectory().appendingPathComponent("pre-v\(version + 1)-migration-\(timestamp).json")
+        do {
+            try data.write(to: url, options: [.atomic])
+            return true
+        } catch {
+            logger.error("Failed to write pre-migration copy; keeping the migrated state in memory only: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
     private func backupsDirectory() -> URL {
         let backupsURL = baseDirectory.appendingPathComponent("Backups", isDirectory: true)
         if !fileManager.fileExists(atPath: backupsURL.path) {
@@ -146,12 +173,14 @@ final class DataStore {
     }
 
     static func defaultState() -> AppState {
+        let profile = Profile.makeDefault()
         let workspace = Workspace(
             id: UUID(),
             name: "Inbox",
             colorId: .defaultColor(),
-            items: []
+            items: [],
+            profileId: profile.id
         )
-        return AppState(schemaVersion: 1, workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        return AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
     }
 }

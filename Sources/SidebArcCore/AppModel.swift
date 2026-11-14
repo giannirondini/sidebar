@@ -37,11 +37,35 @@ final class AppModel {
         if let first = state.workspaces.first {
             return first
         }
-        let fallback = Workspace(id: UUID(), name: "Inbox", colorId: .defaultColor(), items: [], pinnedLinks: [])
+        state = state.repaired()
+        let fallback = Workspace(id: UUID(), name: "Inbox", colorId: .defaultColor(), items: [], profileId: state.profiles[0].id)
         state.workspaces = [fallback]
         state.selectedWorkspaceId = fallback.id
         persist()
         return fallback
+    }
+
+    // MARK: - Profiles
+
+    var profiles: [Profile] {
+        state.profiles
+    }
+
+    /// The profile of the current workspace (its browser setup and Favorites).
+    var currentProfile: Profile {
+        profile(for: currentWorkspace)
+    }
+
+    /// `state` is repaired on load, so a workspace's profile always exists; the
+    /// first-profile fallback only covers states built in memory without `repaired()`.
+    func profile(for workspace: Workspace) -> Profile {
+        state.profiles.first(where: { $0.id == workspace.profileId })
+            ?? state.profiles.first
+            ?? Profile.makeDefault()
+    }
+
+    func profile(id: UUID) -> Profile? {
+        state.profiles.first(where: { $0.id == id })
     }
 
     func selectWorkspace(id: UUID) {
@@ -60,7 +84,8 @@ final class AppModel {
 
     @discardableResult
     func createWorkspace(name: String, colorId: WorkspaceColorId) -> UUID {
-        let workspace = Workspace(id: UUID(), name: name, colorId: colorId, items: [])
+        // A new space joins the current space's profile.
+        let workspace = Workspace(id: UUID(), name: name, colorId: colorId, items: [], profileId: currentProfile.id)
         state.workspaces.append(workspace)
         state.selectedWorkspaceId = workspace.id
         UserDefaults.standard.set(workspace.id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
@@ -80,14 +105,16 @@ final class AppModel {
         }
     }
 
-    func updateWorkspaceBrowserProfile(id: UUID, bundleId: String, profile: String?) {
+    /// Sets (or clears, for nil/blank) the browser profile directory that `profileId`
+    /// uses for `bundleId`. Affects every space in that profile.
+    func updateBrowserProfile(profileId: UUID, bundleId: String, profile: String?) {
         let trimmed = profile?.trimmingCharacters(in: .whitespacesAndNewlines)
         let value = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        updateWorkspace(id: id) { workspace in
+        updateProfile(id: profileId) { profile in
             if let value {
-                workspace.browserProfiles[bundleId] = value
+                profile.browserProfiles[bundleId] = value
             } else {
-                workspace.browserProfiles.removeValue(forKey: bundleId)
+                profile.browserProfiles.removeValue(forKey: bundleId)
             }
         }
     }
@@ -404,40 +431,45 @@ final class AppModel {
         return true
     }
 
-    // MARK: - Pinned Links
+    // MARK: - Favorites (pinned links, shared per profile)
 
     var canPinMore: Bool {
-        currentWorkspace.pinnedLinks.count < Workspace.maxPinnedLinks
+        currentProfile.favorites.count < Profile.maxFavorites
     }
 
     func pinnedLinkById(_ id: UUID) -> Link? {
-        currentWorkspace.pinnedLinks.first(where: { $0.id == id })
+        currentProfile.favorites.first(where: { $0.id == id })
     }
 
+    /// Moves a link from the current space's list into its profile's Favorites.
     func pinLink(id: UUID) {
         guard canPinMore else { return }
         guard let node = nodeById(id), case .link(let link) = node else { return }
-        guard !currentWorkspace.pinnedLinks.contains(where: { $0.id == id }) else { return }
+        let profileId = currentProfile.id
+        guard let profileIndex = state.profiles.firstIndex(where: { $0.id == profileId }),
+              let workspaceIndex = state.workspaces.firstIndex(where: { $0.id == currentWorkspace.id }),
+              !state.profiles[profileIndex].favorites.contains(where: { $0.id == id }) else { return }
 
-        updateWorkspace(id: currentWorkspace.id) { workspace in
-            _ = removeNode(id: id, nodes: &workspace.items)
-            workspace.pinnedLinks.append(link)
-        }
+        _ = removeNode(id: id, nodes: &state.workspaces[workspaceIndex].items)
+        state.profiles[profileIndex].favorites.append(link)
+        persist()
     }
 
+    /// Moves a favorite into the **current** space's list (as in Arc), whichever
+    /// space it was pinned from.
     func unpinLink(id: UUID) {
-        updateWorkspace(id: currentWorkspace.id) { workspace in
-            guard let index = workspace.pinnedLinks.firstIndex(where: { $0.id == id }) else { return }
-            let link = workspace.pinnedLinks.remove(at: index)
-            workspace.items.append(.link(link))
-        }
+        let profileId = currentProfile.id
+        guard let profileIndex = state.profiles.firstIndex(where: { $0.id == profileId }),
+              let favoriteIndex = state.profiles[profileIndex].favorites.firstIndex(where: { $0.id == id }),
+              let workspaceIndex = state.workspaces.firstIndex(where: { $0.id == currentWorkspace.id }) else { return }
+
+        let link = state.profiles[profileIndex].favorites.remove(at: favoriteIndex)
+        state.workspaces[workspaceIndex].items.append(.link(link))
+        persist()
     }
 
     func updatePinnedLinkFaviconPath(id: UUID, path: String?) {
-        updateWorkspace(id: currentWorkspace.id) { workspace in
-            guard let index = workspace.pinnedLinks.firstIndex(where: { $0.id == id }) else { return }
-            workspace.pinnedLinks[index].faviconPath = path
-        }
+        updateFavorite(id: id) { $0.faviconPath = path }
     }
 
     func setLinkCustomIcon(id: UUID, icon: CustomIcon?) {
@@ -465,10 +497,7 @@ final class AppModel {
     }
 
     func setPinnedLinkCustomIcon(id: UUID, icon: CustomIcon?) {
-        updateWorkspace(id: currentWorkspace.id) { workspace in
-            guard let index = workspace.pinnedLinks.firstIndex(where: { $0.id == id }) else { return }
-            workspace.pinnedLinks[index].customIcon = icon
-        }
+        updateFavorite(id: id) { $0.customIcon = icon }
     }
 
     func location(of nodeId: UUID) -> NodeLocation? {
@@ -569,6 +598,21 @@ final class AppModel {
         guard let index = state.workspaces.firstIndex(where: { $0.id == id }) else { return }
         mutate(&state.workspaces[index])
         persist(notify: notify)
+    }
+
+    private func updateProfile(id: UUID, notify: Bool = true, _ mutate: (inout Profile) -> Void) {
+        guard let index = state.profiles.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&state.profiles[index])
+        persist(notify: notify)
+    }
+
+    /// Mutates the favorite `id` in whichever profile holds it. Not limited to the
+    /// current profile: async callers (favicon fetches) may finish after a space switch.
+    private func updateFavorite(id: UUID, _ mutate: (inout Link) -> Void) {
+        guard let profileIndex = state.profiles.firstIndex(where: { $0.favorites.contains(where: { $0.id == id }) }),
+              let index = state.profiles[profileIndex].favorites.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&state.profiles[profileIndex].favorites[index])
+        persist()
     }
 
     private func updateNode(id: UUID, notify: Bool = true, _ mutate: (inout Node) -> Void) {

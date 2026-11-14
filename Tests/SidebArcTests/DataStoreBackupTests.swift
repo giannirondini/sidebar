@@ -8,8 +8,9 @@ import Testing
     }
 
     private func makeState(name: String) -> AppState {
-        let workspace = Workspace(id: UUID(), name: name, colorId: .defaultColor(), items: [])
-        return AppState(schemaVersion: 1, workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        let profile = Profile.makeDefault()
+        let workspace = Workspace(id: UUID(), name: name, colorId: .defaultColor(), items: [], profileId: profile.id)
+        return AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
     }
 
     private func dataURL(in directory: URL) -> URL {

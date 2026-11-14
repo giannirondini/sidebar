@@ -1113,7 +1113,7 @@ final class SettingsContentViewController: NSViewController {
 
         // Browser profile options
         let currentBundleId = BrowserManager.resolveDefaultBrowserBundleId() ?? ""
-        let hasProfileForCurrentBrowser = !currentBundleId.isEmpty && workspace.browserProfiles[currentBundleId] != nil
+        let hasProfileForCurrentBrowser = !currentBundleId.isEmpty && appModel.profile(for: workspace).browserProfiles[currentBundleId] != nil
         let profileTitle = hasProfileForCurrentBrowser ? "Edit Browser Profile..." : "Set Browser Profile..."
         let profileItem = NSMenuItem(title: profileTitle, action: #selector(setContextWorkspaceProfile), keyEquivalent: "")
         profileItem.target = self
@@ -1170,9 +1170,11 @@ final class SettingsContentViewController: NSViewController {
     }
 
     @objc private func clearContextWorkspaceProfile() {
-        guard let workspaceId = contextWorkspaceId else { return }
+        guard let workspaceId = contextWorkspaceId,
+              let appModel,
+              let workspace = appModel.workspaces.first(where: { $0.id == workspaceId }) else { return }
         guard let bundleId = BrowserManager.resolveDefaultBrowserBundleId() else { return }
-        appModel?.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: bundleId, profile: nil)
+        appModel.updateBrowserProfile(profileId: workspace.profileId, bundleId: bundleId, profile: nil)
         reloadWorkspaces()
     }
 
@@ -1180,6 +1182,8 @@ final class SettingsContentViewController: NSViewController {
         guard let appModel = appModel else { return }
         guard let workspace = appModel.workspaces.first(where: { $0.id == id }) else { return }
         guard let window = view.window else { return }
+        let spaceProfileId = workspace.profileId
+        let browserProfiles = appModel.profile(for: workspace).browserProfiles
 
         let bundleId = BrowserManager.resolveDefaultBrowserBundleId() ?? ""
         let browserSupportsProfiles = BrowserManager.supportsProfiles(bundleId: bundleId)
@@ -1217,7 +1221,7 @@ final class SettingsContentViewController: NSViewController {
 
             let textField = NSTextField()
             textField.placeholderString = "e.g., Profile 1"
-            textField.stringValue = workspace.browserProfiles[bundleId] ?? ""
+            textField.stringValue = browserProfiles[bundleId] ?? ""
             textField.font = NSFont.systemFont(ofSize: 13)
             textField.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(textField)
@@ -1239,7 +1243,7 @@ final class SettingsContentViewController: NSViewController {
                 if response == .alertFirstButtonReturn {
                     let value = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                     let profile = value.isEmpty ? nil : value
-                    appModel.updateWorkspaceBrowserProfile(id: id, bundleId: bundleId, profile: profile)
+                    appModel.updateBrowserProfile(profileId: spaceProfileId, bundleId: bundleId, profile: profile)
                     self?.reloadWorkspaces()
                 }
             }
@@ -1261,7 +1265,7 @@ final class SettingsContentViewController: NSViewController {
             }
 
             // Pre-select current profile for this browser
-            if let currentProfile = workspace.browserProfiles[bundleId] {
+            if let currentProfile = browserProfiles[bundleId] {
                 for (index, profile) in detectedProfiles.enumerated() {
                     if profile.id == currentProfile {
                         popup.selectItem(at: index + 1) // +1 for "Default" item
@@ -1289,17 +1293,17 @@ final class SettingsContentViewController: NSViewController {
             ])
 
             alert.accessoryView = container
-            alert.informativeText = "Links opened from this workspace will use the selected profile."
+            alert.informativeText = "Applies to every space in the “\(appModel.profile(for: workspace).name)” profile."
 
             alert.beginSheetModal(for: window) { [weak self] response in
                 if response == .alertFirstButtonReturn {
                     let selectedIndex = popup.indexOfSelectedItem
                     if selectedIndex == 0 {
                         // "Default (no profile)"
-                        appModel.updateWorkspaceBrowserProfile(id: id, bundleId: bundleId, profile: nil)
+                        appModel.updateBrowserProfile(profileId: spaceProfileId, bundleId: bundleId, profile: nil)
                     } else {
-                        let profileId = detectedProfiles[selectedIndex - 1].id
-                        appModel.updateWorkspaceBrowserProfile(id: id, bundleId: bundleId, profile: profileId)
+                        let browserProfileDir = detectedProfiles[selectedIndex - 1].id
+                        appModel.updateBrowserProfile(profileId: spaceProfileId, bundleId: bundleId, profile: browserProfileDir)
                     }
                     self?.reloadWorkspaces()
                 }
@@ -1333,10 +1337,15 @@ extension SettingsContentViewController: NSCollectionViewDataSource {
 
         let workspace = appModel.workspaces[indexPath.item]
         let canDelete = appModel.workspaces.count > 1
+        let hasBrowserProfile: Bool = {
+            guard let bundleId = BrowserManager.resolveDefaultBrowserBundleId() else { return false }
+            return appModel.profile(for: workspace).browserProfiles[bundleId] != nil
+        }()
 
         item.configure(
             workspace: workspace,
             canDelete: canDelete,
+            hasBrowserProfile: hasBrowserProfile,
             onDelete: { [weak self] id in
                 self?.handleWorkspaceDelete(id: id)
             },

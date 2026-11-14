@@ -1,13 +1,25 @@
 import Foundation
 
+/// Root of `data.json`. Older schemas are decoded by `SchemaV1` and upgraded by
+/// `SchemaMigration` in `DataStore.load()`; this type only ever reads the current one.
 struct AppState: Codable, Equatable {
+    static let currentSchemaVersion = 2
+
     var schemaVersion: Int
+    var profiles: [Profile]
     var workspaces: [Workspace]
     var selectedWorkspaceId: UUID?
     var isSettingsSelected: Bool
 
-    init(schemaVersion: Int, workspaces: [Workspace], selectedWorkspaceId: UUID?, isSettingsSelected: Bool) {
+    init(
+        schemaVersion: Int = AppState.currentSchemaVersion,
+        profiles: [Profile],
+        workspaces: [Workspace],
+        selectedWorkspaceId: UUID?,
+        isSettingsSelected: Bool
+    ) {
         self.schemaVersion = schemaVersion
+        self.profiles = profiles
         self.workspaces = workspaces
         self.selectedWorkspaceId = selectedWorkspaceId
         self.isSettingsSelected = isSettingsSelected
@@ -16,9 +28,80 @@ struct AppState: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        // Missing `profiles` is repaired by `repaired()`, not rejected.
+        profiles = try container.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
         workspaces = try container.decode([Workspace].self, forKey: .workspaces)
         selectedWorkspaceId = try container.decodeIfPresent(UUID.self, forKey: .selectedWorkspaceId)
         isSettingsSelected = try container.decodeIfPresent(Bool.self, forKey: .isSettingsSelected) ?? false
+    }
+
+    /// Restores the invariants the rest of the app relies on: there is at least
+    /// one profile, and every workspace's `profileId` names an existing profile
+    /// (dangling ids fall back to the first profile).
+    func repaired() -> AppState {
+        var state = self
+        if state.profiles.isEmpty {
+            state.profiles = [Profile.makeDefault()]
+        }
+        let known = Set(state.profiles.map(\.id))
+        let fallback = state.profiles[0].id
+        for index in state.workspaces.indices where !known.contains(state.workspaces[index].profileId) {
+            state.workspaces[index].profileId = fallback
+        }
+        return state
+    }
+}
+
+/// A group of spaces that share a browser setup and the Favorites grid
+/// (Arc's "profile"). Every workspace belongs to exactly one profile.
+struct Profile: Codable, Identifiable, Equatable {
+    var id: UUID
+    var name: String
+    /// Browser that opens this profile's links; `nil` inherits the global default.
+    var browserBundleId: String?
+    /// Browser profile directory per browser bundle id (e.g. Chrome's "Profile 1").
+    var browserProfiles: [String: String]
+    /// The Favorites tile grid, shared by every space in this profile.
+    var favorites: [Link]
+
+    static let defaultName = "Default"
+    static let maxFavorites = ThemeConstants.Sizing.pinnedTileColumns * ThemeConstants.Sizing.pinnedTileMaxRows
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        browserBundleId: String? = nil,
+        browserProfiles: [String: String] = [:],
+        favorites: [Link] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.browserBundleId = browserBundleId
+        self.browserProfiles = browserProfiles
+        self.favorites = favorites
+    }
+
+    static func makeDefault() -> Profile {
+        Profile(name: defaultName)
+    }
+
+    /// Appends `links` to `favorites` in order, skipping any whose normalised URL
+    /// is already a favorite and stopping at `maxFavorites`. Returns the links
+    /// that did not fit (duplicates and overflow), in order, so callers can put
+    /// them somewhere visible instead of dropping them.
+    mutating func appendFavorites(_ links: [Link]) -> [Link] {
+        var seen = Set(favorites.map { URLNormalization.key(for: $0.url) })
+        var leftovers: [Link] = []
+        for link in links {
+            let key = URLNormalization.key(for: link.url)
+            if seen.contains(key) || favorites.count >= Self.maxFavorites {
+                leftovers.append(link)
+            } else {
+                favorites.append(link)
+                seen.insert(key)
+            }
+        }
+        return leftovers
     }
 }
 
@@ -27,54 +110,7 @@ struct Workspace: Codable, Identifiable, Equatable {
     var name: String
     var colorId: WorkspaceColorId
     var items: [Node]
-    var pinnedLinks: [Link]
-    var browserProfiles: [String: String]
-
-    static let maxPinnedLinks = ThemeConstants.Sizing.pinnedTileColumns * ThemeConstants.Sizing.pinnedTileMaxRows
-
-    init(id: UUID, name: String, colorId: WorkspaceColorId, items: [Node], pinnedLinks: [Link] = [], browserProfiles: [String: String] = [:]) {
-        self.id = id
-        self.name = name
-        self.colorId = colorId
-        self.items = items
-        self.pinnedLinks = pinnedLinks
-        self.browserProfiles = browserProfiles
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        colorId = try container.decode(WorkspaceColorId.self, forKey: .colorId)
-        items = try container.decode([Node].self, forKey: .items)
-        pinnedLinks = try container.decodeIfPresent([Link].self, forKey: .pinnedLinks) ?? []
-
-        // Support new format (browserProfiles dictionary) and migrate old format
-        if let profiles = try container.decodeIfPresent([String: String].self, forKey: .browserProfiles) {
-            browserProfiles = profiles
-        } else if let profile = try container.decodeIfPresent(String.self, forKey: .browserProfile),
-                  let bundleId = try container.decodeIfPresent(String.self, forKey: .browserProfileBundleId) {
-            browserProfiles = [bundleId: profile]
-        } else {
-            browserProfiles = [:]
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, name, colorId, items, pinnedLinks, browserProfiles
-        // Legacy keys for backward compatibility decoding
-        case browserProfile, browserProfileBundleId
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encode(colorId, forKey: .colorId)
-        try container.encode(items, forKey: .items)
-        try container.encode(pinnedLinks, forKey: .pinnedLinks)
-        try container.encode(browserProfiles, forKey: .browserProfiles)
-    }
+    var profileId: UUID
 }
 
 enum CustomIcon: Codable, Equatable, Sendable {
@@ -130,6 +166,8 @@ struct Link: Codable, Identifiable, Equatable, Sendable {
     var faviconPath: String?
     var customIcon: CustomIcon?
     var scheduledOpenAt: Date?
+    /// Per-link browser override ("Always open in ▸"); `nil` follows the space's profile.
+    var browserBundleId: String?
 }
 
 struct Folder: Codable, Identifiable, Equatable, Sendable {

@@ -267,6 +267,7 @@ extension WorkspaceManagementView: NSCollectionViewDataSource {
         item.configure(
             workspace: workspace,
             canDelete: canDelete,
+            hasBrowserProfile: false,
             onDelete: { [weak self] id in
                 self?.handleWorkspaceDelete(id: id)
             },

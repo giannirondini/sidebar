@@ -425,7 +425,7 @@ final class MainViewController: NSViewController {
         } else {
             showWorkspaceContent()
             applyWorkspaceStyling()
-            pinnedTabsView.update(pinnedLinks: model.currentWorkspace.pinnedLinks)
+            pinnedTabsView.update(pinnedLinks: model.currentProfile.favorites)
             if searchCoordinator.isSearchActive {
                 scheduledLinksAccordion.isHidden = true
             } else {
@@ -527,7 +527,7 @@ final class MainViewController: NSViewController {
     private func showWorkspaceContent() {
         // Show workspace content
         searchField.isHidden = false
-        pinnedTabsView.isHidden = model.currentWorkspace.pinnedLinks.isEmpty
+        pinnedTabsView.isHidden = model.currentProfile.favorites.isEmpty
         pasteButton.isHidden = false
         nodeListViewController.view.isHidden = false
 
@@ -805,7 +805,7 @@ final class MainViewController: NSViewController {
         guard let url = URL(string: link.url) else { return }
         let profile: String? = {
             guard let bundleId = BrowserManager.resolveDefaultBrowserBundleId() else { return nil }
-            return model.currentWorkspace.browserProfiles[bundleId]
+            return model.currentProfile.browserProfiles[bundleId]
         }()
         BrowserManager.open(url: url, profile: profile)
     }
@@ -1283,7 +1283,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
         // Switch to the adjacent workspace and update views without animation
         model.selectWorkspace(id: nextWorkspace.id)
-        pinnedTabsView.update(pinnedLinks: nextWorkspace.pinnedLinks)
+        pinnedTabsView.update(pinnedLinks: model.profile(for: nextWorkspace).favorites)
         scheduledLinksAccordion.update(entries: model.scheduledLinks(in: nextWorkspace.id))
         let filteredNodes = searchCoordinator.filter(nodes: ScheduledLinkFiltering.hideScheduled(nextWorkspace.items))
         nodeListViewController.reloadData(with: filteredNodes, forceExpand: false, animated: false)
@@ -1303,7 +1303,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         // Restore original workspace and content without animation
         model.selectWorkspace(id: currentId)
         let currentWorkspace = model.currentWorkspace
-        pinnedTabsView.update(pinnedLinks: currentWorkspace.pinnedLinks)
+        pinnedTabsView.update(pinnedLinks: model.currentProfile.favorites)
         scheduledLinksAccordion.update(entries: model.scheduledLinks(in: currentWorkspace.id))
         let currentNodes = searchCoordinator.filter(nodes: ScheduledLinkFiltering.hideScheduled(currentWorkspace.items))
         nodeListViewController.reloadData(with: currentNodes, forceExpand: searchCoordinator.isSearchActive, animated: false)

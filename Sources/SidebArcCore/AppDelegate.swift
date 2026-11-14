@@ -80,7 +80,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             guard let model else { return }
             if let url = URL(string: ref.url) {
                 let profile = model.state.workspaces
-                    .first(where: { $0.id == ref.workspaceId })?
+                    .first(where: { $0.id == ref.workspaceId })
+                    .map { model.profile(for: $0) }?
                     .browserProfiles[BrowserManager.resolveDefaultBrowserBundleId() ?? ""]
                 BrowserManager.open(url: url, profile: profile)
             }
