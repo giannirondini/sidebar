@@ -82,10 +82,12 @@ struct ChromiumTabLocator: TabLocator {
         let tabSpec = AE.item(tab.tabIndex, of: "CrTb", in: window)
         let current = try AE.get(AE.property("URL ", of: tabSpec), pid: pid, timeout: timeout).stringValue
         guard current == tab.url else { return false }
-        // Restore a minimised window (harmless when it isn't).
-        try? AE.set(AE.property("pmnd", of: window), to: NSAppleEventDescriptor(boolean: false), pid: pid, timeout: timeout)
-        try AE.set(AE.property("acTI", of: window), to: NSAppleEventDescriptor(int32: Int32(tab.tabIndex)), pid: pid, timeout: timeout)
-        try AE.set(AE.property("pidx", of: window), to: NSAppleEventDescriptor(int32: 1), pid: pid, timeout: timeout)
+        try AE.focus(
+            window: window,
+            select: (AE.property("acTI", of: window), NSAppleEventDescriptor(int32: Int32(tab.tabIndex))),
+            pid: pid,
+            timeout: timeout
+        )
         return true
     }
 }
@@ -104,9 +106,7 @@ struct SafariTabLocator: TabLocator {
         let tabSpec = AE.item(tab.tabIndex, of: "bTab", in: window)
         let current = try AE.get(AE.property("pURL", of: tabSpec), pid: pid, timeout: timeout).stringValue
         guard current == tab.url else { return false }
-        try? AE.set(AE.property("pmnd", of: window), to: NSAppleEventDescriptor(boolean: false), pid: pid, timeout: timeout)
-        try AE.set(AE.property("cTab", of: window), to: tabSpec, pid: pid, timeout: timeout)
-        try AE.set(AE.property("pidx", of: window), to: NSAppleEventDescriptor(int32: 1), pid: pid, timeout: timeout)
+        try AE.focus(window: window, select: (AE.property("cTab", of: window), tabSpec), pid: pid, timeout: timeout)
         return true
     }
 }
@@ -180,6 +180,38 @@ enum AE {
         let id = try get(property("ID  ", of: item(index, of: window)), pid: pid, timeout: timeout)
         guard id.descriptorType != typeNull else { throw TabLocatorError.unexpectedReply }
         return byId(id, of: window)
+    }
+
+    /// After the URL check: selects the tab, restores the window if it's
+    /// minimised, then raises it. The tab is selected first because restoring
+    /// animates the window, and the browser doesn't answer events until that's
+    /// done. A timeout on these sets counts as delivered (`deliveredOnTimeout`):
+    /// the browser still runs them, so failing would open a duplicate tab.
+    static func focus(
+        window: NSAppleEventDescriptor,
+        select: (property: NSAppleEventDescriptor, value: NSAppleEventDescriptor),
+        pid: pid_t,
+        timeout: TimeInterval
+    ) throws {
+        let selectTab = { try deliveredOnTimeout { try set(select.property, to: select.value, pid: pid, timeout: timeout) } }
+        // A browser may refuse to select a tab in a minimised window: retried after restoring.
+        let selected = (try? selectTab()) != nil
+        let minimized = property("pmnd", of: window)
+        if (try? get(minimized, pid: pid, timeout: timeout))?.booleanValue == true {
+            try? deliveredOnTimeout { try set(minimized, to: NSAppleEventDescriptor(boolean: false), pid: pid, timeout: timeout) }
+        }
+        if !selected { try selectTab() }
+        try deliveredOnTimeout { try set(property("pidx", of: window), to: NSAppleEventDescriptor(int32: 1), pid: pid, timeout: timeout) }
+    }
+
+    /// Runs `body`, treating an Apple Event timeout (-1712) as success: the event
+    /// reached the browser, which only answered late. Other errors are thrown.
+    static func deliveredOnTimeout(_ body: () throws -> Void) throws {
+        do {
+            try body()
+        } catch TabLocatorError.appleEvent(let code) where code == Int(errAETimeout) {
+            return
+        }
     }
 
     static func property(_ property: String, of container: NSAppleEventDescriptor) -> NSAppleEventDescriptor {

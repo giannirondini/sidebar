@@ -226,6 +226,18 @@ import Testing
         }
     }
 
+    /// A late reply after the URL check means the browser still runs the set:
+    /// failing would open a duplicate tab (restoring a minimised window, B3).
+    @Test func focusStepsTreatOnlyATimeoutAsDelivered() throws {
+        try AE.deliveredOnTimeout { throw TabLocatorError.appleEvent(-1712) }
+        #expect(throws: TabLocatorError.appleEvent(-1743)) {
+            try AE.deliveredOnTimeout { throw TabLocatorError.appleEvent(-1743) }
+        }
+        #expect(throws: TabLocatorError.unexpectedReply) {
+            try AE.deliveredOnTimeout { throw TabLocatorError.unexpectedReply }
+        }
+    }
+
     @Test func parsesNestedURLLists() throws {
         func list(_ items: [NSAppleEventDescriptor]) -> NSAppleEventDescriptor {
             let list = NSAppleEventDescriptor.list()
