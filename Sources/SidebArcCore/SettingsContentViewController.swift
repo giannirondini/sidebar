@@ -1393,6 +1393,15 @@ extension SettingsContentViewController: NSCollectionViewDataSource {
         return appModel?.workspaces.count ?? 0
     }
 
+    /// Tooltip for a space's profile name: where its links open.
+    static func profileDetail(_ profile: Profile) -> String {
+        let target = BrowserManager.resolveTarget(link: nil, profile: profile)
+        let browser = target.bundleId.flatMap(BrowserManager.appName(bundleId:)) ?? "the default browser"
+        let opens = profile.browserBundleId == nil ? "the default browser (\(browser))" : browser
+        guard let dir = target.profileDir, !dir.isEmpty else { return "Profile \(profile.name): opens in \(opens)" }
+        return "Profile \(profile.name): opens in \(opens), browser profile \(dir)"
+    }
+
     func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         guard let appModel = appModel else {
             return NSCollectionViewItem()
@@ -1405,12 +1414,15 @@ extension SettingsContentViewController: NSCollectionViewDataSource {
 
         let workspace = appModel.workspaces[indexPath.item]
         let canDelete = appModel.workspaces.count > 1
-        let hasBrowserProfile = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).profileDir != nil
+        // Every space belongs to a profile; the name only tells spaces apart when there are several.
+        let profile = appModel.profile(for: workspace)
+        let showsProfile = appModel.profiles.count > 1
 
         item.configure(
             workspace: workspace,
             canDelete: canDelete,
-            hasBrowserProfile: hasBrowserProfile,
+            profileName: showsProfile ? profile.name : nil,
+            profileDetail: showsProfile ? Self.profileDetail(profile) : nil,
             onDelete: { [weak self] id in
                 self?.handleWorkspaceDelete(id: id)
             },

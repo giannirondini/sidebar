@@ -20,7 +20,7 @@ final class WorkspaceCollectionViewItem: NSCollectionViewItem {
         }
     }
 
-    func configure(workspace: Workspace, canDelete: Bool, hasBrowserProfile: Bool, onDelete: @escaping (UUID) -> Void, onRenameCommit: @escaping (UUID, String) -> Void, onProfile: @escaping (UUID) -> Void) {
+    func configure(workspace: Workspace, canDelete: Bool, profileName: String?, profileDetail: String?, onDelete: @escaping (UUID) -> Void, onRenameCommit: @escaping (UUID, String) -> Void, onProfile: @escaping (UUID) -> Void) {
         self.workspace = workspace
         self.onDelete = onDelete
         self.onRenameCommit = onRenameCommit
@@ -31,7 +31,8 @@ final class WorkspaceCollectionViewItem: NSCollectionViewItem {
             workspaceColor: workspace.colorId.color,
             showDelete: true,
             canDelete: canDelete,
-            hasProfile: hasBrowserProfile,
+            profileName: profileName,
+            profileDetail: profileDetail,
             onDelete: { [weak self] in
                 guard let self, let workspace = self.workspace else { return }
                 self.onDelete?(workspace.id)
