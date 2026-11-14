@@ -91,4 +91,4 @@ Use a favorite and change the open tab's URL.
 
 | Date | macOS | Browser + version | Build | Failed items / notes |
 |---|---|---|---|---|
-| | | | | |
+| 2026-11-14 | 27.2.1 | Chrome 157.0.8103.79, Brave 157.1.99.57, Safari 27.2 | `2b6b243` (ad-hoc) | All of A–F pass. Before `74fb21a`, B3 opened a duplicate (timeout during the restore animation) |
