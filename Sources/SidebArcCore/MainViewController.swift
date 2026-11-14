@@ -732,7 +732,8 @@ final class MainViewController: NSViewController {
 
     private func openNote(_ note: Note) {
         guard let url = noteServer?.editorURL(noteId: note.id) else { return }
-        BrowserManager.openInGlobalDefault(url: url)
+        // Notes open like the space's links: its profile's browser and browser profile.
+        BrowserManager.open(url: url, target: BrowserManager.resolveTarget(link: nil, profile: model.currentProfile))
     }
 
     @objc func paste(_ sender: Any?) {

@@ -130,7 +130,7 @@ The original bytes are copied to `Backups/pre-v2-migration-<timestamp>.json` (ou
 
 ## Profiles and browser routing
 
-A link opens in: **link override → profile's browser → global default**, skipping any browser that isn't installed (`BrowserManager.resolveTarget`). The browser profile directory comes from the profile's `browserProfiles` for that browser, unless a link override points at a different browser. Favorites belong to the profile, so every space in it shows the same grid; unpinning moves a favorite into the current space. Deleting a profile moves its spaces and favorites to the first remaining profile (leftovers go to a folder). Window attachment and the note editor use the global default browser.
+A link opens in: **link override → profile's browser → global default**, skipping any browser that isn't installed (`BrowserManager.resolveTarget`). The browser profile directory comes from the profile's `browserProfiles` for that browser, unless a link override points at a different browser. Favorites belong to the profile, so every space in it shows the same grid; unpinning moves a favorite into the current space. Deleting a profile moves its spaces and favorites to the first remaining profile (leftovers go to a folder). Notes open in the space's profile browser too; window attachment uses the global default browser.
 
 ## Key Design Decisions
 

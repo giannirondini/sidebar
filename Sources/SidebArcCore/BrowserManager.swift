@@ -52,17 +52,12 @@ enum BrowserManager {
         return BrowserTarget(bundleId: browser, profileDir: profile.browserProfiles[profileBrowser])
     }
 
-    /// Opens `link` where `resolveTarget` says.
+    /// Opens `link` where `resolveTarget` says. Notes use `resolveTarget(link: nil, profile:)`.
     static func open(link: Link, in profile: Profile) {
         guard let url = URL(string: link.url) else { return }
         open(url: url, target: resolveTarget(link: link, profile: profile))
     }
 
-    /// Opens `url` in the global default browser, without a browser profile
-    /// (used for app-internal pages such as the note editor).
-    static func openInGlobalDefault(url: URL) {
-        open(url: url, target: BrowserTarget(bundleId: resolveDefaultBrowserBundleId(), profileDir: nil))
-    }
     static func installedBrowsers() -> [BrowserInfo] {
         guard let probeURL = URL(string: "http://example.com") else { return [] }
         let urls = NSWorkspace.shared.urlsForApplications(toOpen: probeURL)
