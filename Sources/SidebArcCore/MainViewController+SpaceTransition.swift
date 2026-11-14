@@ -28,10 +28,13 @@ final class SpaceTransition {
     /// Current horizontal offset of the content (points).
     var offset: CGFloat = 0
     var phase: Phase = .tracking
+    /// System "Reduce motion": nothing slides; a switch crossfades instead.
+    let reducesMotion: Bool
 
     init(fromWorkspace: Workspace, fromIndex: Int) {
         self.fromWorkspace = fromWorkspace
         self.fromIndex = fromIndex
+        reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 }
 
@@ -118,6 +121,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
             prepareTarget(of: transition, target: target, side: side)
         }
 
+        // Reduce Motion: the page doesn't follow the finger; the release decides.
+        guard !transition.reducesMotion else { return }
         let offset = target == nil
             ? SpaceSwipe.rubberBand(translation, dimension: width)
             : max(-width, min(width, translation))
@@ -197,6 +202,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
     /// (`commits`) or back. All animations start in one transaction, so they stay in step.
     private func settle(_ transition: SpaceTransition, commits: Bool, releaseVelocity: CGFloat) {
         transition.phase = .settling(commits: commits)
+        if transition.reducesMotion {
+            return crossfade(transition, commits: commits)
+        }
         let width = swipeClipContainer.bounds.width
         let start = transition.offset
         let end = commits ? transition.side * width : 0
@@ -253,6 +261,47 @@ extension MainViewController: SwipeGestureServiceDelegate {
         }
         CATransaction.commit()
         transition.offset = end
+    }
+
+    /// Reduce Motion: the target's page fades in over the current one in place;
+    /// the colour (and another profile's Favorites) fade with it; the pill jumps on landing.
+    private func crossfade(_ transition: SpaceTransition, commits: Bool) {
+        guard commits, let preview = transition.previewView, let target = transition.target?.workspace else {
+            return finish(transition)
+        }
+        func fade(_ keyPath: String, from: Any, to: Any) -> CABasicAnimation {
+            let animation = CABasicAnimation(keyPath: keyPath)
+            animation.fromValue = from
+            animation.toValue = to
+            animation.duration = ThemeConstants.Animation.durationNormal
+            animation.timingFunction = ThemeConstants.Animation.timingFunction
+            return animation
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak self, weak transition] in
+            guard let self, let transition, self.spaceTransition === transition else { return }
+            self.finish(transition)
+        }
+        // Over the content, in place.
+        preview.removeFromSuperview()
+        preview.frame.origin = .zero
+        swipeClipContainer.addSubview(preview, positioned: .above, relativeTo: workspaceContentStack)
+        preview.layer?.transform = CATransform3DIdentity
+        preview.layer?.opacity = 1
+        preview.layer?.add(fade("opacity", from: 0, to: 1), forKey: Self.transitionAnimationKey)
+
+        let startColor = transition.fromWorkspace.colorId.backgroundColor
+        let endColor = target.colorId.backgroundColor
+        view.layer?.backgroundColor = endColor.cgColor
+        view.layer?.add(fade("backgroundColor", from: startColor.cgColor, to: endColor.cgColor), forKey: Self.transitionAnimationKey)
+
+        if changesFavorites(transition), let favoritesLayer = pinnedTabsView.layer {
+            favoritesLayer.opacity = 0
+            favoritesLayer.add(fade("opacity", from: 1, to: 0), forKey: Self.transitionAnimationKey)
+        }
+        CATransaction.commit()
     }
 
     /// Lands the current transition immediately (a new click or gesture arrived):
