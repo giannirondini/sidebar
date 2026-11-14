@@ -14,7 +14,7 @@ final class PinnedTabsView: NSView {
     /// Columns that fit `width` with tiles at least `pinnedTileMinWidth` wide,
     /// never fewer than `pinnedTileMinColumns`.
     static func columnCount(forWidth width: CGFloat) -> Int {
-        let gap = ThemeConstants.Spacing.tiny
+        let gap = ThemeConstants.Sizing.pinnedTileSpacing
         let fitting = Int(((width + gap) / (ThemeConstants.Sizing.pinnedTileMinWidth + gap)).rounded(.down))
         return max(ThemeConstants.Sizing.pinnedTileMinColumns, fitting)
     }
@@ -75,7 +75,7 @@ final class PinnedTabsView: NSView {
         let count = tileViews.count
         guard count > 0 else { return }
 
-        let gap = ThemeConstants.Spacing.tiny
+        let gap = ThemeConstants.Sizing.pinnedTileSpacing
         let tileHeight = ThemeConstants.Sizing.pinnedTileHeight
         let totalWidth = bounds.width
         let columns = Self.columnCount(forWidth: totalWidth)
@@ -108,7 +108,7 @@ final class PinnedTabsView: NSView {
         guard count > 0 else { return NSSize(width: NSView.noIntrinsicMetric, height: 0) }
 
         let tileHeight = ThemeConstants.Sizing.pinnedTileHeight
-        let gap = ThemeConstants.Spacing.tiny
+        let gap = ThemeConstants.Sizing.pinnedTileSpacing
         let rows = Self.rowCount(tiles: count, columns: layoutColumns)
         let height = CGFloat(rows) * tileHeight + CGFloat(rows - 1) * gap
 

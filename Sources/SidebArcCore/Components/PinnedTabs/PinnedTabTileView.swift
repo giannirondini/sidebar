@@ -25,7 +25,7 @@ final class PinnedTabTileView: BaseControl {
     }
 
     private func setupView() {
-        layer?.cornerRadius = ThemeConstants.CornerRadius.medium
+        layer?.cornerRadius = ThemeConstants.CornerRadius.large
         layer?.backgroundColor = ThemeConstants.Colors.darkGray
             .withAlphaComponent(ThemeConstants.Opacity.extraSubtle).cgColor
 
@@ -41,8 +41,9 @@ final class PinnedTabTileView: BaseControl {
         let iconSize = ThemeConstants.Sizing.iconLarge
         let badgeSize = ThemeConstants.Sizing.iconSmall
         NSLayoutConstraint.activate([
-            browserBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: ThemeConstants.Spacing.tiny),
-            browserBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ThemeConstants.Spacing.tiny),
+            // Clear of the rounded corner.
+            browserBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: ThemeConstants.Spacing.small),
+            browserBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ThemeConstants.Spacing.small),
             browserBadgeView.widthAnchor.constraint(equalToConstant: badgeSize),
             browserBadgeView.heightAnchor.constraint(equalToConstant: badgeSize),
 

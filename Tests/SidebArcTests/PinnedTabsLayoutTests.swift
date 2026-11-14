@@ -9,8 +9,10 @@ import Testing
     @Test func columnsAtSidebarWidths() {
         #expect(PinnedTabsView.columnCount(forWidth: 260) == 3)  // minimum window, 280
         #expect(PinnedTabsView.columnCount(forWidth: 320) == 3)  // default window, 340
-        #expect(PinnedTabsView.columnCount(forWidth: 395) == 3)
-        #expect(PinnedTabsView.columnCount(forWidth: 396) == 4)  // window ≈ 416
+        #expect(PinnedTabsView.columnCount(forWidth: 391) == 3)
+        #expect(PinnedTabsView.columnCount(forWidth: 392) == 4)  // window ≈ 412
+        #expect(PinnedTabsView.columnCount(forWidth: 491) == 4)
+        #expect(PinnedTabsView.columnCount(forWidth: 492) == 5)  // window ≈ 512
         #expect(PinnedTabsView.columnCount(forWidth: 500) == 5)  // maximum window, 520
         #expect(PinnedTabsView.columnCount(forWidth: 0) == 3)    // before the first layout
     }

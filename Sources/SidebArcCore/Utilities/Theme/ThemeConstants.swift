@@ -251,8 +251,11 @@ struct ThemeConstants {
         static let scrollShadowWidth: CGFloat = 32
 
         /// Narrowest a Favorites tile may get before the grid drops a column
-        /// (3 columns at the default 340-pt sidebar, 4 from about 416 pt, 5 near 520)
-        static let pinnedTileMinWidth: CGFloat = 96
+        /// (3 columns at the default 340-pt sidebar, 4 from about 412 pt, 5 from about 512)
+        static let pinnedTileMinWidth: CGFloat = 92
+
+        /// Gap between Favorites tiles, across and down (as in Arc's grid)
+        static let pinnedTileSpacing: CGFloat = Spacing.medium
 
         /// The Favorites grid never has fewer columns than this (Arc's 3-wide grid)
         static let pinnedTileMinColumns: Int = 3
