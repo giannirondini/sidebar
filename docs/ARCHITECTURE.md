@@ -122,7 +122,7 @@ Node                          // Recursive tree structure
 - **MainViewController** (596 lines) - Coordinator between search, list, and settings
 - **NodeListViewController** (~800 lines) - Collection view, drag-drop, context menus
 - **SearchCoordinator** (~65 lines) - Search/filtering logic
-- **WorkspaceManagementView** (~380 lines) - Settings workspace management
+- **SettingsContentViewController** - Settings page (workspace list, default browser, profiles, permissions, import). The extracted `WorkspaceManagementView` was never wired in and was removed on 2026-11-14
 
 ## Component Patterns
 

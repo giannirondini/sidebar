@@ -113,7 +113,7 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 - **MainViewController** - Collection view-based hierarchical list with animations (reduced from 1352 to 596 lines through Phase 3 refactoring)
 - **NodeListViewController** - Manages collection view, drag-drop, context menus (extracted from MainViewController)
 - **SearchCoordinator** - Handles search/filtering logic (extracted from MainViewController)
-- **WorkspaceManagementView** - Manages workspace list in settings
+- **SettingsContentViewController** - Settings page: workspace list, default browser, profiles (`ProfileSettingsView`), permissions, import
 - **NodeCollectionViewItem** - Reusable cell with icon, title, hover states, delete button
 - **SearchBarView** - Search field that filters nodes
 - **IconTitleButton** - Custom button for paste action
@@ -263,7 +263,7 @@ The codebase underwent a comprehensive refactoring (2026-02-10) to eliminate cod
 - Extracted `NodeListViewController` from `MainViewController` (~800 lines)
 - Extracted `SearchCoordinator` from `MainViewController` (~65 lines)
 - Reduced `MainViewController` from 1352 to 596 lines (56% reduction)
-- Created `WorkspaceManagementView` for settings (~380 lines)
+- Created `WorkspaceManagementView` for settings (~380 lines); never wired in, removed on 2026-11-14 (Settings uses `SettingsContentViewController`)
 
 **Phase 4 - Remaining Components (✅ Complete)**:
 - Migrated `SearchBarView`, `WorkspaceSwitcherView`, `SidebarPositionSelector` to use ThemeConstants
