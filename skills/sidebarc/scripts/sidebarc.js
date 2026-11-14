@@ -169,6 +169,17 @@ const COMMANDS = {
   'workspaces:create': cmdWorkspacesCreate,
   'workspaces:rename': cmdWorkspacesRename,
   'workspaces:set-color': cmdWorkspacesSetColor,
+  'workspaces:set-profile': cmdWorkspacesSetProfile,
+
+  'profiles:list': cmdProfilesList,
+  'profiles:create': cmdProfilesCreate,
+  'profiles:rename': cmdProfilesRename,
+  'profiles:set-browser': cmdProfilesSetBrowser,
+
+  'favorites:add': cmdFavoritesAdd,
+  'favorites:move': cmdFavoritesMove,
+  'favorites:unpin': cmdFavoritesUnpin,
+  'favorites:delete': cmdFavoritesDelete,
 
   'folders:create': cmdFoldersCreate,
   'folders:rename': cmdFoldersRename,
@@ -177,6 +188,7 @@ const COMMANDS = {
   'links:create': cmdLinksCreate,
   'links:rename': cmdLinksRename,
   'links:set-url': cmdLinksSetUrl,
+  'links:set-browser': cmdLinksSetBrowser,
   'links:delete': cmdNodesDelete,
 
   'notes:create': cmdNotesCreate,
@@ -220,6 +232,8 @@ async function cmdWorkspacesCreate(args) {
   const body = { name };
   const color = getFlag(args.flags, 'color');
   if (color !== undefined && color !== true) body.colorId = color;
+  const profile = getFlag(args.flags, 'profile');
+  if (profile !== undefined && profile !== true) body.profile_id = profile;
   const out = await request('POST', '/api/workspaces', body);
   printJSON({ id: out.id });
 }
@@ -237,6 +251,87 @@ async function cmdWorkspacesSetColor(args) {
   if (!id) fail('missing_arg', 'Usage: workspaces:set-color ID --color NAME');
   const color = requireFlag(args.flags, 'color');
   await request('PATCH', `/api/workspaces/${id}`, { colorId: color });
+  printJSON({ ok: true });
+}
+
+async function cmdWorkspacesSetProfile(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: workspaces:set-profile ID --profile PROFILE_ID');
+  const profile = requireFlag(args.flags, 'profile');
+  await request('PATCH', `/api/workspaces/${id}`, { profile_id: profile });
+  printJSON({ ok: true });
+}
+
+// "default" (or "none") clears a browser choice so it inherits the next level.
+function browserValue(flags) {
+  const browser = requireFlag(flags, 'browser');
+  return ['default', 'none'].includes(String(browser).toLowerCase()) ? null : browser;
+}
+
+async function cmdProfilesList() {
+  const out = await request('GET', '/api/profiles');
+  printJSON(out.profiles || []);
+}
+
+async function cmdProfilesCreate(args) {
+  const name = requireFlag(args.flags, 'name');
+  const out = await request('POST', '/api/profiles', { name });
+  printJSON({ id: out.id });
+}
+
+async function cmdProfilesRename(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: profiles:rename ID --name "Y"');
+  const name = requireFlag(args.flags, 'name');
+  await request('PATCH', `/api/profiles/${id}`, { name });
+  printJSON({ ok: true });
+}
+
+async function cmdProfilesSetBrowser(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: profiles:set-browser ID --browser BUNDLE_ID|default');
+  await request('PATCH', `/api/profiles/${id}`, { browser_bundle_id: browserValue(args.flags) });
+  printJSON({ ok: true });
+}
+
+async function cmdFavoritesAdd(args) {
+  const profile = requireFlag(args.flags, 'profile');
+  const url = requireFlag(args.flags, 'url');
+  const body = { url };
+  const title = getFlag(args.flags, 'title');
+  if (title !== undefined && title !== true) body.title = title;
+  const out = await request('POST', `/api/profiles/${profile}/favorites`, body);
+  printJSON({ id: out.id });
+}
+
+async function cmdFavoritesMove(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: favorites:move ID --index N');
+  const n = parseInt(requireFlag(args.flags, 'index'), 10);
+  if (Number.isNaN(n)) fail('bad_index', '--index must be an integer');
+  await request('POST', `/api/favorites/${id}/move`, { index: n });
+  printJSON({ ok: true });
+}
+
+async function cmdFavoritesUnpin(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: favorites:unpin ID --workspace WS_ID');
+  const workspace = requireFlag(args.flags, 'workspace');
+  await request('POST', `/api/favorites/${id}/unpin`, { workspace_id: workspace });
+  printJSON({ ok: true });
+}
+
+async function cmdFavoritesDelete(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: favorites:delete ID');
+  await request('DELETE', `/api/favorites/${id}`);
+  printJSON({ ok: true });
+}
+
+async function cmdLinksSetBrowser(args) {
+  const id = args.positional[0];
+  if (!id) fail('missing_arg', 'Usage: links:set-browser ID --browser BUNDLE_ID|default');
+  await request('PATCH', `/api/links/${id}`, { browser_bundle_id: browserValue(args.flags) });
   printJSON({ ok: true });
 }
 
@@ -395,9 +490,22 @@ State:
 Workspaces (cannot be deleted by the agent):
   workspaces:list
   workspaces:current                   Workspace currently visible in the app.
-  workspaces:create        --name "X" [--color NAME]
+  workspaces:create        --name "X" [--color NAME] [--profile ID]
   workspaces:rename ID     --name "Y"
   workspaces:set-color ID  --color NAME
+  workspaces:set-profile ID --profile PROFILE_ID
+
+Profiles (cannot be deleted by the agent):
+  profiles:list                        Profiles with their spaces and favorites.
+  profiles:create          --name "X"
+  profiles:rename ID       --name "Y"
+  profiles:set-browser ID  --browser BUNDLE_ID|default
+
+Favorites (the tile grid, shared by a profile's spaces; max 12):
+  favorites:add    --profile ID --url URL [--title T]
+  favorites:move   ID  --index N
+  favorites:unpin  ID  --workspace WS_ID   Moves it into that workspace's list.
+  favorites:delete ID
 
 Folders:
   folders:create   --workspace ID [--parent ID|root] --name "X" [--expanded true|false]
@@ -408,6 +516,7 @@ Links:
   links:create     --workspace ID [--parent ID|root] --url URL [--title T]
   links:rename     ID  --title "Y"
   links:set-url    ID  --url URL
+  links:set-browser ID --browser BUNDLE_ID|default
   links:delete     ID
 
 Notes:

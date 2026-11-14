@@ -1,10 +1,10 @@
 ---
 name: sidebarc
 description: >
-  Organize bookmarks, bookmark folders, and markdown notes in the SidebArc
-  macOS app. Use this skill when the user asks to save a link, organize or
-  move bookmarks between SidebArc workspaces, take notes in SidebArc, or
-  otherwise tidy their SidebArc sidebar. Not for creating files or folders
+  Organize bookmarks, bookmark folders, favorites, and markdown notes in the
+  SidebArc macOS app. Use this skill when the user asks to save a link, pin a
+  favorite, organize or move bookmarks between SidebArc workspaces or profiles,
+  take notes in SidebArc, or otherwise tidy their SidebArc sidebar. Not for creating files or folders
   on disk or in a code project.
 last-updated: 2026-11-14
 allowed-tools: Bash(./scripts/sidebarc.js:*)
@@ -38,6 +38,17 @@ file editing.
   stored as a `.md` file and read/written with `notes:read` and `notes:write`.
 - **Node** — any of folder, link, or note. Generic operations like
   `nodes:move` work on all three.
+- **Profile** — a group of workspaces that share a browser setup and the
+  Favorites grid (like an Arc profile, e.g. "Personal", "Work"). Every
+  workspace belongs to exactly one profile (`profileId`). A profile can name a
+  browser (`browserBundleId`, e.g. `org.mozilla.firefox`); `null` means the
+  app's default browser. The agent can create, rename, and set the browser of
+  profiles, and move workspaces between them, but **cannot delete profiles**.
+- **Favorite** — a link in a profile's Favorites tile grid, shown at the top
+  of every workspace in that profile (at most 12). Favorites are not nodes:
+  use the `favorites:*` commands, not `nodes:*`.
+- **Browser override** — a link can always open in a specific browser
+  (`links:set-browser`), regardless of its workspace's profile.
 
 ## Common Actions
 
@@ -53,6 +64,10 @@ file editing.
 | "Write up this meeting in a note" | `notes:create ... --content -` then pipe markdown to stdin |
 | "What's in my Reading workspace?" | `tree WS_ID` |
 | "Make a new workspace called Research" | `workspaces:create --name "Research"` |
+| "Pin this to my favorites" | `workspaces:current` → its `profileId`, then `favorites:add --profile PROFILE_ID --url URL` |
+| "Put my Work spaces in a Work profile that opens in Firefox" | `profiles:create --name "Work"`, `profiles:set-browser ID --browser org.mozilla.firefox`, then `workspaces:set-profile` per space |
+| "Always open this link in Safari" | `links:set-browser LINK_ID --browser com.apple.Safari` |
+| "What are my favorites?" | `profiles:list` |
 | "Delete this bookmark" | `nodes:delete NODE_ID` (or `links:delete`) |
 
 ## Workflow
@@ -71,8 +86,9 @@ file editing.
    command is a single API call; the running app updates the sidebar
    immediately.
 4. **Confirm before destructive bulk work.** Before deleting multiple
-   nodes — especially folders containing many children — confirm with the
-   user. Deletes are not undoable from the CLI.
+   nodes — especially folders containing many children — or favorites,
+   confirm with the user. Deletes are not undoable from the CLI. To take a
+   favorite off the grid without losing it, prefer `favorites:unpin`.
 
 ## Writing note bodies
 
@@ -114,15 +130,23 @@ Combinations:
 
 ## Rules and limits
 
-- **Never delete a workspace.** There is no command for it; do not try.
-  If the user explicitly asks, explain that workspaces must be removed
-  manually from the app.
+- **Never delete a workspace or a profile.** There is no command for
+  either; do not try. If the user explicitly asks, explain that they must be
+  removed manually from the app (deleting a profile moves its workspaces and
+  favorites to another profile).
+- A profile holds at most 12 favorites. `favorites:add` fails with
+  `favorites_full` when the grid is full, and with `duplicate_favorite` when
+  the URL is already a favorite (the error message carries its id).
+- Browsers are identified by bundle id (e.g. `com.google.Chrome`,
+  `org.mozilla.firefox`, `com.apple.Safari`). Pass `default` to clear a
+  profile's browser or a link's override.
 - Workspace **color names**: Blush, Apricot, Butter, Leaf, Mint, Sky,
   Periwinkle, Lavender. Case-insensitive; raw enum cases (ember, ruby,
   coral, tangerine, moss, ocean, indigo, graphite) also work.
 - Every command exits non-zero on failure and prints `{ error, code, ... }`
   to stderr. Inspect `code` — `app_not_running`, `workspace_not_found`,
-  `parent_not_folder`, `node_not_found` are the common ones.
+  `parent_not_folder`, `node_not_found`, `profile_not_found`,
+  `favorite_not_found` are the common ones.
 
 ## Commands Reference
 
@@ -130,11 +154,22 @@ Combinations:
 state                                  Dump the full AppState JSON.
 tree WORKSPACE_ID                      Dump one workspace's tree.
 
-workspaces:list
+workspaces:list                          Each entry includes its profileId.
 workspaces:current                       Workspace currently visible in the app.
-workspaces:create        --name "X" [--color NAME]
+workspaces:create        --name "X" [--color NAME] [--profile ID]
 workspaces:rename ID     --name "Y"
 workspaces:set-color ID  --color NAME
+workspaces:set-profile ID --profile PROFILE_ID
+
+profiles:list                            Profiles with workspaceIds and favorites.
+profiles:create          --name "X"
+profiles:rename ID       --name "Y"
+profiles:set-browser ID  --browser BUNDLE_ID|default
+
+favorites:add    --profile ID --url URL [--title T]
+favorites:move   ID  --index N
+favorites:unpin  ID  --workspace WS_ID   Moves it into that workspace's list.
+favorites:delete ID
 
 folders:create   --workspace ID [--parent ID|root] --name "X" [--expanded true|false]
 folders:rename   ID  --name "Y"
@@ -143,6 +178,7 @@ folders:delete   ID
 links:create     --workspace ID [--parent ID|root] --url URL [--title T]
 links:rename     ID  --title "Y"
 links:set-url    ID  --url URL
+links:set-browser ID --browser BUNDLE_ID|default
 links:delete     ID
 
 notes:create     --workspace ID [--parent ID|root] --title T [--content TEXT | --file PATH | --content -]

@@ -367,4 +367,151 @@ import Testing
         )
         #expect(status == 404)
     }
+
+    // MARK: - Profiles and favorites (agent API v2)
+
+    @Test func testWorkspacePayloadsIncludeProfileId() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let workspace = try #require(model.workspaces.first)
+        model.selectWorkspace(id: workspace.id)
+
+        let (_, listJson) = try await apiRequest("GET", "/api/workspaces", port: server.port)
+        let list = try #require(listJson["workspaces"] as? [[String: Any]])
+        #expect(list.first?["profileId"] as? String == workspace.profileId.uuidString)
+
+        let (_, currentJson) = try await apiRequest("GET", "/api/workspaces/current", port: server.port)
+        let current = try #require(currentJson["workspace"] as? [String: Any])
+        #expect(current["profileId"] as? String == workspace.profileId.uuidString)
+    }
+
+    @Test func testProfileCreatePatchListAndAssign() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+
+        let (createStatus, createJson) = try await apiRequest("POST", "/api/profiles", body: ["name": "Work"], port: server.port)
+        #expect(createStatus == 200)
+        let profileId = try #require((createJson["id"] as? String).flatMap { UUID(uuidString: $0) })
+
+        let (patchStatus, _) = try await apiRequest(
+            "PATCH", "/api/profiles/\(profileId.uuidString)",
+            body: ["name": "Job", "browser_bundle_id": "org.mozilla.firefox"],
+            port: server.port
+        )
+        #expect(patchStatus == 200)
+        #expect(model.profile(id: profileId)?.name == "Job")
+        #expect(model.profile(id: profileId)?.browserBundleId == "org.mozilla.firefox")
+
+        _ = try await apiRequest("PATCH", "/api/profiles/\(profileId.uuidString)", body: ["browser_bundle_id": NSNull()], port: server.port)
+        #expect(model.profile(id: profileId)?.browserBundleId == nil)
+
+        // Create a workspace directly in the profile, and move an existing one there.
+        let (_, wsJson) = try await apiRequest(
+            "POST", "/api/workspaces", body: ["name": "Office", "profile_id": profileId.uuidString], port: server.port
+        )
+        let officeId = try #require((wsJson["id"] as? String).flatMap { UUID(uuidString: $0) })
+        #expect(model.workspaces.first(where: { $0.id == officeId })?.profileId == profileId)
+
+        let inbox = try #require(model.workspaces.first(where: { $0.id != officeId }))
+        _ = try await apiRequest("PATCH", "/api/workspaces/\(inbox.id.uuidString)", body: ["profile_id": profileId.uuidString], port: server.port)
+        #expect(model.workspaces.first(where: { $0.id == inbox.id })?.profileId == profileId)
+
+        let (_, listJson) = try await apiRequest("GET", "/api/profiles", port: server.port)
+        let profiles = try #require(listJson["profiles"] as? [[String: Any]])
+        let job = try #require(profiles.first(where: { $0["id"] as? String == profileId.uuidString }))
+        #expect(Set(job["workspaceIds"] as? [String] ?? []) == [officeId.uuidString, inbox.id.uuidString])
+        #expect(job["browserBundleId"] is NSNull)
+    }
+
+    @Test func testUnknownProfileIsRejected() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let wsId = try #require(model.workspaces.first?.id).uuidString
+        let bogus = UUID().uuidString
+
+        let (patchStatus, patchJson) = try await apiRequest("PATCH", "/api/workspaces/\(wsId)", body: ["profile_id": bogus], port: server.port)
+        #expect(patchStatus == 404)
+        #expect(patchJson["code"] as? String == "profile_not_found")
+
+        let (createStatus, _) = try await apiRequest("POST", "/api/workspaces", body: ["name": "X", "profile_id": bogus], port: server.port)
+        #expect(createStatus == 404)
+        #expect(model.workspaces.count == 1)
+    }
+
+    @Test func testNoDeleteProfileRoute() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let profileId = model.currentProfile.id.uuidString
+        let (status, _) = try await apiRequest("DELETE", "/api/profiles/\(profileId)", port: server.port)
+        #expect(status == 404)
+        #expect(model.profiles.count == 1)
+    }
+
+    @Test func testFavoritesAddMoveUnpinDelete() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let profileId = model.currentProfile.id.uuidString
+        let wsId = model.currentWorkspace.id
+
+        var ids: [String] = []
+        for url in ["https://a.com", "https://b.com", "https://c.com"] {
+            let (status, json) = try await apiRequest("POST", "/api/profiles/\(profileId)/favorites", body: ["url": url], port: server.port)
+            #expect(status == 200)
+            ids.append(try #require(json["id"] as? String))
+        }
+        #expect(model.currentProfile.favorites.map(\.title) == ["a.com", "b.com", "c.com"])
+
+        let (dupStatus, dupJson) = try await apiRequest("POST", "/api/profiles/\(profileId)/favorites", body: ["url": "https://A.com/"], port: server.port)
+        #expect(dupStatus == 409)
+        #expect(dupJson["code"] as? String == "duplicate_favorite")
+
+        let (moveStatus, _) = try await apiRequest("POST", "/api/favorites/\(ids[2])/move", body: ["index": 0], port: server.port)
+        #expect(moveStatus == 200)
+        #expect(model.currentProfile.favorites.map(\.title) == ["c.com", "a.com", "b.com"])
+
+        let (unpinStatus, _) = try await apiRequest("POST", "/api/favorites/\(ids[0])/unpin", body: ["workspace_id": wsId.uuidString], port: server.port)
+        #expect(unpinStatus == 200)
+        #expect(model.currentProfile.favorites.map(\.title) == ["c.com", "b.com"])
+        #expect(model.currentWorkspace.items.map(\.id.uuidString) == [ids[0]])
+
+        let (deleteStatus, _) = try await apiRequest("DELETE", "/api/favorites/\(ids[1])", port: server.port)
+        #expect(deleteStatus == 200)
+        #expect(model.currentProfile.favorites.map(\.title) == ["c.com"])
+
+        let (missingStatus, missingJson) = try await apiRequest("DELETE", "/api/favorites/\(ids[1])", port: server.port)
+        #expect(missingStatus == 404)
+        #expect(missingJson["code"] as? String == "favorite_not_found")
+    }
+
+    @Test func testFavoritesFullReturnsConflict() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let profileId = model.currentProfile.id
+        for i in 0..<Profile.maxFavorites {
+            _ = model.addFavorite(profileId: profileId, urlString: "https://f\(i).com", title: "F\(i)")
+        }
+        let (status, json) = try await apiRequest("POST", "/api/profiles/\(profileId.uuidString)/favorites", body: ["url": "https://late.com"], port: server.port)
+        #expect(status == 409)
+        #expect(json["code"] as? String == "favorites_full")
+    }
+
+    @Test func testLinkBrowserOverrideViaPatch() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let linkId = model.addLink(urlString: "https://x.com", title: "X", parentId: nil)
+
+        _ = try await apiRequest("PATCH", "/api/links/\(linkId.uuidString)", body: ["browser_bundle_id": "com.apple.Safari"], port: server.port)
+        guard case .link(let overridden) = model.nodeById(linkId) else {
+            Issue.record("Expected link")
+            return
+        }
+        #expect(overridden.browserBundleId == "com.apple.Safari")
+
+        _ = try await apiRequest("PATCH", "/api/links/\(linkId.uuidString)", body: ["browser_bundle_id": NSNull()], port: server.port)
+        guard case .link(let cleared) = model.nodeById(linkId) else {
+            Issue.record("Expected link")
+            return
+        }
+        #expect(cleared.browserBundleId == nil)
+    }
 }

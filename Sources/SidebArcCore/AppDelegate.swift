@@ -142,7 +142,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                     let payload: [String: Any] = [
                         "port": Int(port),
                         "host": "127.0.0.1",
-                        "schemaVersion": 1
+                        // Agent API version, not the data.json schema. 2 = profiles and favorites.
+                        "schemaVersion": 2
                     ]
                     if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
                         try? data.write(to: url, options: [.atomic])

@@ -210,6 +210,29 @@ final class NoteServer {
             let idString = String(path.dropFirst("/api/workspaces/".count))
             handlePatchWorkspace(idString: idString, body: request.body, on: connection)
 
+        // Profiles (no delete route: deleting one moves spaces, so it stays a UI action)
+        case ("GET", "/api/profiles"):
+            handleListProfiles(on: connection)
+        case ("POST", "/api/profiles"):
+            handleCreateProfile(body: request.body, on: connection)
+        case ("POST", let path) where path.hasPrefix("/api/profiles/") && path.hasSuffix("/favorites"):
+            let middle = path.dropFirst("/api/profiles/".count).dropLast("/favorites".count)
+            handleAddFavorite(profileIdString: String(middle), body: request.body, on: connection)
+        case ("PATCH", let path) where path.hasPrefix("/api/profiles/"):
+            let idString = String(path.dropFirst("/api/profiles/".count))
+            handlePatchProfile(idString: idString, body: request.body, on: connection)
+
+        // Favorites (ids are link ids inside a profile's grid)
+        case ("POST", let path) where path.hasPrefix("/api/favorites/") && path.hasSuffix("/move"):
+            let middle = path.dropFirst("/api/favorites/".count).dropLast("/move".count)
+            handleMoveFavorite(idString: String(middle), body: request.body, on: connection)
+        case ("POST", let path) where path.hasPrefix("/api/favorites/") && path.hasSuffix("/unpin"):
+            let middle = path.dropFirst("/api/favorites/".count).dropLast("/unpin".count)
+            handleUnpinFavorite(idString: String(middle), body: request.body, on: connection)
+        case ("DELETE", let path) where path.hasPrefix("/api/favorites/"):
+            let idString = String(path.dropFirst("/api/favorites/".count))
+            handleDeleteFavorite(idString: idString, on: connection)
+
         // Folders
         case ("POST", "/api/folders"):
             handleCreateFolder(body: request.body, on: connection)
@@ -324,7 +347,8 @@ final class NoteServer {
             [
                 "id": ws.id.uuidString,
                 "name": ws.name,
-                "colorId": ws.colorId.rawValue
+                "colorId": ws.colorId.rawValue,
+                "profileId": ws.profileId.uuidString
             ]
         }
         sendOk(["workspaces": list], on: connection)
@@ -346,7 +370,8 @@ final class NoteServer {
                 "workspace": [
                     "id": workspace.id.uuidString,
                     "name": workspace.name,
-                    "colorId": workspace.colorId.rawValue
+                    "colorId": workspace.colorId.rawValue,
+                    "profileId": workspace.profileId.uuidString
                 ]
             ]
             sendOk(payload, on: connection)
@@ -407,7 +432,18 @@ final class NoteServer {
         } else {
             color = .defaultColor()
         }
+        var profileId: UUID?
+        if json["profile_id"] != nil {
+            guard let parsed = Self.parseUUID(json["profile_id"]), model.profile(id: parsed) != nil else {
+                sendError(status: 404, code: "profile_not_found", message: "Profile not found", on: connection)
+                return
+            }
+            profileId = parsed
+        }
         let id = model.createWorkspace(name: name, colorId: color)
+        if let profileId {
+            model.assignWorkspace(id, toProfile: profileId)
+        }
         sendOk(["id": id.uuidString], on: connection)
     }
 
@@ -444,11 +480,23 @@ final class NoteServer {
             newColor = nil
         }
 
+        var newProfileId: UUID?
+        if json["profile_id"] != nil {
+            guard let parsed = Self.parseUUID(json["profile_id"]), model.profile(id: parsed) != nil else {
+                sendError(status: 404, code: "profile_not_found", message: "Profile not found", on: connection)
+                return
+            }
+            newProfileId = parsed
+        }
+
         if let newName {
             model.renameWorkspace(id: id, newName: newName)
         }
         if let newColor {
             model.updateWorkspaceColor(id: id, colorId: newColor)
+        }
+        if let newProfileId {
+            model.assignWorkspace(id, toProfile: newProfileId)
         }
         sendOk([:], on: connection)
     }
@@ -575,6 +623,176 @@ final class NoteServer {
         }
         if let url = (json["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
             model.updateLinkUrl(id: id, newUrl: url)
+        }
+        if let value = json["browser_bundle_id"] {
+            // A bundle id sets the override; null (or "") clears it.
+            let bundleId = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            model.setLinkBrowserOverride(id: id, bundleId: (bundleId?.isEmpty ?? true) ? nil : bundleId)
+        }
+        sendOk([:], on: connection)
+    }
+
+    // MARK: - Profiles and favorites
+
+    private func profilePayload(_ profile: Profile, model: AppModel) -> [String: Any] {
+        [
+            "id": profile.id.uuidString,
+            "name": profile.name,
+            "browserBundleId": profile.browserBundleId ?? NSNull(),
+            "browserProfiles": profile.browserProfiles,
+            "workspaceIds": model.workspaces(inProfile: profile.id).map(\.id.uuidString),
+            "favorites": profile.favorites.map { link in
+                [
+                    "id": link.id.uuidString,
+                    "title": link.title,
+                    "url": link.url,
+                    "browserBundleId": link.browserBundleId ?? NSNull()
+                ] as [String: Any]
+            },
+            "maxFavorites": Profile.maxFavorites
+        ]
+    }
+
+    private func handleListProfiles(on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        sendOk(["profiles": model.profiles.map { profilePayload($0, model: model) }], on: connection)
+    }
+
+    private func handleCreateProfile(body: Data, on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        guard let json = parseJSONObject(body) else {
+            sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
+            return
+        }
+        guard let name = (json["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            sendError(status: 400, code: "bad_name", message: "name is required", on: connection)
+            return
+        }
+        let id = model.createProfile(name: name)
+        sendOk(["id": id.uuidString], on: connection)
+    }
+
+    private func handlePatchProfile(idString: String, body: Data, on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        guard let id = UUID(uuidString: idString) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid profile id", on: connection)
+            return
+        }
+        guard model.profile(id: id) != nil else {
+            sendError(status: 404, code: "profile_not_found", message: "Profile not found", on: connection)
+            return
+        }
+        guard let json = parseJSONObject(body) else {
+            sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
+            return
+        }
+        if let name = (json["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            model.renameProfile(id: id, newName: name)
+        }
+        if let value = json["browser_bundle_id"] {
+            // A bundle id sets the profile's browser; null (or "") inherits the default browser.
+            let bundleId = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            model.setProfileBrowser(id: id, bundleId: (bundleId?.isEmpty ?? true) ? nil : bundleId)
+        }
+        sendOk([:], on: connection)
+    }
+
+    private func handleAddFavorite(profileIdString: String, body: Data, on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        guard let profileId = UUID(uuidString: profileIdString) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid profile id", on: connection)
+            return
+        }
+        guard let json = parseJSONObject(body) else {
+            sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
+            return
+        }
+        guard let url = (json["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else {
+            sendError(status: 400, code: "bad_url", message: "url is required", on: connection)
+            return
+        }
+        let providedTitle = (json["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = (providedTitle?.isEmpty == false) ? providedTitle! : (URL(string: url)?.host ?? url)
+        switch model.addFavorite(profileId: profileId, urlString: url, title: title) {
+        case .success(let id):
+            sendOk(["id": id.uuidString], on: connection)
+        case .failure(.profileNotFound):
+            sendError(status: 404, code: "profile_not_found", message: "Profile not found", on: connection)
+        case .failure(.full):
+            sendError(status: 409, code: "favorites_full", message: "Profile already has \(Profile.maxFavorites) favorites", on: connection)
+        case .failure(.duplicate(let existingId)):
+            sendError(status: 409, code: "duplicate_favorite", message: "Already a favorite: \(existingId.uuidString)", on: connection)
+        }
+    }
+
+    private func handleMoveFavorite(idString: String, body: Data, on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        guard let id = UUID(uuidString: idString) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid favorite id", on: connection)
+            return
+        }
+        guard let json = parseJSONObject(body), let index = json["index"] as? Int else {
+            sendError(status: 400, code: "bad_index", message: "index (integer) is required", on: connection)
+            return
+        }
+        guard model.moveFavorite(id: id, toIndex: index) else {
+            sendError(status: 404, code: "favorite_not_found", message: "Favorite not found", on: connection)
+            return
+        }
+        sendOk([:], on: connection)
+    }
+
+    private func handleUnpinFavorite(idString: String, body: Data, on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        guard let id = UUID(uuidString: idString) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid favorite id", on: connection)
+            return
+        }
+        guard let json = parseJSONObject(body), let workspaceId = Self.parseUUID(json["workspace_id"]) else {
+            sendError(status: 400, code: "bad_workspace_id", message: "workspace_id is required", on: connection)
+            return
+        }
+        guard model.profileId(forFavoriteId: id) != nil else {
+            sendError(status: 404, code: "favorite_not_found", message: "Favorite not found", on: connection)
+            return
+        }
+        guard model.unpinFavorite(id: id, toWorkspaceId: workspaceId) else {
+            sendError(status: 404, code: "workspace_not_found", message: "Workspace not found", on: connection)
+            return
+        }
+        sendOk([:], on: connection)
+    }
+
+    private func handleDeleteFavorite(idString: String, on connection: NWConnection) {
+        guard let model else {
+            sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
+            return
+        }
+        guard let id = UUID(uuidString: idString) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid favorite id", on: connection)
+            return
+        }
+        guard model.deleteFavorite(id: id) else {
+            sendError(status: 404, code: "favorite_not_found", message: "Favorite not found", on: connection)
+            return
         }
         sendOk([:], on: connection)
     }

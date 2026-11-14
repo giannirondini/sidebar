@@ -143,7 +143,7 @@ final class AppModel {
     /// Sets or clears (nil) the per-link browser override, for a link in any
     /// space's list or in any profile's favorites.
     func setLinkBrowserOverride(id: UUID, bundleId: String?) {
-        if state.profiles.contains(where: { $0.favorites.contains(where: { $0.id == id }) }) {
+        if favoriteLocation(id: id) != nil {
             updateFavorite(id: id) { $0.browserBundleId = bundleId }
             return
         }
@@ -545,14 +545,77 @@ final class AppModel {
     /// Moves a favorite into the **current** space's list (as in Arc), whichever
     /// space it was pinned from.
     func unpinLink(id: UUID) {
-        let profileId = currentProfile.id
-        guard let profileIndex = state.profiles.firstIndex(where: { $0.id == profileId }),
-              let favoriteIndex = state.profiles[profileIndex].favorites.firstIndex(where: { $0.id == id }),
-              let workspaceIndex = state.workspaces.firstIndex(where: { $0.id == currentWorkspace.id }) else { return }
+        guard currentProfile.favorites.contains(where: { $0.id == id }) else { return }
+        unpinFavorite(id: id, toWorkspaceId: currentWorkspace.id)
+    }
 
+    /// Moves the favorite `id` (from any profile) to the root of `workspaceId`'s list.
+    @discardableResult
+    func unpinFavorite(id: UUID, toWorkspaceId workspaceId: UUID) -> Bool {
+        guard let (profileIndex, favoriteIndex) = favoriteLocation(id: id),
+              let workspaceIndex = state.workspaces.firstIndex(where: { $0.id == workspaceId }) else { return false }
         let link = state.profiles[profileIndex].favorites.remove(at: favoriteIndex)
         state.workspaces[workspaceIndex].items.append(.link(link))
         persist()
+        return true
+    }
+
+    enum AddFavoriteError: Error, Equatable {
+        case profileNotFound
+        case full
+        /// A favorite with the same normalised URL exists in that profile.
+        case duplicate(existingId: UUID)
+    }
+
+    /// Adds a new link straight to a profile's Favorites.
+    func addFavorite(profileId: UUID, urlString: String, title: String) -> Result<UUID, AddFavoriteError> {
+        guard let profileIndex = state.profiles.firstIndex(where: { $0.id == profileId }) else {
+            return .failure(.profileNotFound)
+        }
+        let key = URLNormalization.key(for: urlString)
+        if let existing = state.profiles[profileIndex].favorites.first(where: { URLNormalization.key(for: $0.url) == key }) {
+            return .failure(.duplicate(existingId: existing.id))
+        }
+        guard state.profiles[profileIndex].favorites.count < Profile.maxFavorites else {
+            return .failure(.full)
+        }
+        let link = Link(id: UUID(), title: title, url: urlString, faviconPath: nil)
+        state.profiles[profileIndex].favorites.append(link)
+        persist()
+        return .success(link.id)
+    }
+
+    @discardableResult
+    func deleteFavorite(id: UUID) -> Bool {
+        guard let (profileIndex, favoriteIndex) = favoriteLocation(id: id) else { return false }
+        state.profiles[profileIndex].favorites.remove(at: favoriteIndex)
+        persist()
+        return true
+    }
+
+    /// Moves a favorite within its profile's grid; `index` is clamped.
+    @discardableResult
+    func moveFavorite(id: UUID, toIndex index: Int) -> Bool {
+        guard let (profileIndex, favoriteIndex) = favoriteLocation(id: id) else { return false }
+        let link = state.profiles[profileIndex].favorites.remove(at: favoriteIndex)
+        let target = max(0, min(index, state.profiles[profileIndex].favorites.count))
+        state.profiles[profileIndex].favorites.insert(link, at: target)
+        persist()
+        return true
+    }
+
+    /// Profile containing the favorite `id`, if any.
+    func profileId(forFavoriteId id: UUID) -> UUID? {
+        favoriteLocation(id: id).map { state.profiles[$0.0].id }
+    }
+
+    private func favoriteLocation(id: UUID) -> (Int, Int)? {
+        for (profileIndex, profile) in state.profiles.enumerated() {
+            if let favoriteIndex = profile.favorites.firstIndex(where: { $0.id == id }) {
+                return (profileIndex, favoriteIndex)
+            }
+        }
+        return nil
     }
 
     func updatePinnedLinkFaviconPath(id: UUID, path: String?) {
@@ -696,8 +759,7 @@ final class AppModel {
     /// Mutates the favorite `id` in whichever profile holds it. Not limited to the
     /// current profile: async callers (favicon fetches) may finish after a space switch.
     private func updateFavorite(id: UUID, _ mutate: (inout Link) -> Void) {
-        guard let profileIndex = state.profiles.firstIndex(where: { $0.favorites.contains(where: { $0.id == id }) }),
-              let index = state.profiles[profileIndex].favorites.firstIndex(where: { $0.id == id }) else { return }
+        guard let (profileIndex, index) = favoriteLocation(id: id) else { return }
         mutate(&state.profiles[profileIndex].favorites[index])
         persist()
     }
