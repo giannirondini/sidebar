@@ -148,18 +148,18 @@ The DMG background image provides a professional look to your installer.
 ### Example Background Layout
 
 ```
-┌────────────────────────────────────────────────┐
-│                                                │
-│         Drag Arcmark to Applications          │
-│                                                │
+┌──────────────────────────────────────────────┐
+│                                              │
+│         Drag Arcmark to Applications         │
+│                                              │
 │      ╔═══════╗                ╔═══════╗      │
 │      ║       ║                ║       ║      │
-│      ║   🎯   ║       →        ║   📁   ║      │
+│      ║   🎯  ║       →        ║   📁  ║      │
 │      ║       ║                ║       ║      │
 │      ╚═══════╝                ╚═══════╝      │
-│     Arcmark.app            Applications       │
-│                                                │
-└────────────────────────────────────────────────┘
+│     Arcmark.app            Applications      │
+│                                              │
+└──────────────────────────────────────────────┘
 ```
 
 ### Creating the Background
