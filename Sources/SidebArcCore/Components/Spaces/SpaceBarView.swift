@@ -178,6 +178,8 @@ final class SpaceBarView: NSView {
     func endSelectionTransition() {
         selectionPill.layer?.removeAnimation(forKey: Self.pillAnimationKey)
         pillTargetId = nil
+        // A drag landed mid-way left the pill between two icons; layout puts it back.
+        needsLayout = true
     }
 
     /// The button of a space, e.g. to anchor a popover to it.

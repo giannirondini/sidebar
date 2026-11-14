@@ -298,6 +298,10 @@ extension MainViewController: SwipeGestureServiceDelegate {
         pageStage.setIncoming(transition.snapshots[target.id], baseX: 0)
         pageStage.setOffset(0)
         pageStage.incoming.add(fade("opacity", from: 0, to: 1), forKey: Self.transitionAnimationKey)
+        // Both images are transparent around the rows: fade the old one out too, or
+        // its extra rows would show under a shorter new list.
+        pageStage.outgoing.opacity = 0
+        pageStage.outgoing.add(fade("opacity", from: 1, to: 0), forKey: Self.transitionAnimationKey)
 
         let startColor = transition.fromWorkspace.colorId.backgroundColor
         let endColor = target.colorId.backgroundColor
@@ -334,6 +338,14 @@ extension MainViewController: SwipeGestureServiceDelegate {
         // Cut short (a click, a new gesture): the pages jump to where they were going.
         pageStage.setOffset(commits ? transition.side * swipeClipContainer.bounds.width : 0)
         view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+        // A drag landed mid-way (no settle) was left with a blended colour.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let landedColor = commits
+            ? transition.target?.workspace.colorId.backgroundColor ?? transition.fromWorkspace.colorId.backgroundColor
+            : transition.fromWorkspace.colorId.backgroundColor
+        view.layer?.backgroundColor = landedColor.cgColor
+        CATransaction.commit()
         pinnedTabsView.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         spaceBar.endSelectionTransition()
         let fadeInFavorites = commits && changesFavorites(transition)

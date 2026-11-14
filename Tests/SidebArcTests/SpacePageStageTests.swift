@@ -3,8 +3,8 @@ import Testing
 @testable import SidebArcCore
 
 /// The space transition moves pages on `SpacePageStage`, not the live page, because
-/// AppKit resets the transform of its own views' layers on the next display pass
-/// (the old list then flashed at x = 0 when a switch landed). These tests run in a
+/// AppKit can reset the transform of its own views' layers (the old list then
+/// flashed at x = 0 when a switch landed). These tests run in a
 /// real, invisible window on a display so AppKit's display passes actually happen.
 @MainActor
 @Suite struct SpacePageStageTests {

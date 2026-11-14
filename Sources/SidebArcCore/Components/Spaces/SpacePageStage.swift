@@ -4,9 +4,8 @@ import AppKit
 /// page, holding the outgoing and incoming pages as plain image layers.
 ///
 /// Why not move the real page: AppKit owns the layers of the views it lays out and
-/// resets their `transform` on its next display pass (verified: even an idle run
-/// loop resets it). A moved page then falls back to x = 0 the moment its animation
-/// ends, before the transition can land, and the old list flashes. Layers in a
+/// can reset their `transform` (observed in a test window right after layout, and in
+/// the app as the old list flashing at x = 0 when a switch landed). Layers in a
 /// layer-hosting view belong to us, so their transforms stay put.
 ///
 /// Never takes clicks; the transition hides the live page while the stage is up.
