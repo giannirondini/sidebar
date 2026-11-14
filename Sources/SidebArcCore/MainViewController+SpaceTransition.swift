@@ -168,8 +168,16 @@ extension MainViewController: SwipeGestureServiceDelegate {
         workspaceContentStack.layer?.transform = transform
         transition.previewView?.layer?.transform = transform
         view.layer?.backgroundColor = blendedBackground(transition, progress: progress).cgColor
+        pinnedTabsView.layer?.opacity = Float(changesFavorites(transition) ? 1 - progress : 1)
         CATransaction.commit()
         spaceBar.setSelectionProgress(toward: transition.target?.workspace.id, progress: progress)
+    }
+
+    /// Whether the target space shows other Favorites (another profile): only then
+    /// do they fade with the page; otherwise they stay still.
+    private func changesFavorites(_ transition: SpaceTransition) -> Bool {
+        guard let target = transition.target?.workspace else { return false }
+        return target.profileId != transition.fromWorkspace.profileId
     }
 
     /// How far the page is toward the target, 0…1 (0 past an end).
@@ -233,6 +241,16 @@ extension MainViewController: SwipeGestureServiceDelegate {
                 springAnimation("transform.translation.x", from: from, to: to)
             }
         }
+        if let favoritesLayer = pinnedTabsView.layer {
+            let startOpacity = favoritesLayer.presentation()?.opacity ?? favoritesLayer.opacity
+            // Another profile's Favorites fade out with the page and fade in on landing.
+            let endOpacity: Float = commits && changesFavorites(transition) ? 0 : 1
+            favoritesLayer.opacity = endOpacity
+            if startOpacity != endOpacity {
+                favoritesLayer.add(springAnimation("opacity", from: startOpacity, to: endOpacity),
+                                   forKey: Self.transitionAnimationKey)
+            }
+        }
         CATransaction.commit()
         transition.offset = end
     }
@@ -253,6 +271,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
         workspaceContentStack.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+        pinnedTabsView.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+        let fadeInFavorites = commits && changesFavorites(transition)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         workspaceContentStack.layer?.transform = CATransform3DIdentity
@@ -271,6 +291,24 @@ extension MainViewController: SwipeGestureServiceDelegate {
             suppressNodeAnimations = true
             reloadData()
             suppressNodeAnimations = false
+        }
+        if fadeInFavorites {
+            // The new profile's grid (possibly another height) is in place: fade it in.
+            let fadeIn = CABasicAnimation(keyPath: "opacity")
+            fadeIn.fromValue = 0
+            fadeIn.toValue = 1
+            fadeIn.duration = ThemeConstants.Animation.durationFast
+            fadeIn.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            pinnedTabsView.layer?.opacity = 1
+            pinnedTabsView.layer?.add(fadeIn, forKey: Self.transitionAnimationKey)
+            CATransaction.commit()
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            pinnedTabsView.layer?.opacity = 1
+            CATransaction.commit()
         }
         if commits {
             // The snapshot showed the new space from the top; land there too.

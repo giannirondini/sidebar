@@ -167,7 +167,7 @@ final class MainViewController: NSViewController {
         }
 
         // Workspace content stack (animated during swipe)
-        let contentStack = NSStackView(views: [pinnedTabsView, spaceHeader, scheduledLinksAccordion, nodeListViewController.view, bottomBar])
+        let contentStack = NSStackView(views: [spaceHeader, scheduledLinksAccordion, nodeListViewController.view, bottomBar])
         contentStack.orientation = .vertical
         contentStack.spacing = 10
         contentStack.translatesAutoresizingMaskIntoConstraints = false
@@ -185,8 +185,11 @@ final class MainViewController: NSViewController {
         swipeClipContainer = clipContainer
         clipContainer.addSubview(contentStack)
 
-        // Outer stack: search field, the swipe clip container, then the space bar
-        let stack = NSStackView(views: [searchField, clipContainer, spaceBar])
+        // Outer stack: search field, Favorites, the swipe clip container, then the space bar.
+        // Favorites sit outside the clip: they belong to the profile, not the space, so a
+        // switch between spaces of the same profile leaves them still.
+        pinnedTabsView.wantsLayer = true
+        let stack = NSStackView(views: [searchField, pinnedTabsView, clipContainer, spaceBar])
         stack.orientation = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -227,8 +230,8 @@ final class MainViewController: NSViewController {
         NSLayoutConstraint.activate([
             searchField.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 2),
             searchField.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -2),
-            pinnedTabsView.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 2),
-            pinnedTabsView.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -2),
+            pinnedTabsView.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 2),
+            pinnedTabsView.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -2),
             spaceHeader.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor),
             spaceHeader.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor),
             scheduledLinksAccordion.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 2),

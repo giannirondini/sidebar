@@ -311,7 +311,6 @@ extension MainViewController {
 
         // Switch to the adjacent workspace and update views without animation
         model.selectWorkspace(id: nextWorkspace.id)
-        pinnedTabsView.update(pinnedLinks: model.profile(for: nextWorkspace).favorites)
         configureSpaceHeader(for: nextWorkspace)
         scheduledLinksAccordion.update(entries: model.scheduledLinks(in: nextWorkspace.id))
         let filteredNodes = searchCoordinator.filter(nodes: ScheduledLinkFiltering.hideScheduled(nextWorkspace.items))
@@ -332,7 +331,6 @@ extension MainViewController {
         // Restore original workspace and content without animation
         model.selectWorkspace(id: currentId)
         let currentWorkspace = model.currentWorkspace
-        pinnedTabsView.update(pinnedLinks: model.currentProfile.favorites)
         configureSpaceHeader(for: currentWorkspace)
         scheduledLinksAccordion.update(entries: model.scheduledLinks(in: currentWorkspace.id))
         let currentNodes = searchCoordinator.filter(nodes: ScheduledLinkFiltering.hideScheduled(currentWorkspace.items))
