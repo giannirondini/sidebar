@@ -165,14 +165,14 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 - **BaseControl** - Base class for all interactive controls with hover and pressed state management
   - Eliminates ~40 lines of tracking area and mouse event code per subclass
   - Provides `handleHoverStateChanged()` and `handlePressedStateChanged()` override points
-  - Used by: `IconTitleButton`, `CustomToggle`, `CustomTextButton`
+  - Used by: `IconTitleButton`, `CustomToggle`, `CustomTextButton`, `SpaceBarButton`, `PinnedTabTileView`
 - **BaseView** - Base class for custom views with hover state management (no pressed state)
   - Simpler than BaseControl, designed for non-interactive views like rows
-  - Used by: `NodeRowView`, `WorkspaceRowView`
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
 - **InlineEditableTextField** - Reusable component for inline text editing
   - Encapsulates commit/cancel logic, focus management, and callbacks
   - Eliminates ~80 lines of duplicate editing code per component
-  - Used by: `NodeRowView`, `WorkspaceRowView`
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
 
 **Design System** (located in `Utilities/Theme/`):
 - **ThemeConstants** - Centralized design system constants
@@ -181,8 +181,9 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
   - Fonts: Typography styles (bodyRegular, bodySemibold, bodyMedium, bodyBold)
   - Spacing: Layout spacing values (tiny=4, small=6, medium=8, regular=10, large=14, extraLarge=16, huge=20)
   - CornerRadius: Rounding values (small=6, medium=8, large=12)
-  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, buttonHeight=32, rowHeight=44)
+  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, buttonHeight=32, rowHeight=44), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
   - Animation: Timing values (durationFast=0.15s, durationNormal=0.2s, durationSlow=0.3s)
+  - SpaceTransition: space-switch tuning (commit fraction, flick velocity, velocity window, rubber band, spring response and damping ratio)
   - Replaces 50+ hardcoded "magic numbers" throughout the codebase
 
 **Component Patterns**:
