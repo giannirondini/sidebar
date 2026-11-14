@@ -3,11 +3,11 @@ import os
 
 /// One space switch in progress (Phase 3a.5).
 ///
-/// The live content and a snapshot of the target space sit side by side in the
-/// swipe clip and move by the same offset: 1:1 with the finger while tracking,
-/// then a spring (`SpaceSwipe.Spring`) to the end. The background colour and the
-/// space bar's pill follow the same progress and the same spring. A swipe, a
-/// space bar click and ⌘⌥←/→ all go through here.
+/// The page being left and the page being revealed are drawn as images on the
+/// `SpacePageStage` (the live page is hidden meanwhile) and move by the same offset:
+/// 1:1 with the finger while tracking, then a spring (`SpaceSwipe.Spring`) to the
+/// end. The background colour and the space bar's pill follow the same progress
+/// and the same spring. A swipe, a space bar click and ⌘⌥←/→ all go through here.
 @MainActor
 final class SpaceTransition {
     enum Phase {
@@ -21,11 +21,10 @@ final class SpaceTransition {
     var target: (workspace: Workspace, index: Int)?
     /// +1: the target is on the left (finger right, previous space); -1: on the right.
     var side: CGFloat = 1
-    var previewView: NSView?
-    /// Snapshots taken during this transition, so a drag that wiggles across its
-    /// start doesn't render the same space again.
-    var snapshots: [UUID: NSView] = [:]
-    /// Current horizontal offset of the content (points).
+    /// Page images rendered during this transition, so a drag that wiggles across
+    /// its start doesn't render the same space again.
+    var snapshots: [UUID: NSImage] = [:]
+    /// Current horizontal offset of the pages (points).
     var offset: CGFloat = 0
     var phase: Phase = .tracking
     /// System "Reduce motion": nothing slides; a switch crossfades instead.
@@ -65,10 +64,10 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
     // MARK: - Input during a transition
 
-    /// While a page slides, AppKit still hit-tests the old space's views (a layer
-    /// transform doesn't move a view's frame) and the model still selects the old
-    /// space. So any click or key lands the transition first; the event then
-    /// reaches the new space. Local monitors run before the event is dispatched.
+    /// While the pages slide, the model still selects the old space (and the live
+    /// page underneath is the old one). So any click or key lands the transition
+    /// first; the event then reaches the new space. Local monitors run before the
+    /// event is dispatched.
     func installTransitionInputMonitor() {
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
             if let self, self.spaceTransition != nil {
@@ -97,11 +96,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
             model.selectWorkspace(id: id)
             return
         }
-        removeLandingCover()
-        let transition = SpaceTransition(fromWorkspace: workspaces[fromIndex], fromIndex: fromIndex)
-        spaceTransition = transition
-        // A rename belongs to the space being left (and would show in the snapshot).
-        spaceHeader.cancelInlineRename()
+        let transition = beginSpaceTransition(fromIndex: fromIndex)
         // Further away than one space still slides one page, from its side.
         prepareTarget(of: transition, target: (workspaces[toIndex], toIndex), side: toIndex < fromIndex ? 1 : -1)
         settle(transition, commits: true, releaseVelocity: 0)
@@ -116,12 +111,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
         if let existing = spaceTransition {
             transition = existing
         } else {
-            let workspaces = model.workspaces
-            guard let index = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return }
-            removeLandingCover()
-            transition = SpaceTransition(fromWorkspace: workspaces[index], fromIndex: index)
-            spaceTransition = transition
-            spaceHeader.cancelInlineRename()
+            guard let index = model.workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return }
+            transition = beginSpaceTransition(fromIndex: index)
         }
 
         let width = swipeClipContainer.bounds.width
@@ -155,38 +146,45 @@ extension MainViewController: SwipeGestureServiceDelegate {
         settle(transition, commits: commits, releaseVelocity: transition.target == nil ? 0 : velocity)
     }
 
-    // MARK: - Moving the page
+    // MARK: - Pages
 
-    /// Places a snapshot of `target` next to the content, on `side`; removes any
-    /// previous one. `target == nil` (past an end) shows nothing there.
-    private func prepareTarget(of transition: SpaceTransition, target: (Workspace, Int)?, side: CGFloat) {
-        transition.previewView?.removeFromSuperview()
-        transition.previewView = nil
-        transition.side = side
-        transition.target = target.map { (workspace: $0.0, index: $0.1) }
-        guard let workspace = target?.0 else { return }
-
-        let preview = transition.snapshots[workspace.id] ?? makeSpaceSnapshotView(for: workspace)
-        transition.snapshots[workspace.id] = preview
-        let width = swipeClipContainer.bounds.width
-        preview.frame.origin = NSPoint(x: -side * width, y: 0)
-        preview.layer?.transform = CATransform3DMakeTranslation(transition.offset, 0, 0)
-        swipeClipContainer.addSubview(preview, positioned: .below, relativeTo: workspaceContentStack)
-        transition.previewView = preview
+    /// Starts a transition: the current page goes onto the stage as an image, and
+    /// the live page is hidden until the transition lands.
+    private func beginSpaceTransition(fromIndex: Int) -> SpaceTransition {
+        let transition = SpaceTransition(fromWorkspace: model.workspaces[fromIndex], fromIndex: fromIndex)
+        spaceTransition = transition
+        // A rename belongs to the space being left (and would show in the images).
+        spaceHeader.cancelInlineRename()
+        pageStage.begin(outgoing: pageImage(of: workspaceContentStack))
+        workspaceContentStack.isHidden = true
+        return transition
     }
 
-    /// Tracking: moves the page, the colour and the pill to `offset` at once.
+    /// Puts `target`'s page on the stage, one page to `side`; nil (past an end) shows none.
+    private func prepareTarget(of transition: SpaceTransition, target: (Workspace, Int)?, side: CGFloat) {
+        transition.side = side
+        transition.target = target.map { (workspace: $0.0, index: $0.1) }
+        guard let workspace = target?.0 else {
+            pageStage.setIncoming(nil, baseX: 0)
+            return
+        }
+        let image = transition.snapshots[workspace.id] ?? renderPageImage(for: workspace)
+        transition.snapshots[workspace.id] = image
+        pageStage.setIncoming(image, baseX: -side * swipeClipContainer.bounds.width)
+        pageStage.setOffset(transition.offset)
+    }
+
+    /// Tracking: moves the pages, the colour, the pill and (across profiles) the
+    /// Favorites' opacity to `offset` at once.
     private func apply(offset: CGFloat, to transition: SpaceTransition) {
         transition.offset = offset
         let progress = self.progress(of: transition)
+        pageStage.setOffset(offset)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let transform = CATransform3DMakeTranslation(offset, 0, 0)
-        workspaceContentStack.layer?.transform = transform
-        transition.previewView?.layer?.transform = transform
         view.layer?.backgroundColor = blendedBackground(transition, progress: progress).cgColor
-        pinnedTabsView.layer?.opacity = Float(changesFavorites(transition) ? 1 - progress : 1)
         CATransaction.commit()
+        pinnedTabsView.alphaValue = changesFavorites(transition) ? 1 - progress : 1
         spaceBar.setSelectionProgress(toward: transition.target?.workspace.id, progress: progress)
     }
 
@@ -210,8 +208,11 @@ extension MainViewController: SwipeGestureServiceDelegate {
         return from.usingColorSpace(.sRGB)?.blended(withFraction: progress, of: to.usingColorSpace(.sRGB) ?? to) ?? to
     }
 
-    /// Springs the page (and colour and pill) from where it is to the target
-    /// (`commits`) or back. All animations start in one transaction, so they stay in step.
+    // MARK: - Settling
+
+    /// Springs the pages (and colour, pill and Favorites) from where they are to the
+    /// target (`commits`) or back. All animations start in one transaction, so they
+    /// stay in step.
     private func settle(_ transition: SpaceTransition, commits: Bool, releaseVelocity: CGFloat) {
         transition.phase = .settling(commits: commits)
         if transition.reducesMotion {
@@ -240,6 +241,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
             ? transition.target?.workspace.colorId.backgroundColor ?? startColor
             : transition.fromWorkspace.colorId.backgroundColor
         let pillSpaceId = commits ? transition.target?.workspace.id : transition.fromWorkspace.id
+        let startAlpha = pinnedTabsView.alphaValue
+        // Another profile's Favorites fade out with the page and fade in on landing.
+        let endAlpha: CGFloat = commits && changesFavorites(transition) ? 0 : 1
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -247,38 +251,32 @@ extension MainViewController: SwipeGestureServiceDelegate {
             guard let self, let transition, self.spaceTransition === transition else { return }
             self.finish(transition)
         }
-        // Final values first (layout passes keep them), then the explicit springs.
-        let endTransform = CATransform3DMakeTranslation(end, 0, 0)
-        for layer in [workspaceContentStack.layer, transition.previewView?.layer].compactMap({ $0 }) {
-            layer.transform = endTransform
-            layer.add(springAnimation("transform.translation.x", from: start, to: end), forKey: Self.transitionAnimationKey)
+        // Final values first, then the explicit springs.
+        pageStage.setOffset(end)
+        for page in [pageStage.outgoing, pageStage.incoming] {
+            page.add(springAnimation("transform.translation.x", from: start, to: end), forKey: Self.transitionAnimationKey)
         }
         view.layer?.backgroundColor = endColor.cgColor
         view.layer?.add(springAnimation("backgroundColor", from: startColor.cgColor, to: endColor.cgColor),
                         forKey: Self.transitionAnimationKey)
         if let pillSpaceId {
-            spaceBar.settleSelection(on: pillSpaceId) { from, to in
-                springAnimation("transform.translation.x", from: from, to: to)
+            spaceBar.settleSelection(on: pillSpaceId) { keyPath, from, to in
+                springAnimation(keyPath, from: from, to: to)
             }
         }
-        if let favoritesLayer = pinnedTabsView.layer {
-            let startOpacity = favoritesLayer.presentation()?.opacity ?? favoritesLayer.opacity
-            // Another profile's Favorites fade out with the page and fade in on landing.
-            let endOpacity: Float = commits && changesFavorites(transition) ? 0 : 1
-            favoritesLayer.opacity = endOpacity
-            if startOpacity != endOpacity {
-                favoritesLayer.add(springAnimation("opacity", from: startOpacity, to: endOpacity),
-                                   forKey: Self.transitionAnimationKey)
-            }
+        pinnedTabsView.alphaValue = endAlpha
+        if startAlpha != endAlpha {
+            pinnedTabsView.layer?.add(springAnimation("opacity", from: Float(startAlpha), to: Float(endAlpha)),
+                                      forKey: Self.transitionAnimationKey)
         }
         CATransaction.commit()
         transition.offset = end
     }
 
     /// Reduce Motion: the target's page fades in over the current one in place;
-    /// the colour (and another profile's Favorites) fade with it; the pill jumps on landing.
+    /// the colour (and another profile's Favorites) fade with it; the pill moves on landing.
     private func crossfade(_ transition: SpaceTransition, commits: Bool) {
-        guard commits, let preview = transition.previewView, let target = transition.target?.workspace else {
+        guard commits, let target = transition.target?.workspace else {
             return finish(transition)
         }
         func fade(_ keyPath: String, from: Any, to: Any) -> CABasicAnimation {
@@ -296,25 +294,24 @@ extension MainViewController: SwipeGestureServiceDelegate {
             guard let self, let transition, self.spaceTransition === transition else { return }
             self.finish(transition)
         }
-        // Over the content, in place.
-        preview.removeFromSuperview()
-        preview.frame.origin = .zero
-        swipeClipContainer.addSubview(preview, positioned: .above, relativeTo: workspaceContentStack)
-        preview.layer?.transform = CATransform3DIdentity
-        preview.layer?.opacity = 1
-        preview.layer?.add(fade("opacity", from: 0, to: 1), forKey: Self.transitionAnimationKey)
+        // In place, over the current page.
+        pageStage.setIncoming(transition.snapshots[target.id], baseX: 0)
+        pageStage.setOffset(0)
+        pageStage.incoming.add(fade("opacity", from: 0, to: 1), forKey: Self.transitionAnimationKey)
 
         let startColor = transition.fromWorkspace.colorId.backgroundColor
         let endColor = target.colorId.backgroundColor
         view.layer?.backgroundColor = endColor.cgColor
         view.layer?.add(fade("backgroundColor", from: startColor.cgColor, to: endColor.cgColor), forKey: Self.transitionAnimationKey)
 
-        if changesFavorites(transition), let favoritesLayer = pinnedTabsView.layer {
-            favoritesLayer.opacity = 0
-            favoritesLayer.add(fade("opacity", from: 1, to: 0), forKey: Self.transitionAnimationKey)
+        if changesFavorites(transition) {
+            pinnedTabsView.alphaValue = 0
+            pinnedTabsView.layer?.add(fade("opacity", from: Float(1), to: Float(0)), forKey: Self.transitionAnimationKey)
         }
         CATransaction.commit()
     }
+
+    // MARK: - Landing
 
     /// Lands the current transition immediately (a new click or gesture arrived):
     /// a settle jumps to its end, a drag still being tracked goes back.
@@ -326,34 +323,20 @@ extension MainViewController: SwipeGestureServiceDelegate {
         finish(transition)
     }
 
+    /// The stage shows the landed page (the target's, or the current one after a
+    /// cancel). The live page is updated and drawn underneath it while still covered,
+    /// and only then does the stage fade away, so nothing flashes.
     private func finish(_ transition: SpaceTransition) {
         let commits: Bool
         if case .settling(let value) = transition.phase { commits = value } else { commits = false }
 
-        workspaceContentStack.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
+        pageStage.removeAllPageAnimations()
+        // Cut short (a click, a new gesture): the pages jump to where they were going.
+        pageStage.setOffset(commits ? transition.side * swipeClipContainer.bounds.width : 0)
         view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         pinnedTabsView.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
-        let fadeInFavorites = commits && changesFavorites(transition)
-        // On a switch the target's snapshot stays over the content, in place, until
-        // the reloaded list has drawn (`collectionView.reloadData()` only rebuilds
-        // rows on the next layout and display); otherwise the old list shows for a
-        // frame and the new one pops in.
-        let cover = commits ? transition.previewView : nil
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        workspaceContentStack.layer?.transform = CATransform3DIdentity
-        if let cover {
-            cover.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
-            cover.removeFromSuperview()
-            cover.frame.origin = .zero
-            cover.layer?.transform = CATransform3DIdentity
-            cover.layer?.opacity = 1
-            swipeClipContainer.addSubview(cover, positioned: .above, relativeTo: workspaceContentStack)
-        } else {
-            transition.previewView?.removeFromSuperview()
-        }
-        CATransaction.commit()
         spaceBar.endSelectionTransition()
+        let fadeInFavorites = commits && changesFavorites(transition)
 
         // Unless something else changed the selection meanwhile (a new space, the
         // agent API): that change wins. Still "in transition" here, so the
@@ -364,56 +347,33 @@ extension MainViewController: SwipeGestureServiceDelegate {
         spaceTransition = nil
         if commits || reloadHeldByTransition {
             reloadHeldByTransition = false
-            // After a switch the page already slid (and the snapshot covers the
-            // reload); a cancelled swipe's held change goes through the normal diff.
-            suppressNodeAnimations = commits
+            // The stage covers the page; no list animation underneath it.
+            suppressNodeAnimations = true
             reloadData()
             suppressNodeAnimations = false
         }
         if commits {
-            // The snapshot showed the new space from the top; land there too.
+            // The new space's image showed it from the top; land there too.
             let clipView = nodeListViewController.scrollView.contentView
             clipView.scroll(to: .zero)
             nodeListViewController.scrollView.reflectScrolledClipView(clipView)
         }
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        pinnedTabsView.layer?.opacity = 1
+        pinnedTabsView.alphaValue = 1
         if fadeInFavorites {
             // The new profile's grid (possibly another height) is in place: fade it in.
-            pinnedTabsView.layer?.add(fade(from: 0, to: 1), forKey: Self.transitionAnimationKey)
+            pinnedTabsView.layer?.add(Self.fade(from: 0, to: 1), forKey: Self.transitionAnimationKey)
         }
-        CATransaction.commit()
 
-        if let cover {
-            landingCover = cover
-            view.layoutSubtreeIfNeeded()
-            view.displayIfNeeded()
-            // Next turn of the run loop: the list's new rows are on screen by then.
-            // The fade hides any pixel the snapshot and the live list don't share.
-            DispatchQueue.main.async { [weak self] in
-                guard self?.landingCover === cover else { return }
-                CATransaction.begin()
-                CATransaction.setCompletionBlock { [weak self] in
-                    cover.removeFromSuperview()
-                    if self?.landingCover === cover { self?.landingCover = nil }
-                }
-                cover.layer?.opacity = 0
-                cover.layer?.add(Self.fade(from: 1, to: 0), forKey: Self.transitionAnimationKey)
-                CATransaction.commit()
-            }
+        workspaceContentStack.isHidden = false
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        // Next turn of the run loop the live page is on screen under the stage.
+        let generation = pageStage.generation
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.spaceTransition == nil, self.pageStage.generation == generation else { return }
+            self.pageStage.fadeOut(duration: ThemeConstants.Animation.durationFast)
         }
-    }
-
-    /// A new transition starts: the previous landing's snapshot must not linger over it.
-    private func removeLandingCover() {
-        landingCover?.removeFromSuperview()
-        landingCover = nil
-    }
-
-    private func fade(from: Float, to: Float) -> CABasicAnimation {
-        Self.fade(from: from, to: to)
     }
 
     private static func fade(from: Float, to: Float) -> CABasicAnimation {
@@ -425,26 +385,34 @@ extension MainViewController: SwipeGestureServiceDelegate {
         return animation
     }
 
-    // MARK: - Snapshot of a space's page
+    // MARK: - Page images
 
-    /// A bitmap of `workspace`'s page (header, scheduled links, list, bottom row),
-    /// rendered in the real content views and then restored. The model is not touched.
-    private func makeSpaceSnapshotView(for workspace: Workspace) -> NSView {
+    /// The page (header, scheduled links, list, bottom row) as it is drawn now.
+    private func pageImage(of page: NSView) -> NSImage? {
+        let bounds = page.bounds
+        guard let bitmap = page.bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
+        page.cacheDisplay(in: bounds, to: bitmap)
+        let image = NSImage(size: bounds.size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+
+    /// `workspace`'s page, rendered in the real (hidden) content views from the top
+    /// and then restored. The model is not touched.
+    private func renderPageImage(for workspace: Workspace) -> NSImage? {
         let started = CACurrentMediaTime()
         let current = model.currentWorkspace
         let clipView = nodeListViewController.scrollView.contentView
         let savedScroll = clipView.bounds.origin
+        // Hidden views don't draw into a bitmap; nothing is displayed in between.
+        let wasHidden = workspaceContentStack.isHidden
+        workspaceContentStack.isHidden = false
+        defer { workspaceContentStack.isHidden = wasHidden }
 
         renderSpaceContent(workspace)
         clipView.scroll(to: .zero)
         workspaceContentStack.layoutSubtreeIfNeeded()
-        let bounds = workspaceContentStack.bounds
-        var image: NSImage?
-        if let bitmap = workspaceContentStack.bitmapImageRepForCachingDisplay(in: bounds) {
-            workspaceContentStack.cacheDisplay(in: bounds, to: bitmap)
-            image = NSImage(size: bounds.size)
-            image?.addRepresentation(bitmap)
-        }
+        let image = pageImage(of: workspaceContentStack)
 
         renderSpaceContent(current)
         workspaceContentStack.layoutSubtreeIfNeeded()
@@ -454,15 +422,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         let milliseconds = (CACurrentMediaTime() - started) * 1000
         let rows = workspace.items.count
         Self.transitionLogger.debug("snapshot of a space with \(rows, privacy: .public) top-level items took \(milliseconds, format: .fixed(precision: 1), privacy: .public) ms")
-
-        let container = SnapshotView(frame: NSRect(origin: .zero, size: swipeClipContainer.bounds.size))
-        container.wantsLayer = true
-        let imageView = NSImageView(frame: container.bounds)
-        imageView.imageScaling = .scaleNone
-        imageView.imageAlignment = .alignTopLeft
-        imageView.image = image
-        container.addSubview(imageView)
-        return container
+        return image
     }
 
     /// Shows `workspace`'s page content in the content views (what `reloadData`
@@ -479,10 +439,4 @@ extension MainViewController: SwipeGestureServiceDelegate {
         let items = searching ? workspace.items : ScheduledLinkFiltering.hideScheduled(workspace.items)
         nodeListViewController.reloadData(with: searchCoordinator.filter(nodes: items), forceExpand: searching, animated: false)
     }
-}
-
-/// A space page snapshot. Never takes clicks: while it fades out over the live
-/// content after a switch, clicks must reach the real list underneath.
-private final class SnapshotView: NSView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

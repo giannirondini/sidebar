@@ -149,36 +149,34 @@ final class SpaceBarView: NSView {
         return spaceButtons[index].frame
     }
 
+    // The pill moves by its frame (which AppKit keeps) plus an additive animation,
+    // never by a layer transform: AppKit resets the transforms of its views' layers.
+
     /// While a swipe is tracked: the pill sits `progress` (0…1) of the way from
     /// the selected space's icon toward `targetId`'s (nil: stays put).
     func setSelectionProgress(toward targetId: UUID?, progress: CGFloat) {
         guard let selectedId, let from = buttonFrame(for: selectedId) else { return }
         let to = targetId.flatMap { buttonFrame(for: $0) } ?? from
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        selectionPill.frame = from
-        selectionPill.layer?.transform = CATransform3DMakeTranslation((to.minX - from.minX) * progress, 0, 0)
-        CATransaction.commit()
+        selectionPill.frame = from.offsetBy(dx: (to.minX - from.minX) * progress, dy: 0)
     }
 
     /// Moves the pill from where it is now to `spaceId`'s icon with `animation`,
-    /// which receives the start and end x offsets (`transform.translation.x`).
+    /// built for `keyPath` from the start to the end offset (applied additively).
     /// Call inside the transition's `CATransaction` so it runs in step with the page.
-    func settleSelection(on spaceId: UUID, animation: (_ from: CGFloat, _ to: CGFloat) -> CAAnimation) {
+    func settleSelection(on spaceId: UUID, animation: (_ keyPath: String, _ from: CGFloat, _ to: CGFloat) -> CAPropertyAnimation) {
         guard !isSettingsShown, let target = buttonFrame(for: spaceId), let layer = selectionPill.layer else { return }
-        let presented = layer.presentation()?.transform.m41 ?? layer.transform.m41
-        let currentX = selectionPill.frame.minX + presented
+        let currentX = selectionPill.frame.minX
         pillTargetId = spaceId
         layer.removeAnimation(forKey: Self.pillAnimationKey)
         selectionPill.frame = target
-        layer.transform = CATransform3DIdentity
-        layer.add(animation(currentX - target.minX, 0), forKey: Self.pillAnimationKey)
+        let move = animation("position.x", currentX - target.minX, 0)
+        move.isAdditive = true
+        layer.add(move, forKey: Self.pillAnimationKey)
     }
 
     /// Ends a settle: the pill rests on its target; the next `update` takes over.
     func endSelectionTransition() {
         selectionPill.layer?.removeAnimation(forKey: Self.pillAnimationKey)
-        selectionPill.layer?.transform = CATransform3DIdentity
         pillTargetId = nil
     }
 

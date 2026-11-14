@@ -39,8 +39,8 @@ final class MainViewController: NSViewController {
     /// Reloading mid-transition would reset the colour, snap the bar's pill and
     /// swap the list under the moving page.
     var reloadHeldByTransition = false
-    /// The last switch's snapshot, fading out over the freshly drawn list.
-    var landingCover: NSView?
+    /// Draws the pages while a space transition runs (over the live page, which is hidden).
+    let pageStage = SpacePageStage()
 
     init(model: AppModel) {
         self.model = model
@@ -182,6 +182,8 @@ final class MainViewController: NSViewController {
         clipContainer.layer?.masksToBounds = true
         swipeClipContainer = clipContainer
         clipContainer.addSubview(contentStack)
+        pageStage.translatesAutoresizingMaskIntoConstraints = false
+        clipContainer.addSubview(pageStage, positioned: .above, relativeTo: contentStack)
 
         // Outer stack: search field, Favorites, the swipe clip container, then the space bar.
         // Favorites sit outside the clip: they belong to the profile, not the space, so a
@@ -210,6 +212,10 @@ final class MainViewController: NSViewController {
             contentStack.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
             contentStack.topAnchor.constraint(equalTo: clipContainer.topAnchor),
             contentStack.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
+            pageStage.leadingAnchor.constraint(equalTo: clipContainer.leadingAnchor),
+            pageStage.trailingAnchor.constraint(equalTo: clipContainer.trailingAnchor),
+            pageStage.topAnchor.constraint(equalTo: clipContainer.topAnchor),
+            pageStage.bottomAnchor.constraint(equalTo: clipContainer.bottomAnchor),
 
             // Clip container fills width of outer stack
             clipContainer.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
