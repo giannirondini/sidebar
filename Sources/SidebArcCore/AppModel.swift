@@ -68,6 +68,93 @@ final class AppModel {
         state.profiles.first(where: { $0.id == id })
     }
 
+    func workspaces(inProfile id: UUID) -> [Workspace] {
+        state.workspaces.filter { $0.profileId == id }
+    }
+
+    @discardableResult
+    func createProfile(name: String) -> UUID {
+        let profile = Profile(name: name)
+        state.profiles.append(profile)
+        persist()
+        return profile.id
+    }
+
+    func renameProfile(id: UUID, newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        updateProfile(id: id) { $0.name = trimmed }
+    }
+
+    /// Sets the browser for every space in the profile; `nil` inherits the global default.
+    func setProfileBrowser(id: UUID, bundleId: String?) {
+        updateProfile(id: id) { $0.browserBundleId = bundleId }
+    }
+
+    func assignWorkspace(_ workspaceId: UUID, toProfile profileId: UUID) {
+        guard state.profiles.contains(where: { $0.id == profileId }) else { return }
+        updateWorkspace(id: workspaceId) { $0.profileId = profileId }
+    }
+
+    /// The profile that receives the spaces and favorites of `id` when it is
+    /// deleted: the first remaining profile. `nil` when `id` is the last one.
+    func profileDeletionTarget(for id: UUID) -> Profile? {
+        guard state.profiles.contains(where: { $0.id == id }) else { return nil }
+        return state.profiles.first(where: { $0.id != id })
+    }
+
+    /// Deletes a profile. Its spaces move to `profileDeletionTarget(for:)` and its
+    /// favorites are merged into that profile's (deduplicated, capped). Favorites
+    /// that don't fit go into a "Favorites (from <name>)" folder at the top of the
+    /// first moved space (or the target's first space), so nothing is lost.
+    /// The last profile can't be deleted.
+    func deleteProfile(id: UUID) {
+        guard let target = profileDeletionTarget(for: id),
+              let deletedIndex = state.profiles.firstIndex(where: { $0.id == id }),
+              let targetIndex = state.profiles.firstIndex(where: { $0.id == target.id }) else { return }
+
+        var next = state
+        let deleted = next.profiles[deletedIndex]
+        let movedSpaceIndices = next.workspaces.indices.filter { next.workspaces[$0].profileId == id }
+        for index in movedSpaceIndices {
+            next.workspaces[index].profileId = target.id
+        }
+
+        let leftovers = next.profiles[targetIndex].appendFavorites(deleted.favorites)
+        if !leftovers.isEmpty {
+            // No space to hold them (no workspaces at all): refuse rather than drop links.
+            guard let spaceIndex = movedSpaceIndices.first
+                    ?? next.workspaces.firstIndex(where: { $0.profileId == target.id })
+                    ?? next.workspaces.indices.first else { return }
+            let folder = Folder(
+                id: UUID(),
+                name: "Favorites (from \(deleted.name))",
+                children: leftovers.map { .link($0) },
+                isExpanded: true
+            )
+            next.workspaces[spaceIndex].items.insert(.folder(folder), at: 0)
+        }
+
+        next.profiles.remove(at: deletedIndex)
+        state = next
+        persist()
+    }
+
+    /// Sets or clears (nil) the per-link browser override, for a link in any
+    /// space's list or in any profile's favorites.
+    func setLinkBrowserOverride(id: UUID, bundleId: String?) {
+        if state.profiles.contains(where: { $0.favorites.contains(where: { $0.id == id }) }) {
+            updateFavorite(id: id) { $0.browserBundleId = bundleId }
+            return
+        }
+        updateNode(id: id) { node in
+            if case .link(var link) = node {
+                link.browserBundleId = bundleId
+                node = .link(link)
+            }
+        }
+    }
+
     func selectWorkspace(id: UUID) {
         guard state.workspaces.contains(where: { $0.id == id }) else { return }
         state.selectedWorkspaceId = id
