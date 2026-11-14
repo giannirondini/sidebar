@@ -70,6 +70,21 @@ extension MainViewController: SwipeGestureServiceDelegate {
         endSpaceSwipe(translation: translationX, velocity: velocityX, forceStay: false)
     }
 
+    // MARK: - Input during a transition
+
+    /// While a page slides, AppKit still hit-tests the old space's views (a layer
+    /// transform doesn't move a view's frame) and the model still selects the old
+    /// space. So any click or key lands the transition first; the event then
+    /// reaches the new space. Local monitors run before the event is dispatched.
+    func installTransitionInputMonitor() {
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
+            if let self, self.spaceTransition != nil {
+                self.finishSpaceTransitionNow()
+            }
+            return event
+        }
+    }
+
     // MARK: - Entry points
 
     /// A click on a space bar icon or ⌘⌥←/→: slide to `id` with the same spring as
@@ -92,6 +107,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
         }
         let transition = SpaceTransition(fromWorkspace: workspaces[fromIndex], fromIndex: fromIndex)
         spaceTransition = transition
+        // A rename belongs to the space being left (and would show in the snapshot).
+        spaceHeader.cancelInlineRename()
         // Further away than one space still slides one page, from its side.
         prepareTarget(of: transition, target: (workspaces[toIndex], toIndex), side: toIndex < fromIndex ? 1 : -1)
         settle(transition, commits: true, releaseVelocity: 0)
@@ -110,6 +127,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
             guard let index = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return }
             transition = SpaceTransition(fromWorkspace: workspaces[index], fromIndex: index)
             spaceTransition = transition
+            spaceHeader.cancelInlineRename()
         }
 
         let width = swipeClipContainer.bounds.width
@@ -329,8 +347,10 @@ extension MainViewController: SwipeGestureServiceDelegate {
         transition.previewView?.removeFromSuperview()
         spaceBar.endSelectionTransition()
 
-        if commits, let target = transition.target {
-            // Still "in transition", so this change is held rather than reloaded twice.
+        // Unless something else changed the selection meanwhile (a new space, the
+        // agent API): that change wins. Still "in transition" here, so the
+        // selection's own reload is held rather than run twice.
+        if commits, let target = transition.target, model.currentWorkspace.id == transition.fromWorkspace.id {
             model.selectWorkspace(id: target.workspace.id)
         }
         spaceTransition = nil

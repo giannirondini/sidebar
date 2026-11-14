@@ -14,7 +14,7 @@ final class MainViewController: NSViewController {
     let spaceBar = SpaceBarView()
     private let searchField = SearchBarView(style: .defaultSearch)
     let pinnedTabsView = PinnedTabsView()
-    private let spaceHeader = SpaceHeaderView()
+    let spaceHeader = SpaceHeaderView()
     let scheduledLinksAccordion = ScheduledLinksAccordionView()
     /// "+ Add from Clipboard": the last row under the pinned list (Arc's "New Tab" row).
     private let pasteButton = IconTitleButton(
@@ -72,6 +72,7 @@ final class MainViewController: NSViewController {
         setupNodeListCallbacks()
         bindModel()
         reloadData()
+        installTransitionInputMonitor()
 
         // Listen for favicon updates
         NotificationCenter.default.addObserver(
