@@ -137,9 +137,11 @@ enum AutomationPermission: Equatable {
     /// The click path passes `ask: false`; only Settings asks.
     static func check(pid: pid_t, ask: Bool) -> AutomationPermission {
         let target = NSAppleEventDescriptor(processIdentifier: pid)
-        guard let address = target.aeDesc else { return .other(Int(paramErr)) }
-        let status = AEDeterminePermissionToAutomateTarget(address, typeWildCard, typeWildCard, ask)
-        return AutomationPermission(status: status)
+        // `aeDesc` borrows from `target`: keep it alive for the whole call.
+        return withExtendedLifetime(target) {
+            guard let address = target.aeDesc else { return .other(Int(paramErr)) }
+            return AutomationPermission(status: AEDeterminePermissionToAutomateTarget(address, typeWildCard, typeWildCard, ask))
+        }
     }
 }
 
