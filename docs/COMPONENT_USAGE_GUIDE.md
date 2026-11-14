@@ -7,7 +7,9 @@ This guide provides practical examples for using SidebArc's base classes and des
 2. [BaseControl](#basecontrol)
 3. [BaseView](#baseview)
 4. [InlineEditableTextField](#inlineeditabletextfield)
-5. [Common Patterns](#common-patterns)
+5. [Space Components](#space-components)
+6. [Menu Builders](#menu-builders)
+7. [Common Patterns](#common-patterns)
 
 ---
 
@@ -407,6 +409,115 @@ final class EditableRowView: BaseView {
 
 ---
 
+## Space Components
+
+The space UI (Phase 3a) lives in `Components/Spaces/`. All three take data, never the
+`AppModel`; `MainViewController` wires their callbacks to model calls.
+
+### SpaceIconView
+
+A space's emoji or SF Symbol (`Workspace.icon`), or a dot in its colour when it has none.
+Use it anywhere a space is shown, so icons look the same everywhere.
+
+```swift
+let iconView = SpaceIconView()
+iconView.iconSize = ThemeConstants.Sizing.iconMedium   // emoji/symbol size
+iconView.dotSize = ThemeConstants.Sizing.iconSmall     // colour dot diameter
+iconView.configure(icon: workspace.icon, color: workspace.colorId.color)
+
+// Just the image (e.g. for an NSImageView in an existing row):
+let image = SpaceIconView.image(for: .emoji("🚀"), size: ThemeConstants.Sizing.iconMedium)
+```
+
+### SpaceBarView
+
+The bottom bar: gear, one button per space, `+`. Feed it the whole list on every reload;
+it rebuilds buttons only when the items change, and keeps the selected one scrolled into view.
+
+```swift
+spaceBar.update(
+    items: model.workspaces.map { SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, colorId: $0.colorId) },
+    selectedId: model.currentWorkspace.id,
+    isSettingsShown: model.isSettingsShown
+)
+spaceBar.onSpaceSelected = { id in /* requestSpaceSwitch(to: id) */ }
+spaceBar.onSpaceContextMenu = { id, event in /* SpaceMenu, anchored to spaceBar.buttonView(for: id) */ }
+spaceBar.onAddSpace = { /* create a space */ }
+spaceBar.onSettings = { /* toggle Settings */ }
+```
+
+- Register it with `SwipeGestureService.shared.addExcludedView(spaceBar)`, so a horizontal
+  scroll over it scrolls the bar instead of switching spaces.
+- The selection is a separate pill view. During a space transition, drive it with
+  `setSelectionProgress(toward:progress:)` while tracking and `settleSelection(on:animation:)`
+  inside the transition's `CATransaction`; call `endSelectionTransition()` when it lands.
+- `SpaceBarButton` (a `BaseControl`) is the square button used for all three kinds; its
+  content is dimmed unless selected or hovered.
+
+### SpaceHeaderView
+
+The current space's icon and name between the Favorites and the pinned list. It uses
+`ListMetrics`, so its icon and title line up with a top-level row of the list.
+
+```swift
+spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.colorId.color)
+spaceHeader.onRename = { newName in /* model.renameWorkspace */ }        // after a double-click
+spaceHeader.onIconClicked = { anchor in /* icon picker, kind .space */ }
+spaceHeader.onContextMenu = { event in /* SpaceMenu */ }
+spaceHeader.beginInlineRename()                                          // from a menu or a new space
+```
+
+`configure` never touches the title while it is being edited (the text field returns the
+live typed value), so a reload mid-rename can't end it. Switching spaces cancels a rename.
+
+### IconTitleButton `.listRow`
+
+A dimmed "+ Title" row that reads as the last row of a list (Arc's "New Tab" row): the
+icon sits in the list's icon column, the title where link titles start, and it is as tall
+as a list row. All of it is derived from `ListMetrics`.
+
+```swift
+let row = IconTitleButton(title: "Add from Clipboard", symbolName: "plus", style: .listRow)
+```
+
+---
+
+## Menu Builders
+
+Context menus are built by small enums that only build items (`BrowserMenus`, `SpaceMenu`);
+every action is a closure supplied by the caller, which makes the `AppModel` call.
+
+```swift
+let menu = SpaceMenu.build(
+    workspace: workspace,
+    canDelete: model.workspaces.count > 1,
+    profileItem: profileMenuItem(for: workspace),
+    actions: SpaceMenu.Actions(
+        rename: { /* … */ },
+        changeIcon: { /* … */ },
+        setColor: { colorId in model.updateWorkspaceColor(id: workspace.id, colorId: colorId) },
+        moveLeft: index > 0 ? { /* … */ } : nil,      // nil hides the item
+        moveRight: nil,
+        delete: { /* confirm, then delete */ }
+    )
+)
+```
+
+Rules:
+
+1. **Use `ClosureMenuItem`** for closure actions. Never name an `@objc` action method
+   `perform(_:)`: `#selector` resolves to NSObject's `performSelector:`, AppKit swallows the
+   exception, and the item silently does nothing.
+2. **Capture the id** of the thing the menu is for. Don't act on "the current" space or
+   link: opening a menu must not change the selection.
+3. **Set `menu.autoenablesItems = false`** when an item can be disabled; otherwise AppKit
+   re-enables every item whose target responds to its action.
+4. **Test the dispatch**: build the menu, call `menu.performActionForItem(at:)` and check the
+   closure ran (see `ClosureMenuItemTests`, `SpaceMenuTests`). A menu that only renders is
+   not tested.
+
+---
+
 ## Common Patterns
 
 ### Pattern 1: Hover State with Animation
@@ -617,3 +728,4 @@ let cornerRadius = ThemeConstants.CornerRadius.medium
 - See [CLAUDE.md](/CLAUDE.md) for architecture overview
 - Check the source code for `BaseControl`, `BaseView`, and `InlineEditableTextField` for implementation details
 - Look at existing components like `IconTitleButton`, `NodeRowView`, and `WorkspaceRowView` for real-world examples
+- For the space UI, see `SpaceBarView`, `SpaceHeaderView`, `SpaceIconView` and `SpaceMenu`; for the space switch, CLAUDE.md › "Space layout and switching"

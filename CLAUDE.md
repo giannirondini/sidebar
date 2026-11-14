@@ -96,9 +96,9 @@ The application follows a unidirectional data flow pattern:
 
 The data model is defined in `Models.swift`:
 
-- **AppState** - Root container: `schemaVersion` (currently 2), `profiles`, `workspaces`, selected workspace ID, `isSettingsSelected`
+- **AppState** - Root container: `schemaVersion` (currently 2), `profiles`, `workspaces`, selected workspace ID. Whether Settings is shown is runtime state (`AppModel.isSettingsShown`), not saved; older files' `isSettingsSelected` key is ignored
 - **Profile** - Groups spaces that share a browser setup and the Favorites grid: `name`, `browserBundleId` (nil = global default browser), `browserProfiles` (browser bundle id → browser profile dir), `favorites: [Link]` (max `Profile.maxFavorites` = 12), `focusesOpenTabs: Bool?` (nil = automatic)
-- **Workspace** - Named, colored container with hierarchical `items` and a `profileId` (every space belongs to exactly one profile)
+- **Workspace** - Named, colored container with hierarchical `items`, a `profileId` (every space belongs to exactly one profile) and an optional `icon: CustomIcon?` (emoji or SF Symbol; nil shows the colour dot). The UI says "Space"; code, data keys and the agent API keep `workspace`
 - **Node** - Enum of `Folder`, `Link` or `Note`
   - `Folder` - Contains nested children and isExpanded state
   - `Link` - URL, title, optional favicon path, custom icon, schedule, `browserBundleId` (per-link browser override) and `exactTabMatch: Bool?`
@@ -129,6 +129,17 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 - **Not supported** (open new, no error): Firefox (no dictionary), Dia and Arc (own dictionaries, not verified; Dia is personal-Mac only), Edge/Vivaldi/Canary/Helium (not installed). Add a browser only after verifying it on a Mac: `TabLocators.locator(for:)`.
 - Manual checklist for real browsers: `docs/TAB_FOCUS_CHECKLIST.md`.
 
+### Space layout and switching (Phase 3a)
+
+- **Layout, top to bottom** (`MainViewController.setupUI`): search field → Favorites grid (`PinnedTabsView`, **outside** the swipe clip: it belongs to the profile) → swipe clip [`SpaceHeaderView`, scheduled links, the pinned list, "+ Add from Clipboard" row (`IconTitleButton` `.listRow`)] → `SpaceBarView`. No top bar.
+- **Space bar** (`Components/Spaces/SpaceBarView`): gear (Settings), one `SpaceBarButton` per space (`SpaceIconView`: icon or colour dot; native tooltip = name; right-click = space menu), `+`. Centred while they fit, then scrolls horizontally with faded edges; the selection is a separate pill view (it slides during a transition). Registered with `SwipeGestureService.addExcludedView`.
+- **Space header** (`SpaceHeaderView`): the current space's icon and name, aligned with list rows. Double-click renames (all renames go through it: `beginSpaceRename`, the new-space flow); click the icon for the picker (`IconPickerKind.space`: no Favicon tab); right-click for the menu.
+- **Space menu** (`SpaceMenu.build`): `ClosureMenuItem`s that capture the space id, so it never switches space; `autoenablesItems = false` (otherwise a disabled item is re-enabled). Dispatch tests: `SpaceMenuTests`.
+- **Settings** is not a space: `AppModel.showSettings()` / `closeSettings()` (runtime, keeps the selected space). Gear toggles, ⌘, opens, Esc closes; ⌘⌥←/→ and swipes do nothing there; creating a space closes it. The agent API reports no current space while it's shown.
+- **Switching spaces** (`MainViewController+SpaceTransition`, `SpaceTransition`): a swipe, a space bar click and ⌘⌥←/→ all go through it (`requestSpaceSwitch(to:)` for clicks and keys; never call `model.selectWorkspace` for user navigation). The live page and a snapshot of the target move together, 1:1 with the finger; on release `SpaceSwipe.outcome` decides (past 30% of the width, or a ≥ 300 pt/s flick in the drag direction; a flick back stays) and a critically damped `CASpringAnimation` settles, starting at the release speed capped at ω × remaining (no overshoot). Rubber band at the ends. Background colour, the bar's pill and (across profiles only) the Favorites' opacity follow the same progress and spring. Instant from Settings or to the current space.
+- **Transition rules:** model reloads are held while a transition runs (`reloadHeldByTransition`) and run once on landing; any click or key lands a running transition first (local event monitor), because AppKit still hit-tests the old page; the snapshot is rendered in the real views without touching the model, and stays over the content (click-through) until the reloaded list has drawn, then fades (no flicker); a switch lands with the list at the top; Reduce Motion (read per transition) crossfades instead. Tuning: `ThemeConstants.SpaceTransition`. Pure logic and tests: `SpaceSwipe`, `SwipeVelocityEstimator`, `SpaceSwipeTests`.
+- **Favorites grid:** columns adapt to the width (`PinnedTabsView.columnCount`: tiles ≥ `pinnedTileMinWidth`, at least 3: 3 at the default 340-pt sidebar, 4 from ~412, 5 from ~512); rows grow to fit. `Profile.maxFavorites` is a literal 12, independent of the layout. Tiles: `pinnedTileSpacing` gaps, `CornerRadius.large`; the bottom-centre is reserved for the Phase 2b live-tab dot (the top-trailing corner holds the browser badge).
+
 ### Key Components
 
 **Services** (all MainActor singletons):
@@ -138,13 +149,14 @@ All models are Codable and use UUID-based identification. The Node enum uses cus
 - **TabFocusService** - Click → focus an open tab or open new (`TabFocus`, `TabLocator`, `TabURLMatcher`)
 
 **UI Components**:
-- **MainViewController** - Collection view-based hierarchical list with animations (reduced from 1352 to 596 lines through Phase 3 refactoring)
+- **MainViewController** - Layout, model binding, menus (~1000 lines; the space transition is in `MainViewController+SpaceTransition`)
 - **NodeListViewController** - Manages collection view, drag-drop, context menus (extracted from MainViewController)
 - **SearchCoordinator** - Handles search/filtering logic (extracted from MainViewController)
-- **SettingsContentViewController** - Settings page: workspace list, default browser, profiles (`ProfileSettingsView`), permissions, import
+- **SettingsContentViewController** - Settings page: space list (drag to reorder), default browser, profiles (`ProfileSettingsView`), permissions, import
 - **NodeCollectionViewItem** - Reusable cell with icon, title, hover states, delete button
 - **SearchBarView** - Search field that filters nodes
-- **IconTitleButton** - Custom button for paste action
+- **IconTitleButton** - Icon + title button; `.listRow` style is the "+ Add from Clipboard" row
+- **SpaceBarView**, **SpaceHeaderView**, **SpaceIconView**, **SpaceMenu** - Space bar, header, icon/colour dot and space menu (`Components/Spaces`, `Components/Menus`)
 - **ListFlowLayout** - Custom NSCollectionViewLayout for vertical list
 
 ### UI Component Architecture (Post-Refactoring)
@@ -240,7 +252,7 @@ When moving nodes, the system:
 
 ### Workspace Colors
 
-WorkspaceColorId enum defines 8 color themes (Blush, Apricot, Butter, Leaf, Mint, Sky, Periwinkle, Lavender). Each color affects:
+WorkspaceColorId enum defines 8 color themes, shown as Blush, Apricot, Butter, Leaf, Mint, Sky, Periwinkle, Lavender (the cases are `ember`, `ruby`, `coral`, `tangerine`, `moss`, `ocean`, `indigo`, `graphite`; `settingsBackground` is Settings' colour, not offered for spaces). Each color affects:
 - Window background color (color at 0.92 alpha)
 - View layer background color
 
@@ -298,7 +310,7 @@ The codebase underwent a comprehensive refactoring (2026-02-10) to eliminate cod
 - Created `WorkspaceManagementView` for settings (~380 lines); never wired in, removed on 2026-11-14 (Settings uses `SettingsContentViewController`)
 
 **Phase 4 - Remaining Components (✅ Complete)**:
-- Migrated `SearchBarView`, `WorkspaceSwitcherView`, `SidebarPositionSelector` to use ThemeConstants
+- Migrated `SearchBarView`, `WorkspaceSwitcherView` (removed in Phase 3a, replaced by `SpaceBarView`), `SidebarPositionSelector` to use ThemeConstants
 - Migrated nested button classes in `WorkspaceSwitcherView` to extend BaseControl
 - Eliminated ~205 additional lines of duplicate code
 

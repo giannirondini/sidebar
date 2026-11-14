@@ -52,10 +52,16 @@ Sources/SidebArcCore/
 │   │   └── ... (collection view items, layout)
 │   ├── Inputs/
 │   │   └── SearchBarView.swift
-│   └── Navigation/
-│       └── WorkspaceSwitcherView.swift
+│   ├── Menus/
+│   │   ├── BrowserMenus.swift         # Open in ▸ / Always open in ▸ / Profile ▸
+│   │   └── SpaceMenu.swift            # A space's context menu (acts on that space)
+│   └── Spaces/
+│       ├── SpaceBarView.swift         # Bottom bar: gear, space icons, +
+│       ├── SpaceHeaderView.swift      # Current space's icon and name (rename here)
+│       └── SpaceIconView.swift        # A space's emoji/symbol or colour dot
 ├── ViewControllers/
-│   ├── MainViewController.swift       # Main coordinator (596 lines, down from 1352)
+│   ├── MainViewController.swift       # Main coordinator: layout, model binding, menus
+│   ├── MainViewController+SpaceTransition.swift  # Swipe/click/keyboard space switch
 │   ├── NodeListViewController.swift   # Manages collection view (~800 lines)
 │   ├── SearchCoordinator.swift        # Handles search/filtering (~65 lines)
 │   └── ... (preferences, settings)
@@ -78,6 +84,7 @@ Sources/SidebArcCore/
     ├── NodeFiltering.swift            # Recursive filtering
     ├── TabURLMatcher.swift            # Which open tab shows a link
     ├── URLNormalization.swift         # Favorites dedupe key
+    ├── SpaceSwipe.swift               # Pure swipe decisions, spring, release velocity
     └── Theme/
         └── ThemeConstants.swift       # Design system constants
 ```
@@ -89,8 +96,8 @@ AppState                      // Root container (data.json, schemaVersion 2)
 ├── schemaVersion: Int
 ├── profiles: [Profile]       // At least one
 ├── workspaces: [Workspace]
-├── selectedWorkspaceId: UUID?
-└── isSettingsSelected: Bool
+└── selectedWorkspaceId: UUID?
+                              // Settings shown: runtime only (AppModel.isSettingsShown)
 
 Profile                       // Spaces sharing a browser setup and Favorites
 ├── id: UUID
@@ -104,7 +111,8 @@ Workspace                     // A space
 ├── name: String
 ├── colorId: WorkspaceColorId
 ├── items: [Node]             // Root-level items (the pinned list)
-└── profileId: UUID
+├── profileId: UUID
+└── icon: CustomIcon?         // Emoji or SF Symbol; nil = colour dot
 
 Node                          // Recursive tree structure
 ├── .folder(Folder)
@@ -175,7 +183,7 @@ click → TabFocusService.open (main actor)
 - **Design consistency** - all components use ThemeConstants for colors/fonts/spacing
 
 ### ViewController Decomposition (Phase 3)
-- **MainViewController** (596 lines) - Coordinator between search, list, and settings
+- **MainViewController** - Coordinator between search, Favorites, the space page, the space bar and Settings (596 lines after Phase 3; ~1000 since profiles, tab focus and the Phase 3a space UI). The space switch lives in `MainViewController+SpaceTransition` (see CLAUDE.md › "Space layout and switching")
 - **NodeListViewController** (~800 lines) - Collection view, drag-drop, context menus
 - **SearchCoordinator** (~65 lines) - Search/filtering logic
 - **SettingsContentViewController** - Settings page (workspace list, default browser, profiles, permissions, import). The extracted `WorkspaceManagementView` was never wired in and was removed on 2026-11-14
