@@ -1234,9 +1234,9 @@ final class SettingsContentViewController: NSViewController {
             let browserName = BrowserManager.appName(bundleId: bundleId) ?? bundleId
             if let dir = TextPrompt.run(
                 message: "Browser Profile",
-                informative: "Enter the \(browserName) profile identifier (its directory name).",
+                informative: "\(browserName): \(BrowserManager.manualProfileHint(bundleId: bundleId))",
                 initial: current,
-                placeholder: "e.g. Profile 1",
+                placeholder: nil,
                 confirmTitle: "Save"
             ) {
                 appModel.updateBrowserProfile(profileId: profileId, bundleId: bundleId, profile: dir)
@@ -1251,12 +1251,17 @@ final class SettingsContentViewController: NSViewController {
         let rows = appModel.profiles.map { profile -> ProfileSettingsView.Row in
             let resolved = BrowserManager.resolveTarget(link: nil, profile: profile).bundleId
             let supports = resolved.map { BrowserManager.supportsProfiles(bundleId: $0) } ?? false
+            let detection: BrowserManager.ProfileDetection = supports
+                ? resolved.map { BrowserManager.detectProfileList(bundleId: $0) } ?? .unavailable
+                : .unavailable
             return ProfileSettingsView.Row(
                 profile: profile,
                 spaceCount: appModel.workspaces(inProfile: profile.id).count,
                 resolvedBrowser: resolved,
                 supportsBrowserProfiles: supports,
-                detectedBrowserProfiles: supports ? resolved.map { BrowserManager.detectProfiles(bundleId: $0) } ?? [] : [],
+                detectedBrowserProfiles: detection.profiles,
+                browserProfilesDenied: detection == .accessDenied,
+                resolvedBrowserName: resolved.flatMap { BrowserManager.appName(bundleId: $0) },
                 browserIsMissing: profile.browserBundleId.map { !BrowserManager.isInstalled(bundleId: $0) } ?? false
             )
         }

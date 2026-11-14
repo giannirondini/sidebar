@@ -1,5 +1,6 @@
 import AppKit
 import SQLite3
+import os
 
 struct BrowserInfo: Equatable {
     let bundleId: String
@@ -7,7 +8,7 @@ struct BrowserInfo: Equatable {
     let icon: NSImage?
 }
 
-struct BrowserProfile {
+struct BrowserProfile: Equatable {
     let id: String          // Internal identifier (directory name for Chrome, relative path for Firefox selectable profiles, profile name for Firefox legacy)
     let displayName: String // Human-readable name
 }
@@ -181,20 +182,60 @@ enum BrowserManager {
         return supported.contains(bundleId.lowercased())
     }
 
-    static func detectProfiles(bundleId: String) -> [BrowserProfile] {
-        let lowered = bundleId.lowercased()
+    /// Result of reading a browser's profile list.
+    enum ProfileDetection: Equatable {
+        case found([BrowserProfile])
+        /// macOS (app-data protection) or file permissions blocked reading the
+        /// browser's profile list. Profiles can still be entered manually.
+        case accessDenied
+        /// Unsupported browser, browser data not present, or no profiles listed.
+        case unavailable
 
-        switch lowered {
-        case "com.google.chrome":
-            return detectChromeProfiles(supportDir: "Google/Chrome")
-        case "com.google.chrome.canary":
-            return detectChromeProfiles(supportDir: "Google/Chrome Canary")
-        case "net.imput.helium":
-            return detectChromeProfiles(supportDir: "net.imput.helium")
-        case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
-            return detectFirefoxProfiles(supportDir: "Firefox")
-        default:
+        var profiles: [BrowserProfile] {
+            if case .found(let profiles) = self { return profiles }
             return []
+        }
+    }
+
+    static func detectProfiles(bundleId: String) -> [BrowserProfile] {
+        detectProfileList(bundleId: bundleId).profiles
+    }
+
+    /// `supportRoot` is `~/Library/Application Support`; tests pass a temp directory.
+    static func detectProfileList(bundleId: String, supportRoot: URL? = nil) -> ProfileDetection {
+        let root = supportRoot ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+        let result: ProfileDetection
+        switch bundleId.lowercased() {
+        case "com.google.chrome":
+            result = detectChromeProfiles(dir: root.appendingPathComponent("Google/Chrome"))
+        case "com.google.chrome.canary":
+            result = detectChromeProfiles(dir: root.appendingPathComponent("Google/Chrome Canary"))
+        case "net.imput.helium":
+            result = detectChromeProfiles(dir: root.appendingPathComponent("net.imput.helium"))
+        case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
+            result = detectFirefoxProfiles(firefoxDir: root.appendingPathComponent("Firefox"))
+        default:
+            return .unavailable
+        }
+        switch result {
+        case .found(let profiles):
+            logger.info("\(bundleId, privacy: .public): \(profiles.count) browser profile(s) detected")
+        case .accessDenied:
+            logger.error("\(bundleId, privacy: .public): reading the browser profile list was denied (macOS privacy protection or file permissions)")
+        case .unavailable:
+            logger.info("\(bundleId, privacy: .public): no browser profile list found")
+        }
+        return result
+    }
+
+    /// Hint for the manual "Other…" entry.
+    static func manualProfileHint(bundleId: String) -> String {
+        switch bundleId.lowercased() {
+        case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
+            return "Enter the profile name or its Root Directory, both shown in Firefox at about:profiles."
+        default:
+            return "Enter the browser profile directory name, e.g. “Profile 1”."
         }
     }
 
@@ -204,7 +245,12 @@ enum BrowserManager {
         case "com.google.chrome", "com.google.chrome.canary", "net.imput.helium":
             return ["--profile-directory=\(profile)"]
         case "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition":
-            // Selectable Profiles: profile is a relative path like "Profiles/xxxx.Name"
+            // Absolute path (e.g. the Root Directory from about:profiles, entered manually)
+            if profile.hasPrefix("/") {
+                return ["-profile", profile]
+            }
+            // Relative path inside the Firefox folder: selectable profiles, or
+            // classic profiles.ini entries ("Profiles/xxxx.Name")
             if profile.hasPrefix("Profiles/") {
                 let home = FileManager.default.homeDirectoryForCurrentUser
                 let absolutePath = home
@@ -213,7 +259,7 @@ enum BrowserManager {
                     .path
                 return ["-profile", absolutePath]
             }
-            // Legacy: profile is a name from profiles.ini
+            // Classic profile name from profiles.ini
             return ["-P", profile]
         default:
             return []
@@ -222,16 +268,41 @@ enum BrowserManager {
 
     // MARK: - Private Profile Detection
 
-    private static func detectChromeProfiles(supportDir: String) -> [BrowserProfile] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let localStatePath = home
-            .appendingPathComponent("Library/Application Support/\(supportDir)/Local State")
+    private static let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "browser")
 
-        guard let data = try? Data(contentsOf: localStatePath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    private static func isPermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoPermissionError { return true }
+        if nsError.domain == NSPOSIXErrorDomain, [Int(EPERM), Int(EACCES)].contains(nsError.code) { return true }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error { return isPermissionError(underlying) }
+        return false
+    }
+
+    /// Reads a file, mapping "not there" to nil and permission failures to `.accessDenied`.
+    private static func readFile(_ url: URL) -> Result<Data?, ProfileDetectionFailure> {
+        do {
+            return .success(try Data(contentsOf: url))
+        } catch {
+            if isPermissionError(error) { return .failure(.accessDenied) }
+            return .success(nil)
+        }
+    }
+
+    private enum ProfileDetectionFailure: Error {
+        case accessDenied
+    }
+
+    private static func detectChromeProfiles(dir: URL) -> ProfileDetection {
+        let data: Data
+        switch readFile(dir.appendingPathComponent("Local State")) {
+        case .failure: return .accessDenied
+        case .success(nil): return .unavailable
+        case .success(let read?): data = read
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let profileSection = json["profile"] as? [String: Any],
               let infoCache = profileSection["info_cache"] as? [String: Any] else {
-            return []
+            return .unavailable
         }
 
         var profiles: [BrowserProfile] = []
@@ -241,65 +312,64 @@ enum BrowserManager {
                 profiles.append(BrowserProfile(id: dirName, displayName: name))
             }
         }
-
-        return profiles.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        return profiles.isEmpty ? .unavailable : .found(sortedByName(profiles))
     }
 
-    private static func detectFirefoxProfiles(supportDir: String) -> [BrowserProfile] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let firefoxDir = home.appendingPathComponent("Library/Application Support/\(supportDir)")
-
-        // Try new Selectable Profiles system first (Firefox 128+)
-        let selectableProfiles = detectFirefoxSelectableProfiles(firefoxDir: firefoxDir)
-        if !selectableProfiles.isEmpty {
-            return selectableProfiles
+    /// Firefox lists profiles in two places, and both can be in use at once:
+    /// - classic profiles in `profiles.ini` (`[ProfileN]` with `Name`/`Path`),
+    ///   created by about:profiles;
+    /// - "selectable" profiles (Firefox's newer profile manager) in
+    ///   `Profile Groups/<StoreID>.sqlite`, linked from `profiles.ini` by `StoreID`.
+    /// Both are listed, deduplicated by profile path. Classic profiles keep their
+    /// name as id (opened with `-P name`); selectable ones use their path.
+    private static func detectFirefoxProfiles(firefoxDir: URL) -> ProfileDetection {
+        let ini: String
+        switch readFile(firefoxDir.appendingPathComponent("profiles.ini")) {
+        case .failure: return .accessDenied
+        case .success(nil): return .unavailable
+        case .success(let data?): ini = String(decoding: data, as: UTF8.self)
         }
 
-        // Fallback: parse profiles.ini names (legacy Firefox)
-        return detectFirefoxLegacyProfiles(firefoxDir: firefoxDir)
-    }
-
-    /// Reads Firefox Selectable Profiles from Profile Groups SQLite databases.
-    /// These databases are linked via the StoreID field in profiles.ini.
-    private static func detectFirefoxSelectableProfiles(firefoxDir: URL) -> [BrowserProfile] {
-        let profilesIniPath = firefoxDir.appendingPathComponent("profiles.ini")
-
-        guard let contents = try? String(contentsOf: profilesIniPath, encoding: .utf8) else {
-            return []
-        }
-
-        // Parse profiles.ini to find StoreID values
-        var storeIds: Set<String> = []
-        for line in contents.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.lowercased().hasPrefix("storeid=") {
-                let value = String(trimmed.dropFirst(8))
-                if !value.isEmpty {
-                    storeIds.insert(value)
-                }
-            }
-        }
-
-        if storeIds.isEmpty {
-            return []
-        }
-
-        // Read profiles from each Profile Groups SQLite database
-        let profileGroupsDir = firefoxDir.appendingPathComponent("Profile Groups")
+        let sections = parseINI(ini)
         var profiles: [BrowserProfile] = []
         var seenPaths: Set<String> = []
 
-        for storeId in storeIds {
+        let storeIds = Set(sections.compactMap { $0.values["storeid"] }.filter { !$0.isEmpty })
+        let profileGroupsDir = firefoxDir.appendingPathComponent("Profile Groups")
+        for storeId in storeIds.sorted() {
             let dbPath = profileGroupsDir.appendingPathComponent("\(storeId).sqlite").path
-            for profile in readFirefoxProfileGroupDB(dbPath: dbPath) {
-                if !seenPaths.contains(profile.id) {
-                    seenPaths.insert(profile.id)
-                    profiles.append(profile)
-                }
+            for profile in readFirefoxProfileGroupDB(dbPath: dbPath) where seenPaths.insert(profile.id).inserted {
+                profiles.append(profile)
             }
         }
 
-        return profiles.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        for section in sections where section.name.hasPrefix("Profile") {
+            guard let name = section.values["name"], !name.isEmpty else { continue }
+            if let path = section.values["path"], !seenPaths.insert(path).inserted { continue }
+            profiles.append(BrowserProfile(id: name, displayName: name))
+        }
+
+        return profiles.isEmpty ? .unavailable : .found(sortedByName(profiles))
+    }
+
+    /// Minimal INI parser: sections with lower-cased keys, values as written.
+    private static func parseINI(_ text: String) -> [(name: String, values: [String: String])] {
+        var sections: [(name: String, values: [String: String])] = []
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") && line.hasSuffix("]") {
+                sections.append((String(line.dropFirst().dropLast()), [:]))
+            } else if let equals = line.firstIndex(of: "="), !sections.isEmpty {
+                let key = line[..<equals].trimmingCharacters(in: .whitespaces).lowercased()
+                let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+                sections[sections.count - 1].values[key] = value
+            }
+        }
+        return sections
+    }
+
+    private static func sortedByName(_ profiles: [BrowserProfile]) -> [BrowserProfile] {
+        profiles.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     /// Reads the Profiles table from a Firefox Profile Groups SQLite database.
@@ -330,39 +400,5 @@ enum BrowserManager {
         }
 
         return profiles
-    }
-
-    /// Fallback for older Firefox versions without Selectable Profiles.
-    /// Parses profiles.ini Name fields and uses them as both id and displayName.
-    private static func detectFirefoxLegacyProfiles(firefoxDir: URL) -> [BrowserProfile] {
-        let profilesIniPath = firefoxDir.appendingPathComponent("profiles.ini")
-
-        guard let contents = try? String(contentsOf: profilesIniPath, encoding: .utf8) else {
-            return []
-        }
-
-        var profiles: [BrowserProfile] = []
-        var currentName: String?
-
-        for line in contents.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("[Profile") || trimmed.hasPrefix("[Install") {
-                if let name = currentName {
-                    profiles.append(BrowserProfile(id: name, displayName: name))
-                }
-                currentName = nil
-            }
-            if trimmed.lowercased().hasPrefix("name=") {
-                let value = String(trimmed.dropFirst(5))
-                currentName = value
-            }
-        }
-
-        // Don't forget the last profile section
-        if let name = currentName {
-            profiles.append(BrowserProfile(id: name, displayName: name))
-        }
-
-        return profiles.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 }

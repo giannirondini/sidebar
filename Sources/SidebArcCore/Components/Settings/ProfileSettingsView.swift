@@ -14,6 +14,10 @@ final class ProfileSettingsView: NSView {
         let supportsBrowserProfiles: Bool
         /// Browser profiles detected for `resolvedBrowser`.
         let detectedBrowserProfiles: [BrowserProfile]
+        /// macOS blocked reading the browser's profile list.
+        var browserProfilesDenied: Bool = false
+        /// Display name of `resolvedBrowser`, for messages.
+        var resolvedBrowserName: String? = nil
         /// The profile names a browser that isn't installed on this Mac.
         let browserIsMissing: Bool
     }
@@ -215,7 +219,8 @@ private final class ProfileRowView: NSView {
                 if detected.id == current { dirPopup.select(dirPopup.lastItem) }
             }
             if let current, !row.detectedBrowserProfiles.contains(where: { $0.id == current }) {
-                dirPopup.addItem(withTitle: current)
+                // A manually entered absolute path shows as its folder name.
+                dirPopup.addItem(withTitle: current.hasPrefix("/") ? URL(fileURLWithPath: current).lastPathComponent : current)
                 dirPopup.lastItem?.representedObject = DirChoiceBox(.dir(current))
                 dirPopup.select(dirPopup.lastItem)
             }
@@ -226,6 +231,15 @@ private final class ProfileRowView: NSView {
             dirPopup.action = #selector(dirChanged)
             styleTitle(of: dirPopup)
             arranged.append(container(for: dirPopup))
+
+            if row.browserProfilesDenied {
+                let browserName = row.resolvedBrowserName ?? "the browser"
+                let note = NSTextField(wrappingLabelWithString:
+                    "macOS doesn’t let SidebArc read \(browserName)’s profile list. Allow SidebArc in System Settings › Privacy & Security › Full Disk Access, or choose Other… to enter the profile.")
+                note.font = NSFont.systemFont(ofSize: 11)
+                note.textColor = Self.secondaryTextColor
+                arranged.append(note)
+            }
         }
 
         let column = NSStackView(views: arranged)
