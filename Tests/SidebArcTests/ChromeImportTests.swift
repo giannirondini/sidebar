@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import ArcmarkCore
+@testable import SidebArcCore
 
 @Suite("Chrome Import Tests")
 struct ChromeImportTests {

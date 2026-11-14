@@ -797,7 +797,7 @@ final class NoteServer {
 
         // Bases that might contain the resource bundle (packaged app, flat dev
         // builds) or the assets directly. `Bundle(for:)` covers test/dynamic
-        // builds where ArcmarkCore is not statically linked into Bundle.main.
+        // builds where SidebArcCore is not statically linked into Bundle.main.
         var bases: [URL] = []
         if let main = Bundle.main.resourceURL { bases.append(main) }
         bases.append(Bundle.main.bundleURL)

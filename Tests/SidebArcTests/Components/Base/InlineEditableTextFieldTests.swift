@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import ArcmarkCore
+@testable import SidebArcCore
 
 @MainActor
 @Suite struct InlineEditableTextFieldTests {

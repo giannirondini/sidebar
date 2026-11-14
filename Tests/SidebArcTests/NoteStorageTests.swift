@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import ArcmarkCore
+@testable import SidebArcCore
 
 @Suite struct NoteStorageTests {
     private func makeStore() -> DataStore {

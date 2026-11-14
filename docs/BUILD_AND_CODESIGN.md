@@ -27,9 +27,9 @@ icon = 'Resources/AppIcon.png'
 ```
 
 - Scripts read the app name and bundle id through `scripts/lib/app-config.sh` (`APP_NAME`, `BUNDLE_ID`, `APP_BUNDLE`, `INFO_PLIST`, `APP_EXECUTABLE`). No script hard-codes them.
-- Swift mirrors them in `AppIdentity` (`Sources/ArcmarkCore/Constants.swift`): bundle id, data directory name, logger subsystem, display name, releases URL. `AppIdentityTests` fails if Swift and `Bundler.toml` drift, or if the agent skill CLI points at another data directory.
+- Swift mirrors them in `AppIdentity` (`Sources/SidebArcCore/Constants.swift`): bundle id, data directory name, logger subsystem, display name, releases URL. `AppIdentityTests` fails if Swift and `Bundler.toml` drift, or if the agent skill CLI points at another data directory.
 - The minimum macOS version comes from `platforms` in `Package.swift` (swift-bundler v3 rejects `minimum_macos_version`).
-- The Swift module and target names (`ArcmarkCore`, `ArcmarkApp`, `ArcmarkTests`) are unchanged on purpose; a rename is planned separately.
+- The Swift module and target names (`SidebArcCore`, `SidebArcApp`, `SidebArcTests`) are unchanged on purpose; a rename is planned separately.
 
 ## Build scripts
 

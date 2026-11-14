@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SidebArc is a macOS bookmark management application built with Swift and AppKit (a fork of Arcmark; the Swift modules still carry the original `Arcmark*` names until a planned rename). It provides a workspace-based organization system for links and folders with features like drag-and-drop, inline editing, and automatic favicon/title fetching.
+SidebArc is a macOS bookmark management application built with Swift and AppKit (a fork of Arcmark; Swift package `SidebArc`, modules `SidebArcCore` (library), `SidebArcApp` (entry point) and `SidebArcTests`). It provides a workspace-based organization system for links and folders with features like drag-and-drop, inline editing, and automatic favicon/title fetching.
 
 ## Development Commands
 

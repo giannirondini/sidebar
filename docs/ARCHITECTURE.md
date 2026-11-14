@@ -36,7 +36,7 @@ User Action → MainViewController → AppModel → AppState → DataStore → D
 ## Project Structure
 
 ```
-Sources/ArcmarkCore/
+Sources/SidebArcCore/
 ├── Components/
 │   ├── Base/
 │   │   ├── BaseControl.swift          # Base for interactive controls

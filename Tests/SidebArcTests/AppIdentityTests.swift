@@ -1,13 +1,13 @@
 import AppKit
 import Foundation
 import Testing
-@testable import ArcmarkCore
+@testable import SidebArcCore
 
 /// Guards the fork's runtime isolation from Arcmark (plan-v2 step 0.6).
 @Suite struct AppIdentityTests {
     private var repoRoot: URL {
         URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // ArcmarkTests
+            .deletingLastPathComponent() // SidebArcTests
             .deletingLastPathComponent() // Tests
             .deletingLastPathComponent() // repo root
     }

@@ -59,4 +59,4 @@ log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc"'
 | `Bundler.toml` | App name, bundle id, version, icon (single source) |
 | `Mintfile` | Pinned swift-bundler revision |
 | `scripts/lib/app-config.sh` | Names and helpers shared by every script |
-| `Sources/ArcmarkCore/Constants.swift` | `AppIdentity`: Swift mirror of the identity |
+| `Sources/SidebArcCore/Constants.swift` | `AppIdentity`: Swift mirror of the identity |

@@ -1,40 +1,52 @@
 import AppKit
 import Testing
-@testable import ArcmarkCore
+@testable import SidebArcCore
 
 // Test subclass to verify base behavior
 @MainActor
-fileprivate class TestView: BaseView {
+fileprivate class TestControl: BaseControl {
     var hoverChangeCount = 0
+    var pressedChangeCount = 0
+    var actionPerformed = false
 
     override func handleHoverStateChanged() {
         hoverChangeCount += 1
     }
+
+    override func handlePressedStateChanged() {
+        pressedChangeCount += 1
+    }
+
+    override func performAction() {
+        actionPerformed = true
+        super.performAction()
+    }
 }
 
 @MainActor
-@Suite struct BaseViewTests {
+@Suite struct BaseControlTests {
 
-    fileprivate let view: TestView
+    fileprivate let control: TestControl
 
 
     init() {
 
-        view = TestView(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
+        control = TestControl(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
 
     }
 
     // MARK: - Initialization Tests
 
     @Test func testInitialState() {
-        #expect(!view.isHovered)
-        #expect(view.wantsLayer)
-        #expect(!view.mouseDownCanMoveWindow)
+        #expect(!control.isHovered)
+        #expect(!control.isPressed)
+        #expect(control.wantsLayer)
+        #expect(!control.mouseDownCanMoveWindow)
     }
 
     @Test func testCommonInitSetsWantsLayer() {
-        let newView = TestView(frame: .zero)
-        #expect(newView.wantsLayer)
+        let newControl = TestControl(frame: .zero)
+        #expect(newControl.wantsLayer)
     }
 
     // MARK: - Hover State Tests
@@ -52,10 +64,10 @@ fileprivate class TestView: BaseView {
             userData: nil
         )!
 
-        view.mouseEntered(with: event)
+        control.mouseEntered(with: event)
 
-        #expect(view.isHovered)
-        #expect(view.hoverChangeCount == 1)
+        #expect(control.isHovered)
+        #expect(control.hoverChangeCount == 1)
     }
 
     @Test func testMouseExitedClearsHoverState() {
@@ -71,7 +83,7 @@ fileprivate class TestView: BaseView {
             trackingNumber: 0,
             userData: nil
         )!
-        view.mouseEntered(with: enterEvent)
+        control.mouseEntered(with: enterEvent)
 
         // Then exit
         let exitEvent = NSEvent.enterExitEvent(
@@ -85,25 +97,26 @@ fileprivate class TestView: BaseView {
             trackingNumber: 0,
             userData: nil
         )!
-        view.mouseExited(with: exitEvent)
+        control.mouseExited(with: exitEvent)
 
-        #expect(!view.isHovered)
-        #expect(view.hoverChangeCount == 2)
+        #expect(!control.isHovered)
+        #expect(control.hoverChangeCount == 2)
     }
 
     // MARK: - Tracking Area Tests
 
     @Test func testUpdateTrackingAreasCreatesTrackingArea() {
-        view.updateTrackingAreas()
+        control.updateTrackingAreas()
 
-        // Verify tracking area was added by checking that the method completes without error
-        #expect(view != nil)
+        // Verify tracking area was added by checking that hover events would be processed
+        // This is a basic test to ensure the method completes without error
+        #expect(control != nil)
     }
 
     // MARK: - Refresh Hover State Tests
 
-    @Test func testRefreshHoverStateResetsWhenNoWindow() {
-        // Manually set hover to true via mouseEntered
+    @Test func testRefreshHoverStateWithoutWindow() {
+        // First set hover via mouseEntered
         let enterEvent = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
@@ -115,54 +128,44 @@ fileprivate class TestView: BaseView {
             trackingNumber: 0,
             userData: nil
         )!
-        view.mouseEntered(with: enterEvent)
+        control.mouseEntered(with: enterEvent)
 
-        #expect(view.isHovered)
+        // Verify hover is set
+        #expect(control.isHovered)
 
-        // Now refresh without window
-        view.refreshHoverState()
+        // Call refresh when there's no window
+        control.refreshHoverState()
 
-        // Should clear hover and notify
-        #expect(!view.isHovered)
-        #expect(view.hoverChangeCount > 1)
+        // Should clear hover state
+        #expect(!control.isHovered)
+    }
+
+    // MARK: - Enabled State Tests
+
+    @Test func testMouseDownIgnoredWhenDisabled() {
+        control.isEnabled = false
+
+        // Note: We can't fully test mouseDown without a window, but we can verify enabled check
+        #expect(!control.isEnabled)
+        #expect(!control.isPressed)
     }
 
     // MARK: - Layout Tests
 
     @Test func testLayoutCallsRefreshHoverState() {
-        view.layout()
+        // This test verifies layout() is implemented correctly
+        control.layout()
 
         // If no window, hover should be false
-        #expect(!view.isHovered)
+        #expect(!control.isHovered)
     }
 
     // MARK: - View Lifecycle Tests
 
     @Test func testViewDidMoveToWindowCallsRefreshHoverState() {
-        view.viewDidMoveToWindow()
+        control.viewDidMoveToWindow()
 
         // Without a window, hover should be false
-        #expect(!view.isHovered)
-    }
-
-    // MARK: - Subclass Override Tests
-
-    @Test func testHandleHoverStateChangedIsCalled() {
-        let initialCount = view.hoverChangeCount
-
-        let event = NSEvent.enterExitEvent(
-            with: .mouseEntered,
-            location: NSPoint(x: 50, y: 20),
-            modifierFlags: [],
-            timestamp: 0,
-            windowNumber: 0,
-            context: nil,
-            eventNumber: 0,
-            trackingNumber: 0,
-            userData: nil
-        )!
-        view.mouseEntered(with: event)
-
-        #expect(view.hoverChangeCount == initialCount + 1)
+        #expect(!control.isHovered)
     }
 }

@@ -4,30 +4,30 @@
 import PackageDescription
 
 let package = Package(
-    name: "Arcmark",
+    name: "SidebArc",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         // Library for bundler to use
-        .library(name: "ArcmarkCore", targets: ["ArcmarkCore"]),
+        .library(name: "SidebArcCore", targets: ["SidebArcCore"]),
         // Executable for development/testing; Bundler.toml `product` points here
-        .executable(name: "sidebarc", targets: ["ArcmarkApp"])
+        .executable(name: "sidebarc", targets: ["SidebArcApp"])
     ],
     targets: [
         // Core library with all app logic
         .target(
-            name: "ArcmarkCore",
+            name: "SidebArcCore",
             resources: [.copy("NoteEditor")]
         ),
         // Minimal executable entry point
         .executableTarget(
-            name: "ArcmarkApp",
-            dependencies: ["ArcmarkCore"]
+            name: "SidebArcApp",
+            dependencies: ["SidebArcCore"]
         ),
         .testTarget(
-            name: "ArcmarkTests",
-            dependencies: ["ArcmarkCore"]
+            name: "SidebArcTests",
+            dependencies: ["SidebArcCore"]
         )
     ]
 )

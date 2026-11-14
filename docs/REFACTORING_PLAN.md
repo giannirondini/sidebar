@@ -1,4 +1,4 @@
-> **Historical document.** Completed refactoring of the upstream codebase (2026-02-10), before the fork. "Arcmark" here is the former product name; the Swift module names it mentions (`ArcmarkCore`, `ArcmarkTests`) are still current.
+> **Historical document.** Completed refactoring of the upstream codebase (2026-02-10), before the fork. "Arcmark" here is the former product name; the Swift module names it mentions (`SidebArcCore`, `SidebArcTests`) are still current.
 
 # Arcmark Refactoring Plan
 
@@ -305,14 +305,14 @@ All UI components have similar `Style` structs with static presets:
 ### 2.1 Current Structure (Flat)
 
 ```
-Sources/ArcmarkCore/
+Sources/SidebArcCore/
 ├── (28 Swift files, all in one directory)
 ```
 
 ### 2.2 New Hierarchical Structure
 
 ```
-Sources/ArcmarkCore/
+Sources/SidebArcCore/
 │
 ├── Application/
 │   ├── AppDelegate.swift
@@ -390,7 +390,7 @@ Sources/ArcmarkCore/
 
 ### 3.1 ThemeConstants (New File)
 
-**Location:** `Sources/ArcmarkCore/Utilities/Theme/ThemeConstants.swift`
+**Location:** `Sources/SidebArcCore/Utilities/Theme/ThemeConstants.swift`
 
 ```swift
 import AppKit
@@ -494,7 +494,7 @@ struct ThemeConstants {
 
 ### 3.2 BaseControl (New File)
 
-**Location:** `Sources/ArcmarkCore/Components/Base/BaseControl.swift`
+**Location:** `Sources/SidebArcCore/Components/Base/BaseControl.swift`
 
 ```swift
 import AppKit
@@ -649,7 +649,7 @@ class BaseControl: NSControl {
 
 ### 3.3 BaseView (New File)
 
-**Location:** `Sources/ArcmarkCore/Components/Base/BaseView.swift`
+**Location:** `Sources/SidebArcCore/Components/Base/BaseView.swift`
 
 ```swift
 import AppKit
@@ -756,7 +756,7 @@ class BaseView: NSView {
 
 ### 3.4 InlineEditableTextField (New Component)
 
-**Location:** `Sources/ArcmarkCore/Components/Base/InlineEditableTextField.swift`
+**Location:** `Sources/SidebArcCore/Components/Base/InlineEditableTextField.swift`
 
 ```swift
 import AppKit
@@ -929,7 +929,7 @@ final class NodeRowView: BaseView {
 6. ✅ Wrote unit tests for base classes (759 lines of tests)
 
 **Deliverables:**
-- ✅ New folders created: `Sources/ArcmarkCore/Components/Base/` and `Sources/ArcmarkCore/Utilities/Theme/`
+- ✅ New folders created: `Sources/SidebArcCore/Components/Base/` and `Sources/SidebArcCore/Utilities/Theme/`
 - ✅ Base classes compile successfully (verified with `swift build`)
 - ✅ ThemeConstants documented with comprehensive constants
 - ✅ No existing code modified - purely additive changes
@@ -1244,7 +1244,7 @@ final class MainViewController: NSViewController {
 **New test files to create:**
 
 ```
-Tests/ArcmarkTests/
+Tests/SidebArcTests/
 ├── Components/
 │   ├── Base/
 │   │   ├── BaseControlTests.swift
@@ -1341,9 +1341,9 @@ Since Arcmark is a UI-heavy application, visual regression testing is critical.
 
 1. **Create test file first** (TDD approach)
 ```swift
-// Tests/ArcmarkTests/Components/IconTitleButtonTests.swift
+// Tests/SidebArcTests/Components/IconTitleButtonTests.swift
 import XCTest
-@testable import ArcmarkCore
+@testable import SidebArcCore
 
 final class IconTitleButtonTests: XCTestCase {
     func testHoverStateChanges() {
@@ -1396,8 +1396,8 @@ swift test --filter IconTitleButtonTests
 
 6. **Commit incrementally**
 ```bash
-git add Sources/ArcmarkCore/Components/Buttons/IconTitleButton.swift
-git add Tests/ArcmarkTests/Components/IconTitleButtonTests.swift
+git add Sources/SidebArcCore/Components/Buttons/IconTitleButton.swift
+git add Tests/SidebArcTests/Components/IconTitleButtonTests.swift
 git commit -m "refactor: migrate IconTitleButton to BaseControl"
 ```
 

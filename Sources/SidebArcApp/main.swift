@@ -1,9 +1,9 @@
 import AppKit
-import ArcmarkCore
+import SidebArcCore
 
 @MainActor
 @main
-struct ArcmarkApp {
+struct SidebArcApp {
     private static var appDelegate: AppDelegate?
 
     static func main() {
