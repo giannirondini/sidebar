@@ -7,6 +7,8 @@
 #   APP_BUNDLE      .build/bundler/<name>.app (relative to PROJECT_ROOT)
 #   INFO_PLIST      Info.plist inside APP_BUNDLE
 #   APP_EXECUTABLE  executable inside APP_BUNDLE
+#   APPLE_EVENTS_USAGE  `NSAppleEventsUsageDescription` from `[apps.<name>.plist]`
+#   ENTITLEMENTS    entitlements for hardened-runtime (production) signing
 #
 # Swift mirrors APP_NAME and BUNDLE_ID in `AppIdentity` (Constants.swift);
 # AppIdentityTests fails if they drift.
@@ -16,12 +18,15 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 _bundler_toml="$PROJECT_ROOT/Bundler.toml"
 APP_NAME=$(sed -n 's/^\[apps\.\([^].]*\)\]$/\1/p' "$_bundler_toml" | head -1)
 BUNDLE_ID=$(sed -n "s/^identifier = '\(.*\)'$/\1/p" "$_bundler_toml" | head -1)
+APPLE_EVENTS_USAGE=$(sed -n "s/^NSAppleEventsUsageDescription = '\(.*\)'$/\1/p" "$_bundler_toml" | head -1)
 unset _bundler_toml
 
-if [ -z "$APP_NAME" ] || [ -z "$BUNDLE_ID" ]; then
-    echo "❌ Could not read the app name ([apps.<name>]) or 'identifier' from Bundler.toml" >&2
+if [ -z "$APP_NAME" ] || [ -z "$BUNDLE_ID" ] || [ -z "$APPLE_EVENTS_USAGE" ]; then
+    echo "❌ Could not read the app name ([apps.<name>]), 'identifier' or 'NSAppleEventsUsageDescription' from Bundler.toml" >&2
     exit 1
 fi
+
+ENTITLEMENTS="$PROJECT_ROOT/scripts/SidebArc.entitlements"
 
 APP_BUNDLE=".build/bundler/${APP_NAME}.app"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
@@ -67,4 +72,27 @@ plist_set() {
     else
         /usr/libexec/PlistBuddy -c "Add :$2 string $3" "$1"
     fi
+}
+
+# patch_info_plist [version]: swift-bundler doesn't always merge Bundler.toml's plist
+# values, so set the identifier, version strings and usage descriptions explicitly.
+# Without NSAppleEventsUsageDescription macOS denies Apple Events without a prompt.
+patch_info_plist() {
+    plist_set "$INFO_PLIST" CFBundleIdentifier "$BUNDLE_ID"
+    if [ -n "$1" ]; then
+        plist_set "$INFO_PLIST" CFBundleShortVersionString "$1"
+        plist_set "$INFO_PLIST" CFBundleVersion "$1"
+    fi
+    plist_set "$INFO_PLIST" NSAppleEventsUsageDescription "$APPLE_EVENTS_USAGE"
+}
+
+# Ad-hoc (development) signature. The default ad-hoc designated requirement is the
+# build's cdhash, which changes on every build, so macOS treats each rebuild as a new
+# app and drops its privacy grants (Automation, Accessibility). Pinning the requirement
+# to the bundle id keeps them across rebuilds. Development only: on this Mac any
+# binary with that identifier would match the grants.
+adhoc_sign() {
+    codesign --force --deep --sign - \
+        -r="designated => identifier \"$BUNDLE_ID\"" \
+        "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 }

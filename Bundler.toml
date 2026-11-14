@@ -13,3 +13,9 @@ category = 'public.app-category.productivity'
 icon = 'Resources/AppIcon.png'
 # Minimum macOS comes from `platforms` in Package.swift (swift-bundler v3 has no
 # `minimum_macos_version` key and rejects it).
+
+# Keys merged into Info.plist. swift-bundler doesn't always merge them, so the
+# scripts also set them (`patch_info_plist` in scripts/lib/app-config.sh).
+[apps.SidebArc.plist]
+# Without it macOS denies Apple Events silently, without a prompt (Phase 2 tab focus).
+NSAppleEventsUsageDescription = 'SidebArc looks for a browser tab you already have open, so clicking a favorite focuses it instead of opening a duplicate.'

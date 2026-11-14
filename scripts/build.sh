@@ -55,15 +55,12 @@ mint run swift-bundler bundle -c release
 unwrap_nested_resource_bundles
 
 # Post-build: swift-bundler doesn't always merge [apps.*.plist] values, so set the
-# identifier and version strings explicitly.
+# identifier, version strings and usage descriptions explicitly.
 echo "🔧 Patching Info.plist..."
-plist_set "$INFO_PLIST" CFBundleIdentifier "$BUNDLE_ID"
+patch_info_plist "$VERSION"
 echo "  ✓ CFBundleIdentifier = $BUNDLE_ID"
-if [ -n "$VERSION" ]; then
-    plist_set "$INFO_PLIST" CFBundleShortVersionString "$VERSION"
-    plist_set "$INFO_PLIST" CFBundleVersion "$VERSION"
-    echo "  ✓ CFBundleShortVersionString / CFBundleVersion = $VERSION"
-fi
+[ -n "$VERSION" ] && echo "  ✓ CFBundleShortVersionString / CFBundleVersion = $VERSION"
+echo "  ✓ NSAppleEventsUsageDescription"
 
 # Code sign the app
 echo "🔏 Code signing app..."
@@ -88,13 +85,14 @@ if [ "$PRODUCTION" = true ]; then
     codesign --force --deep \
         --sign "$SIGNING_IDENTITY" \
         --options runtime \
+        --entitlements "$ENTITLEMENTS" \
         --timestamp \
         "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
-    echo "  ✓ Signed with Developer ID (hardened runtime enabled)"
+    echo "  ✓ Signed with Developer ID (hardened runtime, Apple Events entitlement)"
 else
-    codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
-    echo "  ✓ Signed with ad-hoc signature (development only)"
+    adhoc_sign
+    echo "  ✓ Signed with ad-hoc signature (development only; requirement pinned to the bundle id)"
 fi
 
 echo ""
