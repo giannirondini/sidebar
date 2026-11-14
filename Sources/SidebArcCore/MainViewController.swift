@@ -102,7 +102,7 @@ final class MainViewController: NSViewController {
 
         // Search field
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.placeholder = "Search in workspace"
+        searchField.placeholder = "Search in space"
         searchField.onTextChange = { [weak self] text in
             self?.nodeListViewController.clearSelections()
             self?.searchCoordinator.updateQuery(text)
@@ -592,8 +592,8 @@ final class MainViewController: NSViewController {
 
     private func confirmDeleteWorkspace(id: UUID) {
         let alert = NSAlert()
-        alert.messageText = "Delete Workspace"
-        alert.informativeText = "This will delete the workspace and everything inside it."
+        alert.messageText = "Delete Space"
+        alert.informativeText = "This will delete the space and everything inside it."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
@@ -654,7 +654,7 @@ final class MainViewController: NSViewController {
     func promptCreateWorkspace() {
         // The rename happens in the space header, which Settings hides.
         model.closeSettings()
-        let workspaceId = model.createWorkspace(name: "Untitled Workspace", colorId: .randomColor())
+        let workspaceId = model.createWorkspace(name: "Untitled Space", colorId: .randomColor())
         scheduleWorkspaceInlineRename(for: workspaceId)
     }
 

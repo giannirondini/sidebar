@@ -184,7 +184,7 @@ final class WorkspaceRowView: BaseView {
         deleteButton.bezelStyle = .texturedRounded
         deleteButton.isBordered = false
         let deleteIconConfig = NSImage.SymbolConfiguration(pointSize: style.deleteIconSize, weight: style.deleteIconWeight)
-        deleteButton.image = NSImage(systemSymbolName: style.deleteIconName, accessibilityDescription: "Delete workspace")?
+        deleteButton.image = NSImage(systemSymbolName: style.deleteIconName, accessibilityDescription: "Delete space")?
             .withSymbolConfiguration(deleteIconConfig)
         deleteButton.contentTintColor = style.deleteTintColor
         deleteButton.target = self
@@ -275,7 +275,7 @@ final class WorkspaceRowView: BaseView {
         iconView.isHidden = iconImage == nil
         colorSquare.isHidden = iconImage != nil
         deleteButton.isEnabled = canDelete
-        deleteButton.toolTip = canDelete ? nil : "Cannot delete the last workspace"
+        deleteButton.toolTip = canDelete ? nil : "Cannot delete the last space"
 
         profileLabel.stringValue = profileName ?? ""
         profileLabel.toolTip = profileDetail

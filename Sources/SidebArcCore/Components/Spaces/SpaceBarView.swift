@@ -32,7 +32,7 @@ final class SpaceBarView: NSView {
     private static let edgeTolerance: CGFloat = 0.5
 
     private let settingsButton = SpaceBarButton(symbolName: "gearshape", label: "Settings")
-    private let addButton = SpaceBarButton(symbolName: "plus", label: "New Workspace")
+    private let addButton = SpaceBarButton(symbolName: "plus", label: "New Space")
     private let scrollView = NSScrollView()
     private let documentView = FlippedView()
     private let selectionPill = NSView()

@@ -46,14 +46,14 @@ import Testing
     @Test func itemsInOrder() {
         let menu = build(Recorder())
         #expect(menu.items.map(\.title) == [
-            "Rename Workspace…", "Change Icon…", "Change Color", "Profile", "", "Move Left", "Move Right", "", "Delete Workspace…",
+            "Rename Space…", "Change Icon…", "Change Color", "Profile", "", "Move Left", "Move Right", "", "Delete Space…",
         ])
     }
 
     @Test func everyItemRunsItsClosure() throws {
         let recorder = Recorder()
         let menu = build(recorder)
-        for title in ["Rename Workspace…", "Change Icon…", "Move Left", "Move Right", "Delete Workspace…"] {
+        for title in ["Rename Space…", "Change Icon…", "Move Left", "Move Right", "Delete Space…"] {
             menu.performActionForItem(at: try index(of: title, in: menu))
         }
         #expect(recorder.calls == ["rename", "icon", "left", "right", "delete"])
@@ -79,13 +79,13 @@ import Testing
 
         let only = build(Recorder(), canMoveLeft: false, canMoveRight: false)
         #expect(!only.items.contains { $0.title.hasPrefix("Move") })
-        #expect(only.items.map(\.title) == ["Rename Workspace…", "Change Icon…", "Change Color", "Profile", "", "Delete Workspace…"])
+        #expect(only.items.map(\.title) == ["Rename Space…", "Change Icon…", "Change Color", "Profile", "", "Delete Space…"])
     }
 
     @Test func deleteIsDisabledForTheLastSpace() throws {
         let menu = build(Recorder(), canDelete: false)
         // `update()` must not re-enable it (auto-enabling is off).
-        #expect(!menu.items[try index(of: "Delete Workspace…", in: menu)].isEnabled)
-        #expect(menu.items[try index(of: "Rename Workspace…", in: menu)].isEnabled)
+        #expect(!menu.items[try index(of: "Delete Space…", in: menu)].isEnabled)
+        #expect(menu.items[try index(of: "Rename Space…", in: menu)].isEnabled)
     }
 }

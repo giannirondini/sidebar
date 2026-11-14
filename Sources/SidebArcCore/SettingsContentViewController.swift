@@ -29,7 +29,7 @@ final class SettingsContentViewController: NSViewController {
 
     // Display section
     private let tooltipsToggle = CustomToggle(title: "Show full URL tooltip on hover")
-    private let swipeToSwitchToggle = CustomToggle(title: "Swipe to switch workspaces")
+    private let swipeToSwitchToggle = CustomToggle(title: "Swipe to switch spaces")
 
     // Keyboard Shortcuts section
     private let shortcutRecorder = ShortcutRecorderView()
@@ -251,7 +251,7 @@ final class SettingsContentViewController: NSViewController {
         let separatorDisplay = createSeparator()
 
         // Workspace Management Section
-        let workspaceHeader = createSectionHeader("Manage Workspaces")
+        let workspaceHeader = createSectionHeader("Manage Spaces")
 
         let separator2 = createSeparator()
 
@@ -1129,8 +1129,8 @@ final class SettingsContentViewController: NSViewController {
 
         // Show confirmation alert
         let alert = NSAlert()
-        alert.messageText = "Delete Workspace?"
-        alert.informativeText = "Are you sure you want to delete this workspace? All links and folders will be permanently removed."
+        alert.messageText = "Delete Space?"
+        alert.informativeText = "Are you sure you want to delete this space? All links and folders will be permanently removed."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Delete")
@@ -1168,7 +1168,7 @@ final class SettingsContentViewController: NSViewController {
         let menu = NSMenu()
 
         // Rename option
-        let renameItem = NSMenuItem(title: "Rename Workspace...", action: #selector(beginInlineRenameForContextWorkspace), keyEquivalent: "")
+        let renameItem = NSMenuItem(title: "Rename Space…", action: #selector(beginInlineRenameForContextWorkspace), keyEquivalent: "")
         renameItem.target = self
         menu.addItem(renameItem)
 
@@ -1204,7 +1204,7 @@ final class SettingsContentViewController: NSViewController {
 
         // Delete option
         menu.addItem(.separator())
-        let deleteItem = NSMenuItem(title: "Delete Workspace...", action: #selector(deleteContextWorkspace), keyEquivalent: "")
+        let deleteItem = NSMenuItem(title: "Delete Space…", action: #selector(deleteContextWorkspace), keyEquivalent: "")
         deleteItem.target = self
         deleteItem.isEnabled = appModel.workspaces.count > 1
         menu.addItem(deleteItem)

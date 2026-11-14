@@ -33,7 +33,7 @@ enum SpaceMenu {
         // and the disabled Delete item would still be clickable.
         menu.autoenablesItems = false
 
-        menu.addItem(ClosureMenuItem(title: "Rename Workspace…", action: actions.rename))
+        menu.addItem(ClosureMenuItem(title: "Rename Space…", action: actions.rename))
         menu.addItem(ClosureMenuItem(title: "Change Icon…", action: actions.changeIcon))
 
         let colorItem = NSMenuItem(title: "Change Color", action: nil, keyEquivalent: "")
@@ -61,7 +61,7 @@ enum SpaceMenu {
         }
 
         menu.addItem(.separator())
-        let deleteItem = ClosureMenuItem(title: "Delete Workspace…", action: actions.delete)
+        let deleteItem = ClosureMenuItem(title: "Delete Space…", action: actions.delete)
         deleteItem.isEnabled = canDelete
         menu.addItem(deleteItem)
 

@@ -211,7 +211,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         mainMenu.addItem(fileMenuItem)
         let fileMenu = NSMenu(title: "File")
         fileMenuItem.submenu = fileMenu
-        fileMenu.addItem(withTitle: "New Workspace…", action: #selector(newWorkspace), keyEquivalent: "n")
+        fileMenu.addItem(withTitle: "New Space…", action: #selector(newWorkspace), keyEquivalent: "n")
         let newFolderItem = NSMenuItem(title: "New Folder…", action: #selector(newFolder), keyEquivalent: "N")
         newFolderItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(newFolderItem)
@@ -244,7 +244,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         windowMenu.addItem(NSMenuItem.separator())
 
         let prevWorkspaceItem = NSMenuItem(
-            title: "Previous Workspace",
+            title: "Previous Space",
             action: #selector(navigateToPreviousWorkspace),
             keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
         )
@@ -252,7 +252,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         windowMenu.addItem(prevWorkspaceItem)
 
         let nextWorkspaceItem = NSMenuItem(
-            title: "Next Workspace",
+            title: "Next Space",
             action: #selector(navigateToNextWorkspace),
             keyEquivalent: String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
         )
