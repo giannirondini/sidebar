@@ -11,8 +11,9 @@ Browsers in scope: **Chrome, Brave, Safari** (corporate set). Everything else op
    ```bash
    log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "tabs"'
    ```
-   Each click logs `Focused tab …`, `No open tab matched …`, `No Automation permission …` or `… failed …`, with milliseconds.
-3. Optional, outside the app: the counts-only probe lists a running browser's tabs with the real locator. It needs Automation already granted to the terminal and never asks.
+   Each click logs `Focused tab …`, `No open tab matched …`, `No Automation permission …` or `… failed …` with milliseconds, or `Opening new …` with the reason it didn't look (browser can't report tabs, switch off, list link, not running). These are kept, so after the fact `log show --last 10m --predicate '<same predicate>'` works too.
+3. **The favorite's profile must open in Chrome, Brave or Safari, with Switch to open tabs on** (Settings › Profiles). A profile with no browser follows the macOS default browser; if that's Dia or Arc, every click opens new (F2). With Chrome `Default` and `Profile 1` both in use, the switch is off by default (E1).
+4. Optional, outside the app: the counts-only probe lists a running browser's tabs with the real locator. It needs Automation already granted to the terminal and never asks.
    ```bash
    SIDEBARC_TAB_PROBE=com.google.Chrome swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host/plugins/testing" --filter 'TabFocusTests/liveProbe'
    ```
@@ -34,7 +35,7 @@ Browsers in scope: **Chrome, Brave, Safari** (corporate set). Everything else op
 |---|---|---|
 | B1 | Favorite's page open in a background tab of the front window | That tab is selected; felt time ≲ 150 ms; log shows the ms |
 | B2 | Page open in a second window behind the first | That window comes to the front with the tab selected |
-| B3 | Page open in a **minimised** window | The window is restored and focused |
+| B3 | Page open in a **minimised** window | The window is restored and focused, no new tab (fixed in `74fb21a`: it timed out during the restore animation) |
 | B4 | Page open in a window on **another macOS Space** (desktop) | Note what happens (switches Space, or opens new): record it |
 | B5 | Browser **not running** | Opens normally (launches the browser as before). The log has no tab lookup |
 | B6 | Page not open anywhere | New tab, log "No open tab matched" |

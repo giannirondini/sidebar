@@ -24,9 +24,13 @@ final class TabFocusService {
         let decision = TabFocus.decide(target: target, profile: profile, profileTargets: profileTargets, source: source, invert: invert)
 
         // Only a running browser is asked: an Apple Event would launch a closed one.
-        guard case .lookForTab(let bundleId) = decision,
-              let app = Self.runningApplication(bundleId: bundleId),
-              let locator = TabLocators.locator(for: bundleId) else {
+        guard case .lookForTab(let bundleId) = decision else {
+            logger.notice("Opening new in \(target.bundleId ?? "the default browser", privacy: .public): \(Self.reason(source: source, invert: invert, target: target, profile: profile, profileTargets: profileTargets), privacy: .public)")
+            BrowserManager.open(url: url, target: target)
+            return
+        }
+        guard let app = Self.runningApplication(bundleId: bundleId), let locator = TabLocators.locator(for: bundleId) else {
+            logger.notice("Opening new: \(bundleId, privacy: .public) isn't running")
             BrowserManager.open(url: url, target: target)
             return
         }
@@ -58,10 +62,10 @@ final class TabFocusService {
         let ms = Int(Date().timeIntervalSince(start) * 1000)
         switch outcome {
         case .focused(let tab):
-            logger.info("Focused tab \(tab.tabIndex) of window \(tab.windowIndex) in \(bundleId, privacy: .public) (\(ms) ms)")
+            logger.notice("Focused tab \(tab.tabIndex) of window \(tab.windowIndex) in \(bundleId, privacy: .public) (\(ms) ms)")
             Self.activate(app)
         case .noMatch:
-            logger.info("No open tab matched in \(bundleId, privacy: .public) (\(ms) ms); opening")
+            logger.notice("No open tab matched in \(bundleId, privacy: .public) (\(ms) ms); opening")
             BrowserManager.open(url: url, target: target)
         case .notPermitted(let permission):
             logger.notice("No Automation permission for \(bundleId, privacy: .public) (\(String(describing: permission), privacy: .public)); opening")
@@ -74,6 +78,20 @@ final class TabFocusService {
             logger.error("Looking for an open tab in \(bundleId, privacy: .public) failed: \(String(describing: error), privacy: .public) (\(ms) ms); opening")
             BrowserManager.open(url: url, target: target)
         }
+    }
+
+    /// Why a click opens a new tab without looking (log only).
+    private static func reason(source: LinkClickSource, invert: Bool, target: BrowserTarget, profile: Profile, profileTargets: [BrowserTarget]) -> String {
+        guard let bundleId = target.bundleId, TabLocators.isSupported(bundleId: bundleId) else {
+            return "this browser can't report its tabs"
+        }
+        guard TabFocus.prefersFocus(source: source, invert: invert) else {
+            return source == .list ? "list link (⌥-click to switch to its tab)" : "⌥-click"
+        }
+        let ambiguous = TabFocus.isAmbiguous(target: target, profileTargets: profileTargets)
+        return ambiguous && profile.focusesOpenTabs == nil
+            ? "Switch to open tabs is off (several browser profiles)"
+            : "Switch to open tabs is off for this profile"
     }
 
     static func runningApplication(bundleId: String) -> NSRunningApplication? {
