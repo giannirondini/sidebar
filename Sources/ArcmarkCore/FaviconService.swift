@@ -7,7 +7,7 @@ final class FaviconService {
 
     private let store = DataStore()
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.arcmark.app", category: "favicon")
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "favicon")
     private let failureCooldown: TimeInterval = 300
     private var cache: [String: NSImage] = [:]
     private var cachedPaths: [String: String] = [:]

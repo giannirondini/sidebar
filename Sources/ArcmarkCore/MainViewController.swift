@@ -1,5 +1,4 @@
 import AppKit
-@preconcurrency import Sparkle
 
 @MainActor
 final class MainViewController: NSViewController {
@@ -21,11 +20,6 @@ final class MainViewController: NSViewController {
         symbolName: "plus",
         style: .pasteAction
     )
-
-    // Sparkle updater (passed from AppDelegate)
-    var updater: SPUUpdater? {
-        didSet { settingsViewController.updater = updater }
-    }
 
     // Swipe animation views
     private var swipeClipContainer: NSView!         // Clips to bounds, contains content + preview

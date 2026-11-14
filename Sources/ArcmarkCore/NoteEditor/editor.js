@@ -52,7 +52,7 @@
     const fromContent = extractTitleFromContent(getContent());
     const resolved = fromContent || serverTitle || "Untitled";
     titleEl.textContent = resolved;
-    document.title = `${resolved} — Arcmark`;
+    document.title = `${resolved} — SidebArc`;
   }
 
   function updateSavedTicker() {
@@ -99,13 +99,13 @@
       const heading = document.createElement("h2");
       heading.textContent = "Note no longer available";
       const blurb = document.createElement("p");
-      blurb.textContent = "This note was deleted in Arcmark. You can close this tab.";
+      blurb.textContent = "This note was deleted in SidebArc. You can close this tab.";
       card.appendChild(heading);
       card.appendChild(blurb);
       main.appendChild(card);
     }
     setStatus("deleted");
-    document.title = "Deleted note — Arcmark";
+    document.title = "Deleted note — SidebArc";
   }
 
   function enterDisconnectedState() {
@@ -127,13 +127,13 @@
       const heading = document.createElement("h2");
       heading.textContent = "Editor disconnected";
       const blurb = document.createElement("p");
-      blurb.textContent = "Arcmark restarted, so this tab can no longer reach the editor. Reopen this note from Arcmark to continue editing.";
+      blurb.textContent = "SidebArc restarted, so this tab can no longer reach the editor. Reopen this note from SidebArc to continue editing.";
       card.appendChild(heading);
       card.appendChild(blurb);
       main.appendChild(card);
     }
     setStatus("disconnected");
-    document.title = "Disconnected — Arcmark";
+    document.title = "Disconnected — SidebArc";
   }
 
   async function loadNote() {

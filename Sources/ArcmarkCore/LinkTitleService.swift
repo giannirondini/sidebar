@@ -6,7 +6,7 @@ final class LinkTitleService {
     static let shared = LinkTitleService()
 
     private let session: URLSession
-    private let logger = Logger(subsystem: "com.arcmark.app", category: "title")
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "title")
     private var inFlight: Set<UUID> = []
 
     private init() {

@@ -11,17 +11,13 @@ let package = Package(
     products: [
         // Library for bundler to use
         .library(name: "ArcmarkCore", targets: ["ArcmarkCore"]),
-        // Executable for development/testing
-        .executable(name: "Arcmark", targets: ["ArcmarkApp"])
-    ],
-    dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
+        // Executable for development/testing; Bundler.toml `product` points here
+        .executable(name: "sidebarc", targets: ["ArcmarkApp"])
     ],
     targets: [
         // Core library with all app logic
         .target(
             name: "ArcmarkCore",
-            dependencies: ["Sparkle"],
             resources: [.copy("NoteEditor")]
         ),
         // Minimal executable entry point

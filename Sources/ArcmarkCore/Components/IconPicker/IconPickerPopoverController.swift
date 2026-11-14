@@ -126,8 +126,7 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     }
 
     private func loadCachedFavicons() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let iconsDir = appSupport.appendingPathComponent("Arcmark/Icons", isDirectory: true)
+        let iconsDir = DataStore().iconsDirectory()
 
         guard FileManager.default.fileExists(atPath: iconsDir.path) else { return }
         guard let files = try? FileManager.default.contentsOfDirectory(at: iconsDir, includingPropertiesForKeys: nil) else { return }

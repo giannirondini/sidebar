@@ -1,16 +1,15 @@
 format_version = 2
 
-[apps.Arcmark]
-identifier = 'com.arcmark.app'
-product = 'Arcmark'
-version = '0.1.14'
+# The `[apps.<name>]` key is the app name: it names `<name>.app` and the executable
+# inside it. Scripts read it (and `identifier`) via scripts/lib/app-config.sh;
+# Swift mirrors both in `AppIdentity` (Constants.swift), checked by AppIdentityTests.
+[apps.SidebArc]
+identifier = 'io.github.giannirondini.sidebarc'
+product = 'sidebarc'
+version = '1.0.0'
 description = 'A workspace-based bookmark manager for macOS'
 license = 'MIT'
 category = 'public.app-category.productivity'
 icon = 'Resources/AppIcon.png'
-minimum_macos_version = '13.0'
-
-[apps.Arcmark.plist]
-CFBundleIdentifier = 'com.arcmark.app'
-SUFeedURL = 'https://geek-1001.github.io/arcmark/appcast.xml'
-SUPublicEDKey = 'q6dyx5qi+I6jBIYOGjtrKxXWkBsoY6xW7cKsqiIQPto='
+# Minimum macOS comes from `platforms` in Package.swift (swift-bundler v3 has no
+# `minimum_macos_version` key and rejects it).

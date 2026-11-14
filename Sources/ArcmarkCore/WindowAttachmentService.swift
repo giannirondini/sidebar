@@ -499,11 +499,11 @@ final class WindowAttachmentService {
                     // If the previous app was the browser, keep Arcmark visible
                     // This handles clicking between browser and Arcmark
                     if self.lastFrontmostBundleId == self.currentBrowserBundleId {
-                        print("WindowAttachmentService: Arcmark activated, but browser was previous - keeping visible")
+                        print("WindowAttachmentService: \(AppIdentity.displayName) activated, but browser was previous - keeping visible")
                         return
                     }
                     // If previous app was not the browser, hide Arcmark
-                    print("WindowAttachmentService: Arcmark activated from non-browser app - hiding")
+                    print("WindowAttachmentService: \(AppIdentity.displayName) activated from non-browser app - hiding")
                     self.delegate?.attachmentServiceShouldHideWindow(self)
                 } else {
                     // Different app became active - hide Arcmark

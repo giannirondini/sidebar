@@ -1,6 +1,6 @@
 # Note Editor — bundled assets
 
-This directory is copied verbatim into `Arcmark.app/Contents/Resources/NoteEditor/`
+This directory is copied verbatim into `SidebArc.app/Contents/Resources/NoteEditor/`
 and served by `NoteServer` over a token-authenticated loopback HTTP listener.
 
 ## Layout

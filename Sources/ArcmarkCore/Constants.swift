@@ -19,8 +19,24 @@ enum UserDefaultsKeys {
     static let swipeToSwitchEnabled = "swipeToSwitchEnabled"
 }
 
-let nodePasteboardType = NSPasteboard.PasteboardType("com.arcmark.node")
-let workspacePasteboardType = NSPasteboard.PasteboardType("com.arcmark.workspace")
+/// Fork identity. `bundleIdentifier` must match `identifier` in Bundler.toml
+/// (the build scripts read it from there; `AppIdentityTests` checks they agree).
+/// Deliberately not `Bundle.main.bundleIdentifier`: under `swift test` / `swift run`
+/// that is the xctest bundle or nil, and the data directory would silently move.
+enum AppIdentity {
+    static let bundleIdentifier = "io.github.giannirondini.sidebarc"
+    /// Folder under `~/Library/Application Support`, named after the bundle id.
+    static let dataDirectoryName = bundleIdentifier
+    /// `os.Logger` subsystem for every category in the app.
+    static let logSubsystem = bundleIdentifier
+    /// User-facing product name. Must match the `[apps.<name>]` key in Bundler.toml.
+    static let displayName = "SidebArc"
+    /// Target of "Check for Updates…" (menu and Settings); there is no in-app updater.
+    static let releasesURL = URL(string: "https://github.com/giannirondini/sidebarc/releases")!
+}
+
+let nodePasteboardType = NSPasteboard.PasteboardType("\(AppIdentity.bundleIdentifier).node")
+let workspacePasteboardType = NSPasteboard.PasteboardType("\(AppIdentity.bundleIdentifier).workspace")
 
 struct TooltipConstants {
     static let showDelay: TimeInterval = 1.2

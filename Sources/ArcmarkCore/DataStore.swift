@@ -5,7 +5,7 @@ final class DataStore {
     private let fileManager = FileManager.default
     private let baseDirectory: URL
     private let dataURL: URL
-    private let logger = Logger(subsystem: "com.arcmark.app", category: "store")
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "store")
     private var hasBackedUpThisSession = false
     private let backupKeepCount = 10
     private let backupTimestampFormatter: DateFormatter = {
@@ -21,7 +21,7 @@ final class DataStore {
             self.baseDirectory = baseDirectory
         } else {
             let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            self.baseDirectory = appSupport.appendingPathComponent("Arcmark", isDirectory: true)
+            self.baseDirectory = appSupport.appendingPathComponent(AppIdentity.dataDirectoryName, isDirectory: true)
         }
         self.dataURL = self.baseDirectory.appendingPathComponent("data.json")
     }

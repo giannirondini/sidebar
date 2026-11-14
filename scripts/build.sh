@@ -1,15 +1,14 @@
 #!/bin/bash
-# Build Arcmark as a proper macOS app bundle
+# Build the app as a macOS app bundle. Names and ids come from Bundler.toml.
 #
 # Usage:
-#   ./scripts/build.sh                  # Build with ad-hoc signing (development)
-#   ./scripts/build.sh --dmg            # Build with ad-hoc signing and create DMG
-#   ./scripts/build.sh --production     # Build with Developer ID signing (production)
+#   ./scripts/build.sh                     # Build with ad-hoc signing (development)
+#   ./scripts/build.sh --dmg               # Build with ad-hoc signing and create DMG
+#   ./scripts/build.sh --production        # Build with Developer ID signing (production)
 #   ./scripts/build.sh --production --dmg  # Build and create notarized DMG
 
 set -e  # Exit on error
 
-# Parse arguments
 CREATE_DMG=false
 PRODUCTION=false
 
@@ -29,17 +28,19 @@ for arg in "$@"; do
     esac
 done
 
-echo "🔨 Building Arcmark..."
-
 # Ensure we're in the project root
 cd "$(dirname "$0")/.."
+source scripts/lib/app-config.sh
 
-# Read version from VERSION file and update Bundler.toml
+echo "🔨 Building $APP_NAME ($BUNDLE_ID)..."
+
+require_swift_bundler
+
+# Read version from VERSION file and sync it into Bundler.toml
 if [ -f "VERSION" ]; then
-    VERSION=$(cat VERSION | tr -d '[:space:]')
+    VERSION=$(tr -d '[:space:]' < VERSION)
     echo "📌 Version: $VERSION"
 
-    # Update version in Bundler.toml if it differs
     if grep -q "^version = " Bundler.toml; then
         CURRENT_VERSION=$(grep "^version = " Bundler.toml | head -1 | sed "s/version = '\(.*\)'/\1/" | tr -d "'")
         if [ "$CURRENT_VERSION" != "$VERSION" ]; then
@@ -49,112 +50,31 @@ if [ -f "VERSION" ]; then
     fi
 fi
 
-# Build the app bundle using swift-bundler
+# Build the app bundle using swift-bundler (revision pinned in Mintfile)
 mint run swift-bundler bundle -c release
+unwrap_nested_resource_bundles
 
-# Post-build: Patch Info.plist with CFBundleIdentifier and version strings
-# Swift Bundler v2.0.7 has an issue where [apps.*.plist] values don't always merge
+# Post-build: swift-bundler doesn't always merge [apps.*.plist] values, so set the
+# identifier and version strings explicitly.
 echo "🔧 Patching Info.plist..."
-INFO_PLIST=".build/bundler/Arcmark.app/Contents/Info.plist"
-
-# Add CFBundleIdentifier if missing (using PlistBuddy)
-if ! /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST" &>/dev/null; then
-    /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string 'com.arcmark.app'" "$INFO_PLIST"
-    echo "  ✓ Added CFBundleIdentifier"
-else
-    # Update if already exists but has wrong value
-    CURRENT_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST")
-    if [ "$CURRENT_ID" != "com.arcmark.app" ]; then
-        /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier 'com.arcmark.app'" "$INFO_PLIST"
-        echo "  ✓ Updated CFBundleIdentifier"
-    else
-        echo "  ✓ CFBundleIdentifier already correct"
-    fi
-fi
-
-# Patch version strings (required by Sparkle for update checks)
-echo "🔧 Patching Info.plist with version strings..."
-if ! /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" &>/dev/null; then
-    /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string '$VERSION'" "$INFO_PLIST"
-else
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString '$VERSION'" "$INFO_PLIST"
-fi
-echo "  ✓ CFBundleShortVersionString = $VERSION"
-
-if ! /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST" &>/dev/null; then
-    /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string '$VERSION'" "$INFO_PLIST"
-else
-    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion '$VERSION'" "$INFO_PLIST"
-fi
-echo "  ✓ CFBundleVersion = $VERSION"
-
-# Post-build: Ensure Sparkle.framework is embedded
-echo "🔧 Checking Sparkle.framework embedding..."
-FRAMEWORKS_DIR=".build/bundler/Arcmark.app/Contents/Frameworks"
-if [ ! -d "$FRAMEWORKS_DIR/Sparkle.framework" ]; then
-    echo "  → Sparkle.framework not found in app bundle, copying..."
-    mkdir -p "$FRAMEWORKS_DIR"
-    # Find Sparkle.framework in the build artifacts
-    SPARKLE_FW=$(find .build -path "*/artifacts/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" -type d 2>/dev/null | head -1)
-    if [ -z "$SPARKLE_FW" ]; then
-        SPARKLE_FW=$(find .build -name "Sparkle.framework" -path "*/Sparkle.xcframework/*" -type d 2>/dev/null | head -1)
-    fi
-    if [ -n "$SPARKLE_FW" ]; then
-        cp -R "$SPARKLE_FW" "$FRAMEWORKS_DIR/"
-        echo "  ✓ Copied Sparkle.framework"
-    else
-        echo "  ⚠️  Warning: Could not find Sparkle.framework in build artifacts"
-    fi
-else
-    echo "  ✓ Sparkle.framework already embedded"
-fi
-
-# Patch Info.plist with Sparkle keys (SUFeedURL, SUPublicEDKey)
-# Swift Bundler doesn't reliably merge [apps.*.plist] values, so we always set them explicitly
-echo "🔧 Patching Info.plist with Sparkle keys..."
-FEED_URL="https://geek-1001.github.io/arcmark/appcast.xml"
-PUBLIC_ED_KEY=$(grep "^SUPublicEDKey" Bundler.toml | sed "s/.*= *'\\(.*\\)'/\\1/" | tr -d '[:space:]')
-
-if ! /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$INFO_PLIST" &>/dev/null; then
-    /usr/libexec/PlistBuddy -c "Add :SUFeedURL string '$FEED_URL'" "$INFO_PLIST"
-else
-    /usr/libexec/PlistBuddy -c "Set :SUFeedURL '$FEED_URL'" "$INFO_PLIST"
-fi
-echo "  ✓ SUFeedURL = $FEED_URL"
-
-if [ -n "$PUBLIC_ED_KEY" ]; then
-    if ! /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$INFO_PLIST" &>/dev/null; then
-        /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string '$PUBLIC_ED_KEY'" "$INFO_PLIST"
-    else
-        /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey '$PUBLIC_ED_KEY'" "$INFO_PLIST"
-    fi
-    echo "  ✓ SUPublicEDKey = ${PUBLIC_ED_KEY:0:20}..."
-else
-    echo "  ⚠️  No SUPublicEDKey found in Bundler.toml - Sparkle update verification will rely on code signing only"
-fi
-
-# Add @executable_path/../Frameworks to rpath so dyld can find embedded frameworks
-echo "🔧 Fixing rpath for embedded frameworks..."
-EXECUTABLE=".build/bundler/Arcmark.app/Contents/MacOS/Arcmark"
-if ! otool -l "$EXECUTABLE" | grep -A2 LC_RPATH | grep -q '@executable_path/../Frameworks'; then
-    install_name_tool -add_rpath '@executable_path/../Frameworks' "$EXECUTABLE"
-    echo "  ✓ Added Frameworks rpath"
-else
-    echo "  ✓ Frameworks rpath already present"
+plist_set "$INFO_PLIST" CFBundleIdentifier "$BUNDLE_ID"
+echo "  ✓ CFBundleIdentifier = $BUNDLE_ID"
+if [ -n "$VERSION" ]; then
+    plist_set "$INFO_PLIST" CFBundleShortVersionString "$VERSION"
+    plist_set "$INFO_PLIST" CFBundleVersion "$VERSION"
+    echo "  ✓ CFBundleShortVersionString / CFBundleVersion = $VERSION"
 fi
 
 # Code sign the app
 echo "🔏 Code signing app..."
 
 if [ "$PRODUCTION" = true ]; then
-    # Production signing with Developer ID
     if [ ! -f ".notarization-config" ]; then
         echo "❌ Error: .notarization-config not found"
         echo "   See docs/PRODUCTION_SIGNING.md for setup instructions"
         exit 1
     fi
 
-    # Load signing identity from config
     source .notarization-config
 
     if [ -z "$SIGNING_IDENTITY" ]; then
@@ -169,26 +89,24 @@ if [ "$PRODUCTION" = true ]; then
         --sign "$SIGNING_IDENTITY" \
         --options runtime \
         --timestamp \
-        ".build/bundler/Arcmark.app" 2>&1 | grep -v "replacing existing signature" || true
+        "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
 
     echo "  ✓ Signed with Developer ID (hardened runtime enabled)"
 else
-    # Development signing with ad-hoc signature
-    codesign --force --deep --sign - ".build/bundler/Arcmark.app" 2>&1 | grep -v "replacing existing signature" || true
+    codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
     echo "  ✓ Signed with ad-hoc signature (development only)"
 fi
 
-# Verify the build
 echo ""
 echo "✅ Build complete!"
-echo "📦 App bundle: .build/bundler/Arcmark.app"
+echo "📦 App bundle: $APP_BUNDLE"
 echo ""
 echo "🔍 Verification:"
-echo "  Bundle ID: $(defaults read "$(pwd)/$INFO_PLIST" CFBundleIdentifier 2>/dev/null || echo 'ERROR: Not found')"
-echo "  Version: $(defaults read "$(pwd)/$INFO_PLIST" CFBundleShortVersionString 2>/dev/null || echo 'Not set')"
-echo "  Code Sign: $(codesign -dvv ".build/bundler/Arcmark.app" 2>&1 | grep "^Identifier=" | cut -d= -f2)"
+echo "  Bundle ID: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST" 2>/dev/null || echo 'ERROR: Not found')"
+echo "  Version:   $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" 2>/dev/null || echo 'Not set')"
+echo "  Code Sign: $(codesign -dvv "$APP_BUNDLE" 2>&1 | grep "^Identifier=" | cut -d= -f2)"
+echo "  Full check: ./scripts/verify-build.sh"
 
-# Create DMG if requested
 if [ "$CREATE_DMG" = true ]; then
     echo ""
     echo "────────────────────────────────────────"

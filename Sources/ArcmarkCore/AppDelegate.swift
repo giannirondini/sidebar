@@ -1,5 +1,4 @@
 import AppKit
-@preconcurrency import Sparkle
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WindowAttachmentServiceDelegate, GlobalHotkeyServiceDelegate {
@@ -10,7 +9,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var mainViewController: MainViewController?
     private var preferencesWindowController: PreferencesWindowController?
     private var alwaysOnTopMenuItem: NSMenuItem?
-    private var updaterController: SPUStandardUpdaterController!
     private var noteServer: NoteServer?
     private var scheduler: SchedulerService?
     private var agentEndpointFileURL: URL?
@@ -25,15 +23,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     public func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [UserDefaultsKeys.tooltipsEnabled: true])
 
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
-        )
-
         setupMenus()
 
         let model = AppModel()
         let mainViewController = MainViewController(model: model)
-        mainViewController.updater = updaterController.updater
         self.mainViewController = mainViewController
 
         let noteServer = NoteServer(model: model)
@@ -48,7 +41,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             backing: .buffered,
             defer: false
         )
-        window.title = "Arcmark"
+        window.title = AppIdentity.displayName
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
@@ -203,11 +196,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
         appMenu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
-        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
-        checkForUpdatesItem.target = updaterController
+        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(openReleasesPage), keyEquivalent: "")
+        checkForUpdatesItem.target = self
         appMenu.addItem(checkForUpdatesItem)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit Arcmark", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit \(AppIdentity.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let fileMenuItem = NSMenuItem()
         mainMenu.addItem(fileMenuItem)
@@ -235,7 +228,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let windowMenu = NSMenu(title: "Window")
         windowMenuItem.submenu = windowMenu
         NSApplication.shared.windowsMenu = windowMenu
-        let showWindowItem = NSMenuItem(title: "Show Arcmark", action: #selector(showMainWindow), keyEquivalent: "")
+        let showWindowItem = NSMenuItem(title: "Show \(AppIdentity.displayName)", action: #selector(showMainWindow), keyEquivalent: "")
         showWindowItem.target = self
         windowMenu.addItem(showWindowItem)
         let alwaysOnTopItem = NSMenuItem(title: "Always on Top", action: #selector(toggleAlwaysOnTop), keyEquivalent: "t")
@@ -277,6 +270,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showMainWindow()
         return true
+    }
+
+    @objc private func openReleasesPage() {
+        NSWorkspace.shared.open(AppIdentity.releasesURL)
     }
 
     @objc private func showMainWindow() {

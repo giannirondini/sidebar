@@ -1,12 +1,14 @@
 #!/bin/bash
 # Interactive setup script for production code signing
 #
-# This script helps you configure production signing for Arcmark
+# This script helps you configure production signing for the app
 # See docs/PRODUCTION_SIGNING.md for detailed documentation
 
 set -e
 
-echo "🔐 Arcmark Production Signing Setup"
+source "$(dirname "$0")/lib/app-config.sh"
+
+echo "🔐 $APP_NAME Production Signing Setup"
 echo "======================================"
 echo ""
 
@@ -106,7 +108,7 @@ echo ""
 echo "Creating .notarization-config..."
 
 cat > .notarization-config <<EOF
-# Notarization credentials for Arcmark
+# Notarization credentials for $APP_NAME
 # This file is git-ignored - never commit it!
 
 # Your Apple ID email

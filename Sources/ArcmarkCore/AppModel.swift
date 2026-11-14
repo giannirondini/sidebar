@@ -6,7 +6,7 @@ final class AppModel {
     let noteStorage: NoteStorage
     private(set) var state: AppState
     var onChange: (() -> Void)?
-    private let logger = Logger(subsystem: "com.arcmark.app", category: "model")
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "model")
 
     init(store: DataStore = DataStore()) {
         self.store = store

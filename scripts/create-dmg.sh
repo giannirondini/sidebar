@@ -1,5 +1,6 @@
 #!/bin/bash
-# Create a DMG installer for Arcmark with drag-and-drop to Applications folder
+# Create a DMG installer with drag-and-drop to the Applications folder.
+# Names come from Bundler.toml (see scripts/lib/app-config.sh).
 #
 # Usage:
 #   ./scripts/create-dmg.sh              # Create DMG without notarization
@@ -17,6 +18,7 @@ echo "📦 Creating DMG installer..."
 
 # Ensure we're in the project root
 cd "$(dirname "$0")/.."
+source scripts/lib/app-config.sh
 
 # Read version from VERSION file
 if [ ! -f "VERSION" ]; then
@@ -26,7 +28,6 @@ fi
 VERSION=$(cat VERSION | tr -d '[:space:]')
 
 # Verify the app bundle exists
-APP_BUNDLE=".build/bundler/Arcmark.app"
 if [ ! -d "$APP_BUNDLE" ]; then
     echo "❌ Error: App bundle not found at $APP_BUNDLE"
     echo "   Run ./scripts/build.sh first"
@@ -38,9 +39,9 @@ OUTPUT_DIR=".build/dmg"
 mkdir -p "$OUTPUT_DIR"
 
 # DMG configuration
-DMG_NAME="Arcmark-${VERSION}.dmg"
+DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
-VOLUME_NAME="Arcmark ${VERSION}"
+VOLUME_NAME="${APP_NAME} ${VERSION}"
 TEMP_DMG="$OUTPUT_DIR/temp.dmg"
 
 # Clean up any existing DMG files
@@ -120,7 +121,7 @@ tell application "Finder"
         set text size of viewOptions to 14
 
         -- Position icons (adjusted for larger icons)
-        set position of item "Arcmark.app" of container window to {160, 200}
+        set position of item "${APP_NAME}.app" of container window to {160, 200}
         set position of item "Applications" of container window to {460, 200}
 
         -- Update view
@@ -212,7 +213,7 @@ echo "✅ DMG created successfully!"
 echo "📦 Output: $DMG_PATH"
 echo "📏 Size: $(du -h "$DMG_PATH" | cut -f1)"
 
-# Notarize if requested (must happen BEFORE EdDSA signing, because stapling modifies the DMG)
+# Notarize if requested
 if [ "$NOTARIZE" = true ]; then
     echo ""
     echo "────────────────────────────────────────"
@@ -274,77 +275,6 @@ if [ "$NOTARIZE" = true ]; then
     fi
 fi
 
-# Sign DMG with Sparkle's EdDSA and update appcast.xml
-# NOTE: This must happen AFTER notarization stapling, because stapling modifies
-# the DMG file (adds ~2KB ticket). The EdDSA signature and length must reflect
-# the final file that users will download.
-echo ""
-echo "🔐 Signing DMG for Sparkle updates..."
-
-SIGN_UPDATE=""
-# Look for sign_update in Sparkle build artifacts
-SIGN_UPDATE=$(find .build -name "sign_update" -type f 2>/dev/null | head -1)
-
-if [ -n "$SIGN_UPDATE" ] && [ -x "$SIGN_UPDATE" ]; then
-    SIGN_OUTPUT=$("$SIGN_UPDATE" "$DMG_PATH" 2>&1)
-    echo "  ✓ EdDSA signature generated"
-    echo "  $SIGN_OUTPUT"
-
-    # Extract signature and length from sign_update output
-    # Output format: sparkle:edSignature="..." length="..."
-    ED_SIGNATURE=$(echo "$SIGN_OUTPUT" | grep -o 'sparkle:edSignature="[^"]*"' | sed 's/sparkle:edSignature="//;s/"//')
-    FILE_LENGTH=$(echo "$SIGN_OUTPUT" | grep -o 'length="[^"]*"' | sed 's/length="//;s/"//')
-
-    if [ -n "$ED_SIGNATURE" ] && [ -n "$FILE_LENGTH" ]; then
-        # Update appcast.xml with new entry
-        APPCAST_FILE="docs/appcast.xml"
-        if [ -f "$APPCAST_FILE" ]; then
-            echo "  → Updating appcast.xml with new release entry..."
-
-            DMG_URL="https://github.com/Geek-1001/arcmark/releases/download/v${VERSION}/Arcmark-${VERSION}.dmg"
-            PUB_DATE=$(date -u "+%a, %d %b %Y %H:%M:%S %z")
-
-            # Build item XML in a temp file for clean multi-line insertion
-            ITEM_FILE=$(mktemp)
-            {
-                echo '            <item>'
-                echo "                <title>Version ${VERSION}</title>"
-                echo "                <pubDate>${PUB_DATE}</pubDate>"
-                if [ -n "$RELEASE_DESCRIPTION" ]; then
-                    echo '                <description sparkle:format="markdown">'
-                    echo "$RELEASE_DESCRIPTION"
-                    echo '                </description>'
-                fi
-                echo '                <enclosure'
-                echo "                    url=\"${DMG_URL}\""
-                echo "                    sparkle:version=\"${VERSION}\""
-                echo "                    sparkle:shortVersionString=\"${VERSION}\""
-                echo "                    sparkle:edSignature=\"${ED_SIGNATURE}\""
-                echo "                    length=\"${FILE_LENGTH}\""
-                echo '                    type="application/octet-stream"'
-                echo '                />'
-                echo '            </item>'
-            } > "$ITEM_FILE"
-
-            # Insert new item as the first <item> in the channel (after <link> line)
-            sed -i '' "/<link>.*<\/link>/r $ITEM_FILE" "$APPCAST_FILE"
-            rm -f "$ITEM_FILE"
-
-            echo "  ✓ Added v${VERSION} entry to appcast.xml"
-            echo "  → Remember to commit docs/appcast.xml and push to update the feed"
-        else
-            echo "  ⚠️  docs/appcast.xml not found - skipping appcast update"
-            echo "  → Signature: sparkle:edSignature=\"${ED_SIGNATURE}\" length=\"${FILE_LENGTH}\""
-        fi
-    else
-        echo "  ⚠️  Could not parse EdDSA signature output"
-        echo "  → Raw output: $SIGN_OUTPUT"
-    fi
-else
-    echo "  ⚠️  Sparkle sign_update tool not found"
-    echo "  → To enable: run 'swift build' to download Sparkle, then re-run this script"
-    echo "  → The sign_update tool is included in Sparkle's build artifacts"
-fi
 
 echo ""
 echo "🧪 To test the DMG:"

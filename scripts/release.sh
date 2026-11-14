@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build, sign, and publish a new Arcmark release
+# Build, sign, and publish a new release to GitHub Releases.
+# Names come from Bundler.toml (see scripts/lib/app-config.sh).
 #
 # Usage:
 #   ./scripts/release.sh <version>        # Full release: build, tag, push, create GitHub release
@@ -36,8 +37,9 @@ fi
 
 # Ensure we're in the project root
 cd "$(dirname "$0")/.."
+source scripts/lib/app-config.sh
 
-echo "🚀 Releasing Arcmark v${NEW_VERSION}"
+echo "🚀 Releasing $APP_NAME v${NEW_VERSION}"
 if [ "$DRY_RUN" = true ]; then
     echo "   (dry-run mode — git/GitHub operations will be skipped)"
 fi
@@ -45,8 +47,8 @@ echo ""
 
 # Check prerequisites
 if [ "$DRY_RUN" = false ]; then
-    # Check for clean working tree (aside from VERSION and appcast which we'll change)
-    if ! git diff --quiet -- ':!VERSION' ':!docs/appcast.xml' ':!Bundler.toml'; then
+    # Check for clean working tree (aside from VERSION and Bundler.toml which we'll change)
+    if ! git diff --quiet -- ':!VERSION' ':!Bundler.toml'; then
         echo "❌ Working tree has uncommitted changes. Commit or stash them first."
         exit 1
     fi
@@ -75,14 +77,14 @@ if [ "$DRY_RUN" = false ]; then
     fi
 fi
 
-# Collect release description for appcast and GitHub release
+# Collect release description for the GitHub release
 echo "📝 Preparing release description..."
 
 # Get previous version from VERSION file to find merged PRs
 PREV_VERSION=$(cat VERSION | tr -d '[:space:]')
 
 # Build prefilled description from commits since last release
-DESC_FILE=$(mktemp "${TMPDIR:-/tmp}/arcmark-release-desc.XXXXXX")
+DESC_FILE=$(mktemp "${TMPDIR:-/tmp}/release-desc.XXXXXX")
 {
     echo "### What's New"
     echo ""
@@ -113,7 +115,6 @@ ${VISUAL:-${EDITOR:-vi}} "$DESC_FILE"
 # Strip comment lines; command substitution strips trailing newlines
 RELEASE_DESCRIPTION=$(grep -v '^#' "$DESC_FILE" | sed '/./,$!d')
 rm -f "$DESC_FILE"
-export RELEASE_DESCRIPTION
 
 if [ -n "$RELEASE_DESCRIPTION" ]; then
     echo "  ✓ Release description captured"
@@ -128,7 +129,7 @@ echo "$NEW_VERSION" > VERSION
 echo "  ✓ VERSION file updated"
 echo ""
 
-# Step 2: Build production DMG (includes EdDSA signing and appcast update)
+# Step 2: Build production DMG (signed and notarized)
 echo "📦 Step 2: Building production DMG..."
 echo "────────────────────────────────────────"
 ./scripts/build.sh --production --dmg
@@ -136,23 +137,13 @@ echo "────────────────────────�
 echo ""
 
 # Verify DMG was created
-DMG_PATH=".build/dmg/Arcmark-${NEW_VERSION}.dmg"
+DMG_PATH=".build/dmg/${APP_NAME}-${NEW_VERSION}.dmg"
 if [ ! -f "$DMG_PATH" ]; then
     echo "❌ DMG not found at $DMG_PATH"
     exit 1
 fi
 echo "  ✓ DMG ready: $DMG_PATH"
 
-# Verify appcast was updated
-if ! grep -q "sparkle:version=\"${NEW_VERSION}\"" docs/appcast.xml; then
-    echo "⚠️  Warning: appcast.xml may not have been updated with v${NEW_VERSION}"
-    echo "   Check docs/appcast.xml manually"
-fi
-
-# Update landing page download link to point to the new version's DMG
-echo "🔗 Updating landing page download link..."
-sed -i '' "s|href=\"https://github.com/Geek-1001/arcmark/releases/download/v[^\"]*\"|href=\"https://github.com/Geek-1001/arcmark/releases/download/v${NEW_VERSION}/Arcmark-${NEW_VERSION}.dmg\"|" docs/index.html
-echo "  ✓ Download link updated in docs/index.html"
 echo ""
 
 if [ "$DRY_RUN" = true ]; then
@@ -161,10 +152,9 @@ if [ "$DRY_RUN" = true ]; then
     echo ""
     echo "Artifacts:"
     echo "  📦 DMG: $DMG_PATH"
-    echo "  📄 Appcast: docs/appcast.xml"
     echo ""
     echo "To finish the release manually:"
-    echo "  git add VERSION Bundler.toml docs/appcast.xml docs/index.html"
+    echo "  git add VERSION Bundler.toml"
     echo "  git commit -m 'Release v${NEW_VERSION}'"
     echo "  git tag -a v${NEW_VERSION} -m 'Release version ${NEW_VERSION}'"
     echo "  git push origin main v${NEW_VERSION}"
@@ -175,7 +165,7 @@ fi
 # Step 3: Commit changes
 echo ""
 echo "📝 Step 3: Committing release changes..."
-git add VERSION Bundler.toml docs/appcast.xml docs/index.html
+git add VERSION Bundler.toml
 git commit -m "Release v${NEW_VERSION}"
 echo "  ✓ Changes committed"
 
@@ -190,11 +180,11 @@ echo "  ✓ Pushed to origin with tag v${NEW_VERSION}"
 echo ""
 echo "🐙 Step 5: Creating GitHub Release..."
 if [ -n "$RELEASE_DESCRIPTION" ]; then
-    GH_RELEASE_NOTES="## Arcmark v${NEW_VERSION}
+    GH_RELEASE_NOTES="## $APP_NAME v${NEW_VERSION}
 
 ${RELEASE_DESCRIPTION}"
 else
-    GH_RELEASE_NOTES="## Arcmark v${NEW_VERSION}"
+    GH_RELEASE_NOTES="## $APP_NAME v${NEW_VERSION}"
 fi
 gh release create "v${NEW_VERSION}" "$DMG_PATH" \
     --title "v${NEW_VERSION}" \
@@ -203,12 +193,11 @@ echo "  ✓ GitHub Release created"
 
 echo ""
 echo "════════════════════════════════════════"
-echo "✅ Arcmark v${NEW_VERSION} released!"
+echo "✅ $APP_NAME v${NEW_VERSION} released!"
 echo ""
 echo "  📦 DMG: $DMG_PATH"
 echo "  🏷️  Tag: v${NEW_VERSION}"
-echo "  🐙 Release: https://github.com/Geek-1001/arcmark/releases/tag/v${NEW_VERSION}"
-echo "  📡 Appcast will update once GitHub Pages rebuilds"
+echo "  🐙 Release: $(gh release view "v${NEW_VERSION}" --json url --jq .url 2>/dev/null)"
 echo ""
-echo "Existing users will receive the update automatically via Sparkle."
+echo "Users update by downloading the DMG (\"Check for Updates…\" opens the releases page)."
 echo "════════════════════════════════════════"

@@ -344,7 +344,7 @@ final class PreferencesViewController: NSViewController {
         if enabled && !WindowAttachmentService.shared.checkAccessibilityPermissions() {
             let alert = NSAlert()
             alert.messageText = "Accessibility Permissions Required"
-            alert.informativeText = "Arcmark needs Accessibility permissions to attach to windows. Please grant access in System Settings."
+            alert.informativeText = "\(AppIdentity.displayName) needs Accessibility permissions to attach to windows. Please grant access in System Settings."
             alert.alertStyle = .warning
             alert.addButton(withTitle: "OK")
             alert.runModal()
@@ -420,7 +420,7 @@ final class PreferencesViewController: NSViewController {
 
         let alert = NSAlert()
         alert.messageText = "Grant Accessibility Access"
-        alert.informativeText = "Please grant Arcmark access in System Settings > Privacy & Security > Accessibility, then return to this window."
+        alert.informativeText = "Please grant \(AppIdentity.displayName) access in System Settings > Privacy & Security > Accessibility, then return to this window."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()

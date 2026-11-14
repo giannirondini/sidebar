@@ -8,7 +8,7 @@ import os
 /// whose Host header doesn't match 127.0.0.1:<port> (DNS rebinding defense).
 @MainActor
 final class NoteServer {
-    private let logger = Logger(subsystem: "com.arcmark.app", category: "noteserver")
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "noteserver")
     private weak var model: AppModel?
     private let noteStorage: NoteStorage
     private let resourcesURL: URL?
@@ -794,7 +794,6 @@ final class NoteServer {
     /// already 404s/500s) instead of killing the app.
     static func resolveBundledResourcesURL() -> URL? {
         let fm = FileManager.default
-        let bundleName = "Arcmark_ArcmarkCore.bundle"
 
         // Bases that might contain the resource bundle (packaged app, flat dev
         // builds) or the assets directly. `Bundle(for:)` covers test/dynamic
@@ -814,10 +813,14 @@ final class NoteServer {
         }
 
         for base in bases {
-            // Nested SwiftPM resource bundle (Arcmark_ArcmarkCore.bundle).
-            let nested = base.appendingPathComponent(bundleName)
-            if let bundle = Bundle(url: nested), let resources = bundle.resourceURL, hasEditor(resources) {
-                return resources
+            // Nested SwiftPM resource bundle (`<Package>_<Target>.bundle`). Matched by
+            // content, not name, so package/target renames can't break the lookup;
+            // scripts/verify-build.sh applies the same rule.
+            let nested = (try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil)) ?? []
+            for candidate in nested.filter({ $0.pathExtension == "bundle" }).sorted(by: { $0.path < $1.path }) {
+                if let bundle = Bundle(url: candidate), let resources = bundle.resourceURL, hasEditor(resources) {
+                    return resources
+                }
             }
             // Resources copied directly under the base directory.
             if hasEditor(base) {

@@ -4,7 +4,7 @@ import os
 @MainActor
 final class SchedulerService {
     private var timers: [UUID: DispatchSourceTimer] = [:]
-    private let logger = Logger(subsystem: "com.arcmark.app", category: "scheduler")
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "scheduler")
     private var isSyncing = false
 
     var onFire: ((ScheduledLinkRef) -> Void)?
