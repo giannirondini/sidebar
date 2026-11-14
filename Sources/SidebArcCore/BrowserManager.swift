@@ -12,7 +12,50 @@ struct BrowserProfile {
     let displayName: String // Human-readable name
 }
 
+/// Where a link opens: a browser (nil = system default handler) and an optional
+/// browser profile directory for it.
+struct BrowserTarget: Equatable {
+    let bundleId: String?
+    let profileDir: String?
+}
+
 enum BrowserManager {
+    // MARK: - Resolution
+
+    /// Resolves where `link` opens for a space in `profile`.
+    ///
+    /// Browser precedence: **link override → profile's browser → global default**.
+    /// The profile directory is `profile.browserProfiles[browser]` when the browser
+    /// is the profile's own; a per-link override to a *different* browser opens
+    /// without a browser profile.
+    static func resolveTarget(
+        link: Link?,
+        profile: Profile,
+        globalDefault: String? = resolveDefaultBrowserBundleId()
+    ) -> BrowserTarget {
+        let profileBrowser = profile.browserBundleId ?? globalDefault
+        let browser = link?.browserBundleId ?? profileBrowser
+        guard let browser else { return BrowserTarget(bundleId: nil, profileDir: nil) }
+
+        // Bundle ids are case-insensitive; look the dir up under the profile's spelling,
+        // which is the key `browserProfiles` was written with.
+        guard let profileBrowser, profileBrowser.caseInsensitiveCompare(browser) == .orderedSame else {
+            return BrowserTarget(bundleId: browser, profileDir: nil)
+        }
+        return BrowserTarget(bundleId: browser, profileDir: profile.browserProfiles[profileBrowser])
+    }
+
+    /// Opens `link` where `resolveTarget` says.
+    static func open(link: Link, in profile: Profile) {
+        guard let url = URL(string: link.url) else { return }
+        open(url: url, target: resolveTarget(link: link, profile: profile))
+    }
+
+    /// Opens `url` in the global default browser, without a browser profile
+    /// (used for app-internal pages such as the note editor).
+    static func openInGlobalDefault(url: URL) {
+        open(url: url, target: BrowserTarget(bundleId: resolveDefaultBrowserBundleId(), profileDir: nil))
+    }
     static func installedBrowsers() -> [BrowserInfo] {
         guard let probeURL = URL(string: "http://example.com") else { return [] }
         let urls = NSWorkspace.shared.urlsForApplications(toOpen: probeURL)
@@ -42,15 +85,15 @@ enum BrowserManager {
         return defaultBrowserBundleId()
     }
 
-    static func open(url: URL, profile: String? = nil) {
-        guard let bundleId = resolveDefaultBrowserBundleId(),
+    static func open(url: URL, target: BrowserTarget) {
+        guard let bundleId = target.bundleId,
               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
             NSWorkspace.shared.open(url)
             return
         }
 
         // No profile: use existing NSWorkspace approach
-        guard let profile = profile, !profile.isEmpty else {
+        guard let profile = target.profileDir, !profile.isEmpty else {
             let config = NSWorkspace.OpenConfiguration()
             NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config, completionHandler: nil)
             return
@@ -101,8 +144,7 @@ enum BrowserManager {
         return supported.contains(bundleId.lowercased())
     }
 
-    static func detectProfiles() -> [BrowserProfile] {
-        guard let bundleId = resolveDefaultBrowserBundleId() else { return [] }
+    static func detectProfiles(bundleId: String) -> [BrowserProfile] {
         let lowered = bundleId.lowercased()
 
         switch lowered {

@@ -726,7 +726,7 @@ final class MainViewController: NSViewController {
 
     private func openNote(_ note: Note) {
         guard let url = noteServer?.editorURL(noteId: note.id) else { return }
-        BrowserManager.open(url: url, profile: nil)
+        BrowserManager.openInGlobalDefault(url: url)
     }
 
     @objc func paste(_ sender: Any?) {
@@ -802,12 +802,7 @@ final class MainViewController: NSViewController {
     }
 
     private func openLink(_ link: Link) {
-        guard let url = URL(string: link.url) else { return }
-        let profile: String? = {
-            guard let bundleId = BrowserManager.resolveDefaultBrowserBundleId() else { return nil }
-            return model.currentProfile.browserProfiles[bundleId]
-        }()
-        BrowserManager.open(url: url, profile: profile)
+        BrowserManager.open(link: link, in: model.currentProfile)
     }
 
     // MARK: - URL Utilities

@@ -79,11 +79,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         scheduler.onFire = { [weak model] ref in
             guard let model else { return }
             if let url = URL(string: ref.url) {
+                // The ref carries only the URL; look the link up for its browser override.
+                var link: Link?
+                if case .link(let found) = model.nodeAcrossWorkspaces(id: ref.linkId) {
+                    link = found
+                }
                 let profile = model.state.workspaces
                     .first(where: { $0.id == ref.workspaceId })
-                    .map { model.profile(for: $0) }?
-                    .browserProfiles[BrowserManager.resolveDefaultBrowserBundleId() ?? ""]
-                BrowserManager.open(url: url, profile: profile)
+                    .map { model.profile(for: $0) } ?? model.currentProfile
+                BrowserManager.open(url: url, target: BrowserManager.resolveTarget(link: link, profile: profile))
             }
             model.cancelSchedule(id: ref.linkId)
         }

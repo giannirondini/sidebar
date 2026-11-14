@@ -1112,8 +1112,7 @@ final class SettingsContentViewController: NSViewController {
         menu.addItem(colorItem)
 
         // Browser profile options
-        let currentBundleId = BrowserManager.resolveDefaultBrowserBundleId() ?? ""
-        let hasProfileForCurrentBrowser = !currentBundleId.isEmpty && appModel.profile(for: workspace).browserProfiles[currentBundleId] != nil
+        let hasProfileForCurrentBrowser = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).profileDir != nil
         let profileTitle = hasProfileForCurrentBrowser ? "Edit Browser Profile..." : "Set Browser Profile..."
         let profileItem = NSMenuItem(title: profileTitle, action: #selector(setContextWorkspaceProfile), keyEquivalent: "")
         profileItem.target = self
@@ -1173,7 +1172,7 @@ final class SettingsContentViewController: NSViewController {
         guard let workspaceId = contextWorkspaceId,
               let appModel,
               let workspace = appModel.workspaces.first(where: { $0.id == workspaceId }) else { return }
-        guard let bundleId = BrowserManager.resolveDefaultBrowserBundleId() else { return }
+        guard let bundleId = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).bundleId else { return }
         appModel.updateBrowserProfile(profileId: workspace.profileId, bundleId: bundleId, profile: nil)
         reloadWorkspaces()
     }
@@ -1185,7 +1184,7 @@ final class SettingsContentViewController: NSViewController {
         let spaceProfileId = workspace.profileId
         let browserProfiles = appModel.profile(for: workspace).browserProfiles
 
-        let bundleId = BrowserManager.resolveDefaultBrowserBundleId() ?? ""
+        let bundleId = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).bundleId ?? ""
         let browserSupportsProfiles = BrowserManager.supportsProfiles(bundleId: bundleId)
 
         let alert = NSAlert()
@@ -1206,7 +1205,7 @@ final class SettingsContentViewController: NSViewController {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
 
-        let detectedProfiles = BrowserManager.detectProfiles()
+        let detectedProfiles = BrowserManager.detectProfiles(bundleId: bundleId)
         let containerWidth: CGFloat = 260
 
         if detectedProfiles.isEmpty {
@@ -1337,10 +1336,7 @@ extension SettingsContentViewController: NSCollectionViewDataSource {
 
         let workspace = appModel.workspaces[indexPath.item]
         let canDelete = appModel.workspaces.count > 1
-        let hasBrowserProfile: Bool = {
-            guard let bundleId = BrowserManager.resolveDefaultBrowserBundleId() else { return false }
-            return appModel.profile(for: workspace).browserProfiles[bundleId] != nil
-        }()
+        let hasBrowserProfile = BrowserManager.resolveTarget(link: nil, profile: appModel.profile(for: workspace)).profileDir != nil
 
         item.configure(
             workspace: workspace,
