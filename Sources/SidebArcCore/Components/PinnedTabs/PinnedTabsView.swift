@@ -8,6 +8,22 @@ final class PinnedTabsView: NSView {
 
     private var tileViews: [PinnedTabTileView] = []
     private var currentLinks: [Link] = []
+    /// Columns used by the last layout; the height depends on it.
+    private var layoutColumns = ThemeConstants.Sizing.pinnedTileMinColumns
+
+    /// Columns that fit `width` with tiles at least `pinnedTileMinWidth` wide,
+    /// never fewer than `pinnedTileMinColumns`.
+    static func columnCount(forWidth width: CGFloat) -> Int {
+        let gap = ThemeConstants.Spacing.tiny
+        let fitting = Int(((width + gap) / (ThemeConstants.Sizing.pinnedTileMinWidth + gap)).rounded(.down))
+        return max(ThemeConstants.Sizing.pinnedTileMinColumns, fitting)
+    }
+
+    /// Rows needed for `count` tiles in `columns` columns.
+    static func rowCount(tiles count: Int, columns: Int) -> Int {
+        guard count > 0, columns > 0 else { return 0 }
+        return (count + columns - 1) / columns
+    }
 
     override var isFlipped: Bool { true }
 
@@ -62,13 +78,19 @@ final class PinnedTabsView: NSView {
         let gap = ThemeConstants.Spacing.tiny
         let tileHeight = ThemeConstants.Sizing.pinnedTileHeight
         let totalWidth = bounds.width
+        let columns = Self.columnCount(forWidth: totalWidth)
+        if columns != layoutColumns {
+            layoutColumns = columns
+            invalidateIntrinsicContentSize()
+        }
 
         var y: CGFloat = 0
         var placed = 0
 
         while placed < count {
             let remaining = count - placed
-            let cols = min(remaining, ThemeConstants.Sizing.pinnedTileColumns)
+            // A short last row stretches its tiles across the full width (as before).
+            let cols = min(remaining, columns)
             let tileWidth = (totalWidth - gap * CGFloat(cols - 1)) / CGFloat(cols)
 
             for col in 0..<cols {
@@ -87,8 +109,7 @@ final class PinnedTabsView: NSView {
 
         let tileHeight = ThemeConstants.Sizing.pinnedTileHeight
         let gap = ThemeConstants.Spacing.tiny
-        let cols = ThemeConstants.Sizing.pinnedTileColumns
-        let rows = min(Int(ceil(Double(count) / Double(cols))), ThemeConstants.Sizing.pinnedTileMaxRows)
+        let rows = Self.rowCount(tiles: count, columns: layoutColumns)
         let height = CGFloat(rows) * tileHeight + CGFloat(rows - 1) * gap
 
         return NSSize(width: NSView.noIntrinsicMetric, height: height)

@@ -250,11 +250,12 @@ struct ThemeConstants {
         /// Scroll shadow gradient width (32pt) - Used for horizontal overscroll fade indicators
         static let scrollShadowWidth: CGFloat = 32
 
-        /// Number of columns in the pinned tabs grid
-        static let pinnedTileColumns: Int = 4
+        /// Narrowest a Favorites tile may get before the grid drops a column
+        /// (3 columns at the default 340-pt sidebar, 4 from about 416 pt, 5 near 520)
+        static let pinnedTileMinWidth: CGFloat = 96
 
-        /// Maximum number of rows in the pinned tabs grid
-        static let pinnedTileMaxRows: Int = 3
+        /// The Favorites grid never has fewer columns than this (Arc's 3-wide grid)
+        static let pinnedTileMinColumns: Int = 3
 
         /// Height of the bottom space bar (`SpaceBarView`)
         static let spaceBarHeight: CGFloat = buttonHeight

@@ -68,7 +68,10 @@ struct Profile: Codable, Identifiable, Equatable {
     var focusesOpenTabs: Bool?
 
     static let defaultName = "Default"
-    static let maxFavorites = ThemeConstants.Sizing.pinnedTileColumns * ThemeConstants.Sizing.pinnedTileMaxRows
+    /// A product limit, independent of the grid's layout: the grid adapts its
+    /// columns to the sidebar width and grows rows to fit. Lowering it would
+    /// need an overflow pass for profiles that already hold more.
+    static let maxFavorites = 12
 
     init(
         id: UUID = UUID(),
