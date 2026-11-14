@@ -26,16 +26,12 @@ final class MainViewController: NSViewController {
     // Swipe animation views
     var swipeClipContainer: NSView!         // Clips to bounds, contains content + preview
     var workspaceContentStack: NSStackView! // The animated workspace content
-    var swipePreviewView: NSView?           // Container for preview snapshot + gradient
-    var swipePreviewSnapshot: NSImage?      // Cached snapshot of adjacent workspace
-    var swipePreviewDirection: SwipeDirection? // Direction the snapshot was captured for
 
     // State
     private var isReloadScheduled = false
     private var hasLoaded = false
     private var lastWorkspaceId: UUID?
     private var pendingWorkspaceRenameId: UUID?
-    var isSwipeAnimating = false
     var suppressNodeAnimations = false          // Suppresses collection view animations during swipe transitions
     /// The space switch in progress (MainViewController+SpaceTransition).
     var spaceTransition: SpaceTransition?
@@ -45,7 +41,6 @@ final class MainViewController: NSViewController {
     var reloadHeldByTransition = false
     /// The last switch's snapshot, fading out over the freshly drawn list.
     var landingCover: NSView?
-    var swipeColorAnimationFromColor: NSColor?  // Set before workspace switch to trigger animated color transition
 
     init(model: AppModel) {
         self.model = model
@@ -505,23 +500,9 @@ final class MainViewController: NSViewController {
         let newColor = model.currentWorkspace.colorId.backgroundColor
         nodeListViewController.workspaceColor = model.currentWorkspace.colorId
 
-        if let fromColor = swipeColorAnimationFromColor {
-            // Animate background color transition during swipe
-            swipeColorAnimationFromColor = nil
-            view.layer?.backgroundColor = fromColor.cgColor
-            view.window?.backgroundColor = fromColor
-
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = ThemeConstants.Animation.durationSlow
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                context.allowsImplicitAnimation = true
-                self.view.layer?.backgroundColor = newColor.cgColor
-                self.view.window?.backgroundColor = newColor
-            })
-        } else {
-            view.layer?.backgroundColor = newColor.cgColor
-            view.window?.backgroundColor = newColor
-        }
+        // A space transition animates the colour itself and lands on this value.
+        view.layer?.backgroundColor = newColor.cgColor
+        view.window?.backgroundColor = newColor
     }
 
     private func showSettingsContent() {
@@ -536,25 +517,9 @@ final class MainViewController: NSViewController {
         // Show settings content
         settingsViewController.view.isHidden = false
 
-        // Apply settings background color
-        let settingsColor = NSColor(calibratedRed: 0.898, green: 0.906, blue: 0.922, alpha: 1.0)
-
-        if let fromColor = swipeColorAnimationFromColor {
-            swipeColorAnimationFromColor = nil
-            view.layer?.backgroundColor = fromColor.cgColor
-            view.window?.backgroundColor = fromColor
-
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = ThemeConstants.Animation.durationSlow
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                context.allowsImplicitAnimation = true
-                self.view.layer?.backgroundColor = settingsColor.cgColor
-                self.view.window?.backgroundColor = settingsColor
-            })
-        } else {
-            view.layer?.backgroundColor = settingsColor.cgColor
-            view.window?.backgroundColor = settingsColor
-        }
+        let settingsColor = ThemeConstants.Colors.settingsBackground
+        view.layer?.backgroundColor = settingsColor.cgColor
+        view.window?.backgroundColor = settingsColor
     }
 
     private func showWorkspaceContent() {
@@ -665,13 +630,6 @@ final class MainViewController: NSViewController {
         guard let index = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }),
               workspaces.indices.contains(index + step) else { return nil }
         return workspaces[index + step].id
-    }
-
-    /// Selects the adjacent space at once, without a transition (the legacy swipe
-    /// animates by itself, then calls this).
-    func selectAdjacentSpace(step: Int) {
-        guard let id = adjacentSpaceId(step: step) else { return }
-        model.selectWorkspace(id: id)
     }
 
     func promptCreateWorkspace() {

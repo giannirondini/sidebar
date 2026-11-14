@@ -42,10 +42,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
     private static let transitionAnimationKey = "spaceTransition"
     private static let transitionLogger = Logger(subsystem: AppIdentity.logSubsystem, category: "transition")
 
-    // MARK: - Gesture (dispatches to the legacy swipe when that flag is set)
+    // MARK: - Gesture
 
     func swipeGestureDidBegin(_ service: SwipeGestureService) {
-        if SpaceTransitionMode.isLegacy { return legacySwipeDidBegin(service) }
         // A new gesture during a settle: land the previous switch first.
         if spaceTransition != nil {
             finishSpaceTransitionNow()
@@ -53,16 +52,10 @@ extension MainViewController: SwipeGestureServiceDelegate {
     }
 
     func swipeGestureDidUpdate(_ service: SwipeGestureService, translationX: CGFloat) {
-        if SpaceTransitionMode.isLegacy { return legacySwipeDidUpdate(service, translationX: translationX) }
         trackSpaceSwipe(translation: translationX)
     }
 
-    func swipeGestureDidComplete(_ service: SwipeGestureService, direction: SwipeDirection) {
-        if SpaceTransitionMode.isLegacy { legacySwipeDidComplete(service, direction: direction) }
-    }
-
     func swipeGestureDidCancel(_ service: SwipeGestureService) {
-        if SpaceTransitionMode.isLegacy { return legacySwipeDidCancel(service) }
         endSpaceSwipe(translation: 0, velocity: 0, forceStay: true)
     }
 
@@ -88,15 +81,14 @@ extension MainViewController: SwipeGestureServiceDelegate {
     // MARK: - Entry points
 
     /// A click on a space bar icon or ⌘⌥←/→: slide to `id` with the same spring as
-    /// a swipe. Instant (no transition) in legacy mode, from Settings, for the
-    /// current space, or while the window isn't visible.
+    /// a swipe. Instant (no transition) from Settings, for the current space, or
+    /// while the window isn't visible.
     func requestSpaceSwitch(to id: UUID) {
         if spaceTransition != nil {
             finishSpaceTransitionNow()
         }
         let workspaces = model.workspaces
-        guard !SpaceTransitionMode.isLegacy,
-              !model.isSettingsShown,
+        guard !model.isSettingsShown,
               view.window?.isVisible == true,
               let fromIndex = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }),
               let toIndex = workspaces.firstIndex(where: { $0.id == id }),

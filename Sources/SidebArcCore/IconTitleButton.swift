@@ -63,25 +63,6 @@ final class IconTitleButton: BaseControl {
             )
         }
 
-        static var addWorkspace: Style {
-            Style(
-                backgroundColor: ThemeConstants.Colors.darkGray,
-                hoverBackgroundOpacity: ThemeConstants.Opacity.minimal,
-                pressedBackgroundOpacity: ThemeConstants.Opacity.extraSubtle,
-                foregroundColor: ThemeConstants.Colors.darkGray,
-                foregroundInactiveOpacity: ThemeConstants.Opacity.high,
-                foregroundActiveOpacity: ThemeConstants.Opacity.full,
-                font: ThemeConstants.Fonts.bodySemibold,
-                iconPointSize: ThemeConstants.Sizing.iconSmall,
-                iconWeight: .medium,
-                iconTitleSpacing: ThemeConstants.Spacing.small,
-                horizontalPadding: ThemeConstants.Spacing.regular,
-                verticalPadding: ThemeConstants.Spacing.regular,
-                cornerRadius: ThemeConstants.CornerRadius.medium,
-                fillsWidth: false
-            )
-        }
-
         var height: CGFloat {
             let textHeight = ceil(font.ascender - font.descender)
             let contentHeight = max(iconPointSize, textHeight)

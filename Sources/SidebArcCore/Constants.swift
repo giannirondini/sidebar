@@ -26,17 +26,6 @@ enum UserDefaultsKeys {
     /// Bundle id of the browser whose Automation permission was missing when a click
     /// looked for an open tab; Settings › Permissions shows a hint until it's resolved.
     static let tabFocusPermissionHintBundleId = "tabFocusPermissionHintBundleId"
-    /// Hidden switch back to the pre-3a.5 swipe (snapshot slide, trigger at 150 pt,
-    /// instant click and keyboard switches). Set with
-    /// `defaults write io.github.giannirondini.sidebarc legacySpaceTransition -bool YES`;
-    /// read once at launch (`SpaceTransitionMode`). Removed once the new one is accepted.
-    static let legacySpaceTransition = "legacySpaceTransition"
-}
-
-/// Which space transition this run uses. Read once, so the gesture service and
-/// the view controller can never disagree; changing the default needs a relaunch.
-enum SpaceTransitionMode {
-    static let isLegacy: Bool = UserDefaults.standard.bool(forKey: UserDefaultsKeys.legacySpaceTransition)
 }
 
 /// Fork identity. `bundleIdentifier` must match `identifier` in Bundler.toml
