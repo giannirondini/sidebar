@@ -334,7 +334,7 @@ import Testing
     @Test func testCurrentWorkspaceReportsSettings() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        model.selectSettings()
+        model.showSettings()
 
         let (status, json) = try await apiRequest("GET", "/api/workspaces/current", port: server.port)
         #expect(status == 200)

@@ -150,7 +150,6 @@ import Testing
         let state = SchemaMigration.v1ToV2(try decodeV1(JSONSerialization.data(withJSONObject: root)))
         #expect(state.profiles.map(\.name) == ["Default"])
         #expect(state.workspaces.isEmpty)
-        #expect(state.isSettingsSelected)
     }
 
     // MARK: - Favorites: dedupe and overflow

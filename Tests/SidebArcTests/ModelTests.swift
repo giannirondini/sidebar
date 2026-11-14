@@ -12,7 +12,7 @@ import Testing
     private func makeState(_ workspaces: (UUID) -> [Workspace], favorites: [Link] = []) -> AppState {
         let profile = Profile(name: "Default", favorites: favorites)
         let list = workspaces(profile.id)
-        return AppState(profiles: [profile], workspaces: list, selectedWorkspaceId: list.first?.id, isSettingsSelected: false)
+        return AppState(profiles: [profile], workspaces: list, selectedWorkspaceId: list.first?.id)
     }
 
     @Test func testJSONRoundTrip() throws {
@@ -59,6 +59,35 @@ import Testing
 
         model.setWorkspaceIcon(id: id, icon: nil)
         #expect(AppModel(store: store).currentWorkspace.icon == nil)
+    }
+
+    @Test func settingsIsRuntimeStateAndKeepsTheSelectedSpace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dataFile = directory.appendingPathComponent("data.json")
+        let store = DataStore(baseDirectory: directory)
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+        let spaceId = model.createWorkspace(name: "Second", colorId: .moss)
+        let before = try Data(contentsOf: dataFile)
+
+        var changes = 0
+        model.onChange = { changes += 1 }
+        model.showSettings()
+        #expect(model.isSettingsShown)
+        #expect(model.state.selectedWorkspaceId == spaceId)
+        #expect(changes == 1)
+        // Showing and closing Settings never writes the file.
+        model.closeSettings()
+        #expect(!model.isSettingsShown)
+        #expect(model.currentWorkspace.id == spaceId)
+        #expect(changes == 2)
+        #expect(try Data(contentsOf: dataFile) == before)
+        #expect(!String(decoding: before, as: UTF8.self).contains("isSettingsSelected"))
+
+        // Selecting a space also leaves Settings.
+        model.showSettings()
+        model.selectWorkspace(id: spaceId)
+        #expect(!model.isSettingsShown)
     }
 
     @Test func testMoveNodeReorderAndNest() {
@@ -300,7 +329,7 @@ import Testing
         let spaceA = Workspace(id: UUID(), name: "A", colorId: .ember, items: [], profileId: personal.id)
         let spaceB = Workspace(id: UUID(), name: "B", colorId: .ocean, items: [], profileId: work.id)
         let store = makeStore()
-        store.save(AppState(profiles: [personal, work], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id, isSettingsSelected: false))
+        store.save(AppState(profiles: [personal, work], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id))
         let model = AppModel(store: store)
         model.selectWorkspace(id: spaceA.id)
 
@@ -324,7 +353,7 @@ import Testing
         let spaceA = Workspace(id: UUID(), name: "A", colorId: .ember, items: [], profileId: personal.id)
         let spaceB = Workspace(id: UUID(), name: "B", colorId: .ocean, items: [], profileId: work.id)
         let store = makeStore()
-        store.save(AppState(profiles: [personal, workWithFavorite], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id, isSettingsSelected: false))
+        store.save(AppState(profiles: [personal, workWithFavorite], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id))
         let model = AppModel(store: store)
         model.selectWorkspace(id: spaceA.id)
 
@@ -343,7 +372,7 @@ import Testing
             favorites: [favorite]
         )
         let workspace = Workspace(id: UUID(), name: "Test", colorId: .ember, items: [.link(override)], profileId: profile.id)
-        let state = AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        let state = AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id)
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
@@ -387,13 +416,13 @@ import Testing
 
     @Test func testRepairCreatesProfileAndFixesDanglingProfileIds() {
         let orphan = Workspace(id: UUID(), name: "Orphan", colorId: .ember, items: [], profileId: UUID())
-        let repaired = AppState(profiles: [], workspaces: [orphan], selectedWorkspaceId: orphan.id, isSettingsSelected: false).repaired()
+        let repaired = AppState(profiles: [], workspaces: [orphan], selectedWorkspaceId: orphan.id).repaired()
         #expect(repaired.profiles.count == 1)
         #expect(repaired.workspaces[0].profileId == repaired.profiles[0].id)
 
         let keep = Profile(name: "Keep")
         let second = Workspace(id: UUID(), name: "Dangling", colorId: .ember, items: [], profileId: UUID())
-        let fixed = AppState(profiles: [keep], workspaces: [second], selectedWorkspaceId: nil, isSettingsSelected: false).repaired()
+        let fixed = AppState(profiles: [keep], workspaces: [second], selectedWorkspaceId: nil).repaired()
         #expect(fixed.profiles == [keep])
         #expect(fixed.workspaces[0].profileId == keep.id)
     }

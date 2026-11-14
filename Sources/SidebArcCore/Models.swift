@@ -9,20 +9,19 @@ struct AppState: Codable, Equatable {
     var profiles: [Profile]
     var workspaces: [Workspace]
     var selectedWorkspaceId: UUID?
-    var isSettingsSelected: Bool
+    // Whether Settings is shown is runtime state (`AppModel.isSettingsShown`), not saved.
+    // Files written before Phase 3a still carry an `isSettingsSelected` key; it is ignored.
 
     init(
         schemaVersion: Int = AppState.currentSchemaVersion,
         profiles: [Profile],
         workspaces: [Workspace],
-        selectedWorkspaceId: UUID?,
-        isSettingsSelected: Bool
+        selectedWorkspaceId: UUID?
     ) {
         self.schemaVersion = schemaVersion
         self.profiles = profiles
         self.workspaces = workspaces
         self.selectedWorkspaceId = selectedWorkspaceId
-        self.isSettingsSelected = isSettingsSelected
     }
 
     init(from decoder: Decoder) throws {
@@ -32,7 +31,6 @@ struct AppState: Codable, Equatable {
         profiles = try container.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
         workspaces = try container.decode([Workspace].self, forKey: .workspaces)
         selectedWorkspaceId = try container.decodeIfPresent(UUID.self, forKey: .selectedWorkspaceId)
-        isSettingsSelected = try container.decodeIfPresent(Bool.self, forKey: .isSettingsSelected) ?? false
     }
 
     /// Restores the invariants the rest of the app relies on: there is at least

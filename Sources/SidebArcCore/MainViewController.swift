@@ -97,7 +97,7 @@ final class MainViewController: NSViewController {
             self?.model.renameWorkspace(id: workspaceId, newName: newName)
         }
         workspaceSwitcher.onSettingsSelected = { [weak self] in
-            self?.model.selectSettings()
+            self?.toggleSettings()
         }
 
         // Search field
@@ -423,7 +423,7 @@ final class MainViewController: NSViewController {
         }
 
         // Check if settings is selected
-        if model.state.isSettingsSelected {
+        if model.isSettingsShown {
             nodeListViewController.clearSelections()
             showSettingsContent()
         } else {
@@ -459,9 +459,9 @@ final class MainViewController: NSViewController {
             )
         }
 
-        workspaceSwitcher.isSettingsSelected = model.state.isSettingsSelected
+        workspaceSwitcher.isSettingsSelected = model.isSettingsShown
 
-        if model.state.isSettingsSelected {
+        if model.isSettingsShown {
             workspaceSwitcher.selectedWorkspaceId = nil
             workspaceSwitcher.workspaceColor = .settingsBackground
         } else {
@@ -595,9 +595,26 @@ final class MainViewController: NSViewController {
     /// The workspace switcher view, exposed for swipe gesture exclusion.
     var workspaceSwitcherView: NSView { workspaceSwitcher }
 
+    /// The gear: opens Settings, or closes it when it is already shown.
+    func toggleSettings() {
+        if model.isSettingsShown {
+            model.closeSettings()
+        } else {
+            model.showSettings()
+        }
+    }
+
+    /// Esc closes Settings (field editors keep Esc for themselves while editing).
+    override func cancelOperation(_ sender: Any?) {
+        if model.isSettingsShown {
+            model.closeSettings()
+        }
+    }
+
+    /// ⌘⌥←: the previous space. Stops at the first space; does nothing in Settings.
     func navigateToPreviousWorkspace() {
         let workspaces = model.workspaces
-        if model.state.isSettingsSelected {
+        if model.isSettingsShown {
             return
         }
         let currentId = model.currentWorkspace.id
@@ -606,18 +623,13 @@ final class MainViewController: NSViewController {
             let prevId = workspaces[currentIndex - 1].id
             model.selectWorkspace(id: prevId)
             workspaceSwitcher.scrollToWorkspace(id: prevId)
-        } else {
-            model.selectSettings()
-            workspaceSwitcher.scrollToSettings()
         }
     }
 
+    /// ⌘⌥→: the next space. Stops at the last space; does nothing in Settings.
     func navigateToNextWorkspace() {
         let workspaces = model.workspaces
-        if model.state.isSettingsSelected {
-            guard let firstWorkspace = workspaces.first else { return }
-            model.selectWorkspace(id: firstWorkspace.id)
-            workspaceSwitcher.scrollToWorkspace(id: firstWorkspace.id)
+        if model.isSettingsShown {
             return
         }
         let currentId = model.currentWorkspace.id
@@ -1058,7 +1070,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
         // Save current color so applyWorkspaceStyling can animate the transition
         let currentBgColor: NSColor
-        if model.state.isSettingsSelected {
+        if model.isSettingsShown {
             currentBgColor = ThemeConstants.Colors.settingsBackground
         } else {
             currentBgColor = model.currentWorkspace.colorId.backgroundColor
@@ -1162,7 +1174,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
     private func canNavigatePrevious() -> Bool {
         // Swipe disabled from/to settings — only between workspaces
-        if model.state.isSettingsSelected { return false }
+        if model.isSettingsShown { return false }
         let workspaces = model.workspaces
         guard let currentIndex = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return false }
         return currentIndex > 0
@@ -1170,7 +1182,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
     private func canNavigateNext() -> Bool {
         // Swipe disabled from/to settings — only between workspaces
-        if model.state.isSettingsSelected { return false }
+        if model.isSettingsShown { return false }
         let workspaces = model.workspaces
         guard let currentIndex = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return false }
         return currentIndex < workspaces.count - 1
@@ -1275,7 +1287,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
     private func adjacentWorkspace(for direction: SwipeDirection) -> Workspace? {
         // Swipe only between workspaces, not to/from settings
-        if model.state.isSettingsSelected { return nil }
+        if model.isSettingsShown { return nil }
         let workspaces = model.workspaces
         guard let currentIndex = workspaces.firstIndex(where: { $0.id == model.currentWorkspace.id }) else { return nil }
         switch direction {
@@ -1338,7 +1350,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
         // Use the CURRENT workspace's background color so the preview blends seamlessly
         let currentBgColor: NSColor
-        if model.state.isSettingsSelected {
+        if model.isSettingsShown {
             currentBgColor = ThemeConstants.Colors.settingsBackground
         } else {
             currentBgColor = model.currentWorkspace.colorId.backgroundColor

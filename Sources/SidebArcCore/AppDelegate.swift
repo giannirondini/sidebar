@@ -317,7 +317,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     @objc private func openPreferences() {
         // Select the settings tab in the main window instead of opening a separate preferences window
         guard let mainVC = mainViewController else { return }
-        mainVC.model.selectSettings()
+        mainVC.model.showSettings()
         showMainWindow()
     }
 

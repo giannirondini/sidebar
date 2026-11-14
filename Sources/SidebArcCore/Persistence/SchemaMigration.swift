@@ -115,8 +115,7 @@ enum SchemaMigration {
             schemaVersion: 2,
             profiles: profiles,
             workspaces: workspaces,
-            selectedWorkspaceId: old.selectedWorkspaceId,
-            isSettingsSelected: old.isSettingsSelected
+            selectedWorkspaceId: old.selectedWorkspaceId
         ).repaired()
     }
 }

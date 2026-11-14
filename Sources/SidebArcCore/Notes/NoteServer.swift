@@ -360,13 +360,16 @@ final class NoteServer {
             return
         }
         let state = model.state
-        let selectedId = state.selectedWorkspaceId
+        let settingsShown = model.isSettingsShown
+        // Agent API contract: while Settings is shown there is no current space, so
+        // the agent asks instead of guessing (skills/sidebarc/SKILL.md).
+        let selectedId = settingsShown ? nil : state.selectedWorkspaceId
         let workspace = selectedId.flatMap { id in model.workspaces.first(where: { $0.id == id }) }
 
         if let workspace {
             let payload: [String: Any] = [
                 "selected": true,
-                "settingsSelected": state.isSettingsSelected,
+                "settingsSelected": settingsShown,
                 "workspace": [
                     "id": workspace.id.uuidString,
                     "name": workspace.name,
@@ -380,7 +383,7 @@ final class NoteServer {
 
         let payload: [String: Any] = [
             "selected": false,
-            "settingsSelected": state.isSettingsSelected,
+            "settingsSelected": settingsShown,
             "workspace": NSNull()
         ]
         sendOk(payload, on: connection)

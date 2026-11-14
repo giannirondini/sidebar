@@ -181,6 +181,6 @@ final class DataStore {
             items: [],
             profileId: profile.id
         )
-        return AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        return AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id)
     }
 }

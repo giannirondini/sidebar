@@ -10,7 +10,7 @@ import Testing
     private func makeState(name: String) -> AppState {
         let profile = Profile.makeDefault()
         let workspace = Workspace(id: UUID(), name: name, colorId: .defaultColor(), items: [], profileId: profile.id)
-        return AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id, isSettingsSelected: false)
+        return AppState(profiles: [profile], workspaces: [workspace], selectedWorkspaceId: workspace.id)
     }
 
     private func dataURL(in directory: URL) -> URL {

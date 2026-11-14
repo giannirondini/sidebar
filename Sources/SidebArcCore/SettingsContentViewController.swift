@@ -1018,7 +1018,7 @@ final class SettingsContentViewController: NSViewController {
             addNodeToWorkspace(node, parentId: nil, appModel: appModel)
         }
 
-        // Don't call selectWorkspace — it sets isSettingsSelected=false and navigates away.
+        // Don't call selectWorkspace — it closes Settings and navigates away.
         // The new workspace is already selected; when the user leaves settings they'll see it.
 
         // Reload the workspace list
@@ -1114,7 +1114,7 @@ final class SettingsContentViewController: NSViewController {
         workspaceCollectionView.reloadData()
 
         // Profile rows read browser profile files; only rebuild them while Settings is shown.
-        if appModel.state.isSettingsSelected {
+        if appModel.isSettingsShown {
             reloadProfiles()
         }
     }

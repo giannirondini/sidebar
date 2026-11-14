@@ -6,6 +6,10 @@ final class AppModel {
     let noteStorage: NoteStorage
     private(set) var state: AppState
     var onChange: (() -> Void)?
+    /// Whether the Settings page is shown instead of the current space. Runtime
+    /// state only: not saved, so the app always starts on a space. The selected
+    /// space is kept while Settings is shown, and closing Settings returns to it.
+    private(set) var isSettingsShown = false
     private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "model")
 
     init(store: DataStore = DataStore()) {
@@ -13,15 +17,13 @@ final class AppModel {
         self.noteStorage = NoteStorage(store: store)
         self.state = store.load()
 
-        if !state.isSettingsSelected {
-            if let savedId = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastSelectedWorkspaceId),
-               let uuid = UUID(uuidString: savedId),
-               state.workspaces.contains(where: { $0.id == uuid }) {
-                state.selectedWorkspaceId = uuid
-            }
-            if state.selectedWorkspaceId == nil {
-                state.selectedWorkspaceId = state.workspaces.first?.id
-            }
+        if let savedId = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastSelectedWorkspaceId),
+           let uuid = UUID(uuidString: savedId),
+           state.workspaces.contains(where: { $0.id == uuid }) {
+            state.selectedWorkspaceId = uuid
+        }
+        if state.selectedWorkspaceId == nil {
+            state.selectedWorkspaceId = state.workspaces.first?.id
         }
     }
 
@@ -240,15 +242,23 @@ final class AppModel {
     func selectWorkspace(id: UUID) {
         guard state.workspaces.contains(where: { $0.id == id }) else { return }
         state.selectedWorkspaceId = id
-        state.isSettingsSelected = false
+        isSettingsShown = false
         UserDefaults.standard.set(id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
         persist()
     }
 
-    func selectSettings() {
-        state.isSettingsSelected = true
-        state.selectedWorkspaceId = nil
-        persist()
+    /// Shows Settings in place of the current space (nothing is saved).
+    func showSettings() {
+        guard !isSettingsShown else { return }
+        isSettingsShown = true
+        onChange?()
+    }
+
+    /// Leaves Settings and returns to the space that was selected.
+    func closeSettings() {
+        guard isSettingsShown else { return }
+        isSettingsShown = false
+        onChange?()
     }
 
     @discardableResult
