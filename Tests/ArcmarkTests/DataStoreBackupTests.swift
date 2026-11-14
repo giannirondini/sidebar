@@ -1,7 +1,8 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ArcmarkCore
 
-final class DataStoreBackupTests: XCTestCase {
+@Suite struct DataStoreBackupTests {
     private func makeTempDirectory() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     }
@@ -27,20 +28,20 @@ final class DataStoreBackupTests: XCTestCase {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    func testLoadCreatesBackup() throws {
+    @Test func testLoadCreatesBackup() throws {
         let directory = makeTempDirectory()
         DataStore(baseDirectory: directory).save(makeState(name: "A"))
 
         _ = DataStore(baseDirectory: directory).load()
 
         let backups = backupURLs(in: directory)
-        XCTAssertEqual(backups.count, 1)
+        #expect(backups.count == 1)
         let backupData = try Data(contentsOf: backups[0])
         let liveData = try Data(contentsOf: dataURL(in: directory))
-        XCTAssertEqual(backupData, liveData)
+        #expect(backupData == liveData)
     }
 
-    func testCorruptFileIsPreservedAndBackedUpNotOverwritten() throws {
+    @Test func testCorruptFileIsPreservedAndBackedUpNotOverwritten() throws {
         let directory = makeTempDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let corruptBytes = Data("not json".utf8)
@@ -48,24 +49,24 @@ final class DataStoreBackupTests: XCTestCase {
 
         let state = DataStore(baseDirectory: directory).load()
 
-        XCTAssertEqual(state.workspaces.map(\.name), ["Inbox"])
-        XCTAssertEqual(try Data(contentsOf: dataURL(in: directory)), corruptBytes)
+        #expect(state.workspaces.map(\.name) == ["Inbox"])
+        #expect((try Data(contentsOf: dataURL(in: directory))) == corruptBytes)
         let backups = backupURLs(in: directory)
-        XCTAssertEqual(backups.count, 1)
-        XCTAssertEqual(try Data(contentsOf: backups[0]), corruptBytes)
+        #expect(backups.count == 1)
+        #expect((try Data(contentsOf: backups[0])) == corruptBytes)
     }
 
-    func testRelaunchWithUnchangedDataDoesNotDuplicateBackup() {
+    @Test func testRelaunchWithUnchangedDataDoesNotDuplicateBackup() {
         let directory = makeTempDirectory()
         DataStore(baseDirectory: directory).save(makeState(name: "A"))
 
         _ = DataStore(baseDirectory: directory).load()
         _ = DataStore(baseDirectory: directory).load()
 
-        XCTAssertEqual(backupURLs(in: directory).count, 1)
+        #expect(backupURLs(in: directory).count == 1)
     }
 
-    func testBackupRotationKeepsTenMostRecent() {
+    @Test func testBackupRotationKeepsTenMostRecent() {
         let directory = makeTempDirectory()
         var allNames = Set<String>()
 
@@ -79,13 +80,13 @@ final class DataStoreBackupTests: XCTestCase {
         _ = DataStore(baseDirectory: directory).load()
         backupURLs(in: directory).forEach { allNames.insert($0.lastPathComponent) }
 
-        XCTAssertEqual(allNames.count, 12)
+        #expect(allNames.count == 12)
         let remaining = backupURLs(in: directory).map(\.lastPathComponent)
-        XCTAssertEqual(remaining.count, 10)
-        XCTAssertEqual(Set(remaining), Set(allNames.sorted().suffix(10)))
+        #expect(remaining.count == 10)
+        #expect(Set(remaining) == Set(allNames.sorted().suffix(10)))
     }
 
-    func testSaveWithoutPriorLoadStillBacksUp() throws {
+    @Test func testSaveWithoutPriorLoadStillBacksUp() throws {
         let directory = makeTempDirectory()
         DataStore(baseDirectory: directory).save(makeState(name: "A"))
         let originalData = try Data(contentsOf: dataURL(in: directory))
@@ -93,16 +94,16 @@ final class DataStoreBackupTests: XCTestCase {
         DataStore(baseDirectory: directory).save(makeState(name: "B"))
 
         let backups = backupURLs(in: directory)
-        XCTAssertEqual(backups.count, 1)
-        XCTAssertEqual(try Data(contentsOf: backups[0]), originalData)
+        #expect(backups.count == 1)
+        #expect((try Data(contentsOf: backups[0])) == originalData)
     }
 
-    func testFirstLaunchCreatesNoBackup() {
+    @Test func testFirstLaunchCreatesNoBackup() {
         let directory = makeTempDirectory()
 
         _ = DataStore(baseDirectory: directory).load()
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dataURL(in: directory).path))
-        XCTAssertTrue(backupURLs(in: directory).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: dataURL(in: directory).path))
+        #expect(backupURLs(in: directory).isEmpty)
     }
 }

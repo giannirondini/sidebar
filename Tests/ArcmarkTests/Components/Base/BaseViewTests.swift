@@ -1,4 +1,5 @@
-import XCTest
+import AppKit
+import Testing
 @testable import ArcmarkCore
 
 // Test subclass to verify base behavior
@@ -12,41 +13,34 @@ fileprivate class TestView: BaseView {
 }
 
 @MainActor
-final class BaseViewTests: XCTestCase {
+@Suite struct BaseViewTests {
 
-    fileprivate var view: TestView!
+    fileprivate let view: TestView
 
-    nonisolated override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated { [unowned self] in
-            view = TestView(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
-        }
-    }
 
-    nonisolated override func tearDown() {
-        MainActor.assumeIsolated { [unowned self] in
-            view = nil
-        }
-        super.tearDown()
+    init() {
+
+        view = TestView(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
+
     }
 
     // MARK: - Initialization Tests
 
-    func testInitialState() {
-        XCTAssertFalse(view.isHovered)
-        XCTAssertTrue(view.wantsLayer)
-        XCTAssertFalse(view.mouseDownCanMoveWindow)
+    @Test func testInitialState() {
+        #expect(!view.isHovered)
+        #expect(view.wantsLayer)
+        #expect(!view.mouseDownCanMoveWindow)
     }
 
-    func testCommonInitSetsWantsLayer() {
+    @Test func testCommonInitSetsWantsLayer() {
         let newView = TestView(frame: .zero)
-        XCTAssertTrue(newView.wantsLayer)
+        #expect(newView.wantsLayer)
     }
 
     // MARK: - Hover State Tests
 
-    func testMouseEnteredSetsHoverState() {
-        let event = NSEvent.mouseEvent(
+    @Test func testMouseEnteredSetsHoverState() {
+        let event = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -54,19 +48,19 @@ final class BaseViewTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
 
         view.mouseEntered(with: event)
 
-        XCTAssertTrue(view.isHovered)
-        XCTAssertEqual(view.hoverChangeCount, 1)
+        #expect(view.isHovered)
+        #expect(view.hoverChangeCount == 1)
     }
 
-    func testMouseExitedClearsHoverState() {
+    @Test func testMouseExitedClearsHoverState() {
         // First set hover state
-        let enterEvent = NSEvent.mouseEvent(
+        let enterEvent = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -74,13 +68,13 @@ final class BaseViewTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         view.mouseEntered(with: enterEvent)
 
         // Then exit
-        let exitEvent = NSEvent.mouseEvent(
+        let exitEvent = NSEvent.enterExitEvent(
             with: .mouseExited,
             location: NSPoint(x: 150, y: 20),
             modifierFlags: [],
@@ -88,29 +82,29 @@ final class BaseViewTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         view.mouseExited(with: exitEvent)
 
-        XCTAssertFalse(view.isHovered)
-        XCTAssertEqual(view.hoverChangeCount, 2)
+        #expect(!view.isHovered)
+        #expect(view.hoverChangeCount == 2)
     }
 
     // MARK: - Tracking Area Tests
 
-    func testUpdateTrackingAreasCreatesTrackingArea() {
+    @Test func testUpdateTrackingAreasCreatesTrackingArea() {
         view.updateTrackingAreas()
 
         // Verify tracking area was added by checking that the method completes without error
-        XCTAssertNotNil(view)
+        #expect(view != nil)
     }
 
     // MARK: - Refresh Hover State Tests
 
-    func testRefreshHoverStateResetsWhenNoWindow() {
+    @Test func testRefreshHoverStateResetsWhenNoWindow() {
         // Manually set hover to true via mouseEntered
-        let enterEvent = NSEvent.mouseEvent(
+        let enterEvent = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -118,45 +112,45 @@ final class BaseViewTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         view.mouseEntered(with: enterEvent)
 
-        XCTAssertTrue(view.isHovered)
+        #expect(view.isHovered)
 
         // Now refresh without window
         view.refreshHoverState()
 
         // Should clear hover and notify
-        XCTAssertFalse(view.isHovered)
-        XCTAssertGreaterThan(view.hoverChangeCount, 1)
+        #expect(!view.isHovered)
+        #expect(view.hoverChangeCount > 1)
     }
 
     // MARK: - Layout Tests
 
-    func testLayoutCallsRefreshHoverState() {
+    @Test func testLayoutCallsRefreshHoverState() {
         view.layout()
 
         // If no window, hover should be false
-        XCTAssertFalse(view.isHovered)
+        #expect(!view.isHovered)
     }
 
     // MARK: - View Lifecycle Tests
 
-    func testViewDidMoveToWindowCallsRefreshHoverState() {
+    @Test func testViewDidMoveToWindowCallsRefreshHoverState() {
         view.viewDidMoveToWindow()
 
         // Without a window, hover should be false
-        XCTAssertFalse(view.isHovered)
+        #expect(!view.isHovered)
     }
 
     // MARK: - Subclass Override Tests
 
-    func testHandleHoverStateChangedIsCalled() {
+    @Test func testHandleHoverStateChangedIsCalled() {
         let initialCount = view.hoverChangeCount
 
-        let event = NSEvent.mouseEvent(
+        let event = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -164,11 +158,11 @@ final class BaseViewTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         view.mouseEntered(with: event)
 
-        XCTAssertEqual(view.hoverChangeCount, initialCount + 1)
+        #expect(view.hoverChangeCount == initialCount + 1)
     }
 }

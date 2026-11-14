@@ -1,13 +1,14 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ArcmarkCore
 
-final class ModelTests: XCTestCase {
+@Suite struct ModelTests {
     private func makeStore() -> DataStore {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         return DataStore(baseDirectory: temp)
     }
 
-    func testJSONRoundTrip() throws {
+    @Test func testJSONRoundTrip() throws {
         let link = Link(id: UUID(), title: "Example", url: "https://example.com", faviconPath: nil)
         let folder = Folder(id: UUID(), name: "Folder", children: [.link(link)], isExpanded: true)
         let workspace = Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder)])
@@ -15,10 +16,10 @@ final class ModelTests: XCTestCase {
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
-        XCTAssertEqual(state, decoded)
+        #expect(state == decoded)
     }
 
-    func testMoveNodeReorderAndNest() {
+    @Test func testMoveNodeReorderAndNest() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -37,18 +38,18 @@ final class ModelTests: XCTestCase {
                 return nil
             }).first
         else {
-            XCTFail("Expected nodes to exist")
+            Issue.record("Expected nodes to exist")
             return
         }
 
         model.moveNode(id: linkAId, toParentId: folderId, index: 0)
         let location = model.location(of: linkAId)
-        XCTAssertEqual(location?.parentId, folderId)
+        #expect(location?.parentId == folderId)
 
         if let folderNode = model.nodeById(folderId), case .folder(let folder) = folderNode {
-            XCTAssertEqual(folder.children.count, 1)
+            #expect(folder.children.count == 1)
         } else {
-            XCTFail("Expected folder to contain moved link")
+            Issue.record("Expected folder to contain moved link")
         }
 
         if let linkBId = model.currentWorkspace.items.compactMap({
@@ -57,27 +58,27 @@ final class ModelTests: XCTestCase {
         }).first {
             model.moveNode(id: linkBId, toParentId: nil, index: 0)
             let locationB = model.location(of: linkBId)
-            XCTAssertEqual(locationB?.parentId, nil)
-            XCTAssertEqual(locationB?.index, 0)
+            #expect(locationB?.parentId == nil)
+            #expect(locationB?.index == 0)
         }
     }
 
-    func testWorkspaceScopedFiltering() {
+    @Test func testWorkspaceScopedFiltering() {
         let link1 = Link(id: UUID(), title: "Docs", url: "https://docs.com", faviconPath: nil)
         let link2 = Link(id: UUID(), title: "Blog", url: "https://blog.com", faviconPath: nil)
         let folder = Folder(id: UUID(), name: "Reading", children: [.link(link2)], isExpanded: false)
         let nodes: [Node] = [.link(link1), .folder(folder)]
 
         let results = NodeFiltering.filter(nodes: nodes, query: "blog")
-        XCTAssertEqual(results.count, 1)
+        #expect(results.count == 1)
         if case .folder(let filteredFolder) = results[0] {
-            XCTAssertEqual(filteredFolder.children.count, 1)
+            #expect(filteredFolder.children.count == 1)
         } else {
-            XCTFail("Expected folder to remain for matching child")
+            Issue.record("Expected folder to remain for matching child")
         }
     }
 
-    func testWorkspaceReordering() {
+    @Test func testWorkspaceReordering() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -88,78 +89,78 @@ final class ModelTests: XCTestCase {
         let id3 = model.createWorkspace(name: "Third", colorId: .moss)
 
         // Initial order should be: Inbox (default), First, Second, Third
-        XCTAssertEqual(model.workspaces.count, 4)
-        XCTAssertEqual(model.workspaces[0].name, "Inbox")
-        XCTAssertEqual(model.workspaces[1].name, "First")
-        XCTAssertEqual(model.workspaces[2].name, "Second")
-        XCTAssertEqual(model.workspaces[3].name, "Third")
+        #expect(model.workspaces.count == 4)
+        #expect(model.workspaces[0].name == "Inbox")
+        #expect(model.workspaces[1].name == "First")
+        #expect(model.workspaces[2].name == "Second")
+        #expect(model.workspaces[3].name == "Third")
 
         // Move "Second" to the right (swap with "Third")
         model.moveWorkspace(id: id2, direction: .right)
-        XCTAssertEqual(model.workspaces[2].name, "Third")
-        XCTAssertEqual(model.workspaces[3].name, "Second")
+        #expect(model.workspaces[2].name == "Third")
+        #expect(model.workspaces[3].name == "Second")
 
         // Move "Second" to the left (swap back with "Third")
         model.moveWorkspace(id: id2, direction: .left)
-        XCTAssertEqual(model.workspaces[2].name, "Second")
-        XCTAssertEqual(model.workspaces[3].name, "Third")
+        #expect(model.workspaces[2].name == "Second")
+        #expect(model.workspaces[3].name == "Third")
 
         // Move "First" to the left (swap with "Inbox")
         model.moveWorkspace(id: id1, direction: .left)
-        XCTAssertEqual(model.workspaces[0].name, "First")
-        XCTAssertEqual(model.workspaces[1].name, "Inbox")
+        #expect(model.workspaces[0].name == "First")
+        #expect(model.workspaces[1].name == "Inbox")
 
         // Try to move "First" to the left again (should not move, already at start)
         model.moveWorkspace(id: id1, direction: .left)
-        XCTAssertEqual(model.workspaces[0].name, "First")
-        XCTAssertEqual(model.workspaces[1].name, "Inbox")
+        #expect(model.workspaces[0].name == "First")
+        #expect(model.workspaces[1].name == "Inbox")
 
         // Try to move "Third" to the right (should not move, already at end)
         model.moveWorkspace(id: id3, direction: .right)
-        XCTAssertEqual(model.workspaces[2].name, "Second")
-        XCTAssertEqual(model.workspaces[3].name, "Third")
+        #expect(model.workspaces[2].name == "Second")
+        #expect(model.workspaces[3].name == "Third")
     }
 
     // MARK: - Pinned Links Tests
 
-    func testPinLink() {
+    @Test func testPinLink() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
-        XCTAssertEqual(model.currentWorkspace.items.count, 1)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, 0)
+        #expect(model.currentWorkspace.items.count == 1)
+        #expect(model.currentWorkspace.pinnedLinks.count == 0)
 
         model.pinLink(id: linkId)
-        XCTAssertEqual(model.currentWorkspace.items.count, 0)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, 1)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks[0].id, linkId)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks[0].title, "A")
+        #expect(model.currentWorkspace.items.count == 0)
+        #expect(model.currentWorkspace.pinnedLinks.count == 1)
+        #expect(model.currentWorkspace.pinnedLinks[0].id == linkId)
+        #expect(model.currentWorkspace.pinnedLinks[0].title == "A")
     }
 
-    func testUnpinLink() {
+    @Test func testUnpinLink() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.pinLink(id: linkId)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, 1)
-        XCTAssertEqual(model.currentWorkspace.items.count, 0)
+        #expect(model.currentWorkspace.pinnedLinks.count == 1)
+        #expect(model.currentWorkspace.items.count == 0)
 
         model.unpinLink(id: linkId)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, 0)
-        XCTAssertEqual(model.currentWorkspace.items.count, 1)
+        #expect(model.currentWorkspace.pinnedLinks.count == 0)
+        #expect(model.currentWorkspace.items.count == 1)
         if case .link(let link) = model.currentWorkspace.items.last {
-            XCTAssertEqual(link.id, linkId)
-            XCTAssertEqual(link.title, "A")
+            #expect(link.id == linkId)
+            #expect(link.title == "A")
         } else {
-            XCTFail("Expected link at root level after unpin")
+            Issue.record("Expected link at root level after unpin")
         }
     }
 
-    func testPinLinkMaximum() {
+    @Test func testPinLinkMaximum() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -175,17 +176,17 @@ final class ModelTests: XCTestCase {
         for i in 0..<max {
             model.pinLink(id: linkIds[i])
         }
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, max)
-        XCTAssertEqual(model.currentWorkspace.items.count, 1)
-        XCTAssertFalse(model.canPinMore)
+        #expect(model.currentWorkspace.pinnedLinks.count == max)
+        #expect(model.currentWorkspace.items.count == 1)
+        #expect(!model.canPinMore)
 
         // Attempt to pin one more - should be rejected
         model.pinLink(id: linkIds[max])
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, max)
-        XCTAssertEqual(model.currentWorkspace.items.count, 1)
+        #expect(model.currentWorkspace.pinnedLinks.count == max)
+        #expect(model.currentWorkspace.items.count == 1)
     }
 
-    func testPinLinkFromNestedFolder() {
+    @Test func testPinLinkFromNestedFolder() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -194,33 +195,33 @@ final class ModelTests: XCTestCase {
         let linkId = model.addLink(urlString: "https://nested.com", title: "Nested", parentId: folderId)
 
         if let folderNode = model.nodeById(folderId), case .folder(let folder) = folderNode {
-            XCTAssertEqual(folder.children.count, 1)
+            #expect(folder.children.count == 1)
         }
 
         model.pinLink(id: linkId)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, 1)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks[0].title, "Nested")
+        #expect(model.currentWorkspace.pinnedLinks.count == 1)
+        #expect(model.currentWorkspace.pinnedLinks[0].title == "Nested")
 
         // Verify link was removed from the folder
         if let folderNode = model.nodeById(folderId), case .folder(let folder) = folderNode {
-            XCTAssertEqual(folder.children.count, 0)
+            #expect(folder.children.count == 0)
         } else {
-            XCTFail("Expected folder to still exist")
+            Issue.record("Expected folder to still exist")
         }
     }
 
-    func testCannotPinFolder() {
+    @Test func testCannotPinFolder() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         model.pinLink(id: folderId)
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks.count, 0)
-        XCTAssertEqual(model.currentWorkspace.items.count, 1)
+        #expect(model.currentWorkspace.pinnedLinks.count == 0)
+        #expect(model.currentWorkspace.items.count == 1)
     }
 
-    func testJSONRoundTripWithPinnedLinks() throws {
+    @Test func testJSONRoundTripWithPinnedLinks() throws {
         let link = Link(id: UUID(), title: "Pinned", url: "https://pinned.com", faviconPath: nil)
         let treeLink = Link(id: UUID(), title: "Tree", url: "https://tree.com", faviconPath: nil)
         let workspace = Workspace(
@@ -235,13 +236,13 @@ final class ModelTests: XCTestCase {
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
-        XCTAssertEqual(decoded.workspaces[0].pinnedLinks.count, 1)
-        XCTAssertEqual(decoded.workspaces[0].pinnedLinks[0].title, "Pinned")
-        XCTAssertEqual(decoded.workspaces[0].items.count, 1)
-        XCTAssertEqual(state, decoded)
+        #expect(decoded.workspaces[0].pinnedLinks.count == 1)
+        #expect(decoded.workspaces[0].pinnedLinks[0].title == "Pinned")
+        #expect(decoded.workspaces[0].items.count == 1)
+        #expect(state == decoded)
     }
 
-    func testBackwardCompatibilityNoPinnedLinks() throws {
+    @Test func testBackwardCompatibilityNoPinnedLinks() throws {
         // Simulate old JSON format without pinnedLinks field
         let json = """
         {
@@ -259,13 +260,13 @@ final class ModelTests: XCTestCase {
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
-        XCTAssertEqual(decoded.workspaces[0].pinnedLinks.count, 0)
-        XCTAssertEqual(decoded.workspaces[0].name, "Old Workspace")
+        #expect(decoded.workspaces[0].pinnedLinks.count == 0)
+        #expect(decoded.workspaces[0].name == "Old Workspace")
     }
 
     // MARK: - Browser Profile Tests
 
-    func testJSONRoundTripWithBrowserProfiles() throws {
+    @Test func testJSONRoundTripWithBrowserProfiles() throws {
         let workspace = Workspace(
             id: UUID(),
             name: "Work",
@@ -279,12 +280,12 @@ final class ModelTests: XCTestCase {
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
-        XCTAssertEqual(decoded.workspaces[0].browserProfiles["com.google.chrome"], "Profile 1")
-        XCTAssertEqual(decoded.workspaces[0].browserProfiles["org.mozilla.firefox"], "default")
-        XCTAssertEqual(state, decoded)
+        #expect(decoded.workspaces[0].browserProfiles["com.google.chrome"] == "Profile 1")
+        #expect(decoded.workspaces[0].browserProfiles["org.mozilla.firefox"] == "default")
+        #expect(state == decoded)
     }
 
-    func testBackwardCompatibilityNoBrowserProfile() throws {
+    @Test func testBackwardCompatibilityNoBrowserProfile() throws {
         // Simulate old JSON format without any browser profile fields
         let json = """
         {
@@ -303,11 +304,11 @@ final class ModelTests: XCTestCase {
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
-        XCTAssertTrue(decoded.workspaces[0].browserProfiles.isEmpty)
-        XCTAssertEqual(decoded.workspaces[0].name, "Legacy Workspace")
+        #expect(decoded.workspaces[0].browserProfiles.isEmpty)
+        #expect(decoded.workspaces[0].name == "Legacy Workspace")
     }
 
-    func testBackwardCompatibilityOldBrowserProfileFormat() throws {
+    @Test func testBackwardCompatibilityOldBrowserProfileFormat() throws {
         // Simulate old JSON format with browserProfile + browserProfileBundleId
         let json = """
         {
@@ -328,23 +329,23 @@ final class ModelTests: XCTestCase {
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
-        XCTAssertEqual(decoded.workspaces[0].browserProfiles["com.google.chrome"], "Profile 1")
-        XCTAssertEqual(decoded.workspaces[0].browserProfiles.count, 1)
+        #expect(decoded.workspaces[0].browserProfiles["com.google.chrome"] == "Profile 1")
+        #expect(decoded.workspaces[0].browserProfiles.count == 1)
     }
 
-    func testUpdateWorkspaceBrowserProfile() {
+    @Test func testUpdateWorkspaceBrowserProfile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let workspaceId = model.currentWorkspace.id
-        XCTAssertTrue(model.currentWorkspace.browserProfiles.isEmpty)
+        #expect(model.currentWorkspace.browserProfiles.isEmpty)
 
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "Profile 2")
-        XCTAssertEqual(model.currentWorkspace.browserProfiles["com.google.chrome"], "Profile 2")
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 2")
     }
 
-    func testClearWorkspaceBrowserProfile() {
+    @Test func testClearWorkspaceBrowserProfile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -353,14 +354,14 @@ final class ModelTests: XCTestCase {
 
         // Set profile
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "Profile 1")
-        XCTAssertEqual(model.currentWorkspace.browserProfiles["com.google.chrome"], "Profile 1")
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 1")
 
         // Clear profile
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: nil)
-        XCTAssertNil(model.currentWorkspace.browserProfiles["com.google.chrome"])
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == nil)
     }
 
-    func testUpdateWorkspaceBrowserProfileTrimsWhitespace() {
+    @Test func testUpdateWorkspaceBrowserProfileTrimsWhitespace() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -369,16 +370,16 @@ final class ModelTests: XCTestCase {
 
         // Empty string should result in no entry
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: "   ")
-        XCTAssertNil(model.currentWorkspace.browserProfiles["com.google.chrome"])
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == nil)
 
         // Whitespace-padded string should be trimmed
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: " Profile 1 ")
-        XCTAssertEqual(model.currentWorkspace.browserProfiles["com.google.chrome"], "Profile 1")
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 1")
     }
 
     // MARK: - Open Folder Links Tests
 
-    func testFolderRootLinksWithOnlyLinks() {
+    @Test func testFolderRootLinksWithOnlyLinks() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -389,18 +390,18 @@ final class ModelTests: XCTestCase {
         model.addLink(urlString: "https://c.com", title: "C", parentId: folderId)
 
         guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            XCTFail("Expected folder"); return
+            Issue.record("Expected folder"); return
         }
 
         let rootLinks = folder.children.compactMap { child -> Link? in
             if case .link(let link) = child { return link }
             return nil
         }
-        XCTAssertEqual(rootLinks.count, 3)
-        XCTAssertEqual(rootLinks.map(\.title), ["A", "B", "C"])
+        #expect(rootLinks.count == 3)
+        #expect(rootLinks.map(\.title) == ["A", "B", "C"])
     }
 
-    func testFolderRootLinksWithMixedContent() {
+    @Test func testFolderRootLinksWithMixedContent() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -412,7 +413,7 @@ final class ModelTests: XCTestCase {
         model.addLink(urlString: "https://root2.com", title: "Root Link 2", parentId: folderId)
 
         guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            XCTFail("Expected folder"); return
+            Issue.record("Expected folder"); return
         }
 
         let rootLinks = folder.children.compactMap { child -> Link? in
@@ -420,11 +421,11 @@ final class ModelTests: XCTestCase {
             return nil
         }
         // Only root-level links, not the one inside the nested folder
-        XCTAssertEqual(rootLinks.count, 2)
-        XCTAssertEqual(rootLinks.map(\.title), ["Root Link 1", "Root Link 2"])
+        #expect(rootLinks.count == 2)
+        #expect(rootLinks.map(\.title) == ["Root Link 1", "Root Link 2"])
     }
 
-    func testFolderRootLinksWithEmptyFolder() {
+    @Test func testFolderRootLinksWithEmptyFolder() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -432,17 +433,17 @@ final class ModelTests: XCTestCase {
         let folderId = model.addFolder(name: "Empty", parentId: nil)
 
         guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            XCTFail("Expected folder"); return
+            Issue.record("Expected folder"); return
         }
 
         let rootLinks = folder.children.compactMap { child -> Link? in
             if case .link(let link) = child { return link }
             return nil
         }
-        XCTAssertEqual(rootLinks.count, 0)
+        #expect(rootLinks.count == 0)
     }
 
-    func testFolderRootLinksWithOnlyNestedFolders() {
+    @Test func testFolderRootLinksWithOnlyNestedFolders() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -454,7 +455,7 @@ final class ModelTests: XCTestCase {
         model.addLink(urlString: "https://deep2.com", title: "Deep 2", parentId: childFolder2)
 
         guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            XCTFail("Expected folder"); return
+            Issue.record("Expected folder"); return
         }
 
         let rootLinks = folder.children.compactMap { child -> Link? in
@@ -462,12 +463,12 @@ final class ModelTests: XCTestCase {
             return nil
         }
         // No root-level links, even though nested folders contain links
-        XCTAssertEqual(rootLinks.count, 0)
+        #expect(rootLinks.count == 0)
     }
 
     // MARK: - Bulk Open Links Tests
 
-    func testBulkOpenLinksWithOnlyLinks() {
+    @Test func testBulkOpenLinksWithOnlyLinks() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -495,11 +496,11 @@ final class ModelTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(collectedLinks.count, 3)
-        XCTAssertEqual(Set(collectedLinks.map(\.url)), Set(["https://a.com", "https://b.com", "https://c.com"]))
+        #expect(collectedLinks.count == 3)
+        #expect(Set(collectedLinks.map(\.url)) == Set(["https://a.com", "https://b.com", "https://c.com"]))
     }
 
-    func testBulkOpenLinksWithFolders() {
+    @Test func testBulkOpenLinksWithFolders() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -527,11 +528,11 @@ final class ModelTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(collectedLinks.count, 2)
-        XCTAssertEqual(Set(collectedLinks.map(\.url)), Set(["https://inside1.com", "https://inside2.com"]))
+        #expect(collectedLinks.count == 2)
+        #expect(Set(collectedLinks.map(\.url)) == Set(["https://inside1.com", "https://inside2.com"]))
     }
 
-    func testBulkOpenLinksWithMixedSelection() {
+    @Test func testBulkOpenLinksWithMixedSelection() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -562,11 +563,11 @@ final class ModelTests: XCTestCase {
         }
 
         // Direct link + root-level link from folder, NOT the deeply nested link
-        XCTAssertEqual(collectedLinks.count, 2)
-        XCTAssertEqual(Set(collectedLinks.map(\.url)), Set(["https://direct.com", "https://inside.com"]))
+        #expect(collectedLinks.count == 2)
+        #expect(Set(collectedLinks.map(\.url)) == Set(["https://direct.com", "https://inside.com"]))
     }
 
-    func testBulkOpenLinksIgnoresNestedFolderLinks() {
+    @Test func testBulkOpenLinksIgnoresNestedFolderLinks() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -596,10 +597,10 @@ final class ModelTests: XCTestCase {
         }
 
         // Parent folder has no root-level links, only a nested folder
-        XCTAssertEqual(collectedLinks.count, 0)
+        #expect(collectedLinks.count == 0)
     }
 
-    func testBulkOpenLinksWithExplicitlySelectedNestedFolder() {
+    @Test func testBulkOpenLinksWithExplicitlySelectedNestedFolder() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -630,34 +631,34 @@ final class ModelTests: XCTestCase {
         }
 
         // Root link from parent + nested link from explicitly selected child folder
-        XCTAssertEqual(collectedLinks.count, 2)
-        XCTAssertEqual(Set(collectedLinks.map(\.url)), Set(["https://root.com", "https://nested.com"]))
+        #expect(collectedLinks.count == 2)
+        #expect(Set(collectedLinks.map(\.url)) == Set(["https://root.com", "https://nested.com"]))
     }
 
     // MARK: - Custom Icon Tests
 
-    func testCustomIconJSONRoundTrip() throws {
+    @Test func testCustomIconJSONRoundTrip() throws {
         let link = Link(id: UUID(), title: "Test", url: "https://test.com", faviconPath: nil, customIcon: .emoji("🔥"))
         let data = try JSONEncoder().encode(link)
         let decoded = try JSONDecoder().decode(Link.self, from: data)
-        XCTAssertEqual(decoded.customIcon, .emoji("🔥"))
+        #expect(decoded.customIcon == .emoji("🔥"))
     }
 
-    func testCustomIconSFSymbolRoundTrip() throws {
+    @Test func testCustomIconSFSymbolRoundTrip() throws {
         let link = Link(id: UUID(), title: "Test", url: "https://test.com", faviconPath: nil, customIcon: .sfSymbol("star.fill"))
         let data = try JSONEncoder().encode(link)
         let decoded = try JSONDecoder().decode(Link.self, from: data)
-        XCTAssertEqual(decoded.customIcon, .sfSymbol("star.fill"))
+        #expect(decoded.customIcon == .sfSymbol("star.fill"))
     }
 
-    func testCustomIconNilRoundTrip() throws {
+    @Test func testCustomIconNilRoundTrip() throws {
         let link = Link(id: UUID(), title: "Test", url: "https://test.com", faviconPath: nil)
         let data = try JSONEncoder().encode(link)
         let decoded = try JSONDecoder().decode(Link.self, from: data)
-        XCTAssertNil(decoded.customIcon)
+        #expect(decoded.customIcon == nil)
     }
 
-    func testBackwardCompatibilityNoCustomIcon() throws {
+    @Test func testBackwardCompatibilityNoCustomIcon() throws {
         let json = """
         {
             "id": "00000000-0000-0000-0000-000000000001",
@@ -667,12 +668,12 @@ final class ModelTests: XCTestCase {
         """
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(Link.self, from: data)
-        XCTAssertEqual(decoded.title, "Old Link")
-        XCTAssertNil(decoded.customIcon)
-        XCTAssertNil(decoded.faviconPath)
+        #expect(decoded.title == "Old Link")
+        #expect(decoded.customIcon == nil)
+        #expect(decoded.faviconPath == nil)
     }
 
-    func testSetLinkCustomIcon() {
+    @Test func testSetLinkCustomIcon() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -682,21 +683,21 @@ final class ModelTests: XCTestCase {
         // Set emoji custom icon
         model.setLinkCustomIcon(id: linkId, icon: .emoji("🚀"))
         if let node = model.nodeById(linkId), case .link(let link) = node {
-            XCTAssertEqual(link.customIcon, .emoji("🚀"))
+            #expect(link.customIcon == .emoji("🚀"))
         } else {
-            XCTFail("Expected link")
+            Issue.record("Expected link")
         }
 
         // Restore (set to nil)
         model.setLinkCustomIcon(id: linkId, icon: nil)
         if let node = model.nodeById(linkId), case .link(let link) = node {
-            XCTAssertNil(link.customIcon)
+            #expect(link.customIcon == nil)
         } else {
-            XCTFail("Expected link")
+            Issue.record("Expected link")
         }
     }
 
-    func testSetPinnedLinkCustomIcon() {
+    @Test func testSetPinnedLinkCustomIcon() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -705,15 +706,15 @@ final class ModelTests: XCTestCase {
         model.pinLink(id: linkId)
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: .sfSymbol("heart.fill"))
-        XCTAssertEqual(model.currentWorkspace.pinnedLinks[0].customIcon, .sfSymbol("heart.fill"))
+        #expect(model.currentWorkspace.pinnedLinks[0].customIcon == .sfSymbol("heart.fill"))
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: nil)
-        XCTAssertNil(model.currentWorkspace.pinnedLinks[0].customIcon)
+        #expect(model.currentWorkspace.pinnedLinks[0].customIcon == nil)
     }
 
     // MARK: - Note Tests
 
-    func testNoteJSONRoundTrip() throws {
+    @Test func testNoteJSONRoundTrip() throws {
         let note = Note(id: UUID(), title: "My Note", customIcon: .emoji("📝"))
         let folder = Folder(id: UUID(), name: "Folder", children: [.note(note)], isExpanded: true)
         let workspace = Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder), .note(Note(id: UUID(), title: "Top-level", customIcon: nil))])
@@ -721,18 +722,18 @@ final class ModelTests: XCTestCase {
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
-        XCTAssertEqual(state, decoded)
+        #expect(state == decoded)
 
         guard case .folder(let decodedFolder) = decoded.workspaces[0].items[0],
               case .note(let decodedNote) = decodedFolder.children[0] else {
-            XCTFail("Expected nested note inside folder")
+            Issue.record("Expected nested note inside folder")
             return
         }
-        XCTAssertEqual(decodedNote.title, "My Note")
-        XCTAssertEqual(decodedNote.customIcon, .emoji("📝"))
+        #expect(decodedNote.title == "My Note")
+        #expect(decodedNote.customIcon == .emoji("📝"))
     }
 
-    func testBackwardCompatibilityNoNotes() throws {
+    @Test func testBackwardCompatibilityNoNotes() throws {
         // Pre-Note schema: items contain only folder/link entries. Decoding must succeed.
         let json = """
         {
@@ -752,34 +753,34 @@ final class ModelTests: XCTestCase {
         """
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
-        XCTAssertEqual(decoded.workspaces[0].items.count, 1)
+        #expect(decoded.workspaces[0].items.count == 1)
         if case .link(let link) = decoded.workspaces[0].items[0] {
-            XCTAssertEqual(link.title, "Legacy Link")
+            #expect(link.title == "Legacy Link")
         } else {
-            XCTFail("Expected link to decode")
+            Issue.record("Expected link to decode")
         }
     }
 
-    func testAddNote() {
+    @Test func testAddNote() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let noteId = model.addNote(title: "Test Note", parentId: nil)
-        XCTAssertEqual(model.currentWorkspace.items.count, 1)
+        #expect(model.currentWorkspace.items.count == 1)
         if case .note(let note) = model.currentWorkspace.items[0] {
-            XCTAssertEqual(note.id, noteId)
-            XCTAssertEqual(note.title, "Test Note")
+            #expect(note.id == noteId)
+            #expect(note.title == "Test Note")
         } else {
-            XCTFail("Expected note at root")
+            Issue.record("Expected note at root")
         }
 
         // New notes start with empty content; the editor shows a placeholder instead.
         let content = model.noteStorage.read(id: noteId)
-        XCTAssertEqual(content, "")
+        #expect(content == "")
     }
 
-    func testRenameNote() {
+    @Test func testRenameNote() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -788,13 +789,13 @@ final class ModelTests: XCTestCase {
         model.renameNode(id: noteId, newName: "New")
 
         if case .note(let note) = model.nodeById(noteId) {
-            XCTAssertEqual(note.title, "New")
+            #expect(note.title == "New")
         } else {
-            XCTFail("Expected note")
+            Issue.record("Expected note")
         }
     }
 
-    func testSetNoteCustomIcon() {
+    @Test func testSetNoteCustomIcon() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -803,31 +804,31 @@ final class ModelTests: XCTestCase {
         model.setNoteCustomIcon(id: noteId, icon: .sfSymbol("note.text"))
 
         if case .note(let note) = model.nodeById(noteId) {
-            XCTAssertEqual(note.customIcon, .sfSymbol("note.text"))
+            #expect(note.customIcon == .sfSymbol("note.text"))
         } else {
-            XCTFail("Expected note")
+            Issue.record("Expected note")
         }
 
         model.setNoteCustomIcon(id: noteId, icon: nil)
         if case .note(let note) = model.nodeById(noteId) {
-            XCTAssertNil(note.customIcon)
+            #expect(note.customIcon == nil)
         }
     }
 
-    func testDeleteNoteRemovesFile() {
+    @Test func testDeleteNoteRemovesFile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let noteId = model.addNote(title: "Doomed", parentId: nil)
         let fileURL = store.noteFileURL(for: noteId)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
 
         model.deleteNode(id: noteId)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path))
     }
 
-    func testDeleteFolderCleansUpContainedNotes() {
+    @Test func testDeleteFolderCleansUpContainedNotes() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -839,32 +840,32 @@ final class ModelTests: XCTestCase {
 
         let urlA = store.noteFileURL(for: noteAId)
         let urlB = store.noteFileURL(for: noteBId)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: urlA.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: urlB.path))
+        #expect(FileManager.default.fileExists(atPath: urlA.path))
+        #expect(FileManager.default.fileExists(atPath: urlB.path))
 
         model.deleteNode(id: folderId)
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: urlA.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: urlB.path))
+        #expect(!FileManager.default.fileExists(atPath: urlA.path))
+        #expect(!FileManager.default.fileExists(atPath: urlB.path))
     }
 
-    func testNoteFilteringByTitle() {
+    @Test func testNoteFilteringByTitle() {
         let note1 = Note(id: UUID(), title: "Project Plan", customIcon: nil)
         let note2 = Note(id: UUID(), title: "Recipes", customIcon: nil)
         let nodes: [Node] = [.note(note1), .note(note2)]
 
         let results = NodeFiltering.filter(nodes: nodes, query: "project")
-        XCTAssertEqual(results.count, 1)
+        #expect(results.count == 1)
         if case .note(let filtered) = results[0] {
-            XCTAssertEqual(filtered.title, "Project Plan")
+            #expect(filtered.title == "Project Plan")
         } else {
-            XCTFail("Expected note in filter results")
+            Issue.record("Expected note in filter results")
         }
     }
 
     // MARK: - Scheduled Link Tests
 
-    func testLinkRoundTripWithSchedule() throws {
+    @Test func testLinkRoundTripWithSchedule() throws {
         let fireAt = Date(timeIntervalSince1970: 1_800_000_000)
         let link = Link(
             id: UUID(),
@@ -876,10 +877,10 @@ final class ModelTests: XCTestCase {
         )
         let data = try JSONEncoder().encode(link)
         let decoded = try JSONDecoder().decode(Link.self, from: data)
-        XCTAssertEqual(decoded.scheduledOpenAt, fireAt)
+        #expect(decoded.scheduledOpenAt == fireAt)
     }
 
-    func testLinkDecodesLegacyMissingScheduledOpenAt() throws {
+    @Test func testLinkDecodesLegacyMissingScheduledOpenAt() throws {
         let legacyJSON = """
         {
             "id": "00000000-0000-0000-0000-0000000000aa",
@@ -888,10 +889,10 @@ final class ModelTests: XCTestCase {
         }
         """.data(using: .utf8)!
         let link = try JSONDecoder().decode(Link.self, from: legacyJSON)
-        XCTAssertNil(link.scheduledOpenAt)
+        #expect(link.scheduledOpenAt == nil)
     }
 
-    func testScheduleLinkSetsDate() {
+    @Test func testScheduleLinkSetsDate() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -901,12 +902,12 @@ final class ModelTests: XCTestCase {
         model.scheduleLink(id: linkId, at: fireAt)
 
         guard let node = model.nodeById(linkId), case .link(let link) = node else {
-            XCTFail("Expected link"); return
+            Issue.record("Expected link"); return
         }
-        XCTAssertEqual(link.scheduledOpenAt, fireAt)
+        #expect(link.scheduledOpenAt == fireAt)
     }
 
-    func testCancelScheduleClearsDate() {
+    @Test func testCancelScheduleClearsDate() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -916,25 +917,25 @@ final class ModelTests: XCTestCase {
         model.cancelSchedule(id: linkId)
 
         guard let node = model.nodeById(linkId), case .link(let link) = node else {
-            XCTFail("Expected link"); return
+            Issue.record("Expected link"); return
         }
-        XCTAssertNil(link.scheduledOpenAt)
+        #expect(link.scheduledOpenAt == nil)
     }
 
-    func testDeleteNodeRemovesScheduledLinkFromState() {
+    @Test func testDeleteNodeRemovesScheduledLinkFromState() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.scheduleLink(id: linkId, at: Date(timeIntervalSinceNow: 60))
-        XCTAssertEqual(model.allScheduledLinks().count, 1)
+        #expect(model.allScheduledLinks().count == 1)
 
         model.deleteNode(id: linkId)
-        XCTAssertEqual(model.allScheduledLinks().count, 0)
+        #expect(model.allScheduledLinks().count == 0)
     }
 
-    func testAllScheduledLinksWalksFoldersAndWorkspaces() {
+    @Test func testAllScheduledLinksWalksFoldersAndWorkspaces() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -954,12 +955,12 @@ final class ModelTests: XCTestCase {
         model.selectWorkspace(id: workspaceBId)
 
         let scheduled = model.allScheduledLinks()
-        XCTAssertEqual(scheduled.count, 2)
+        #expect(scheduled.count == 2)
         let linkIds = Set(scheduled.map { $0.linkId })
-        XCTAssertEqual(linkIds, Set([nestedLinkId, topLinkId]))
+        #expect(linkIds == Set([nestedLinkId, topLinkId]))
     }
 
-    func testMultipleBrowserProfiles() {
+    @Test func testMultipleBrowserProfiles() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
@@ -971,14 +972,14 @@ final class ModelTests: XCTestCase {
         // Set Firefox profile
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "org.mozilla.firefox", profile: "default")
 
-        XCTAssertEqual(model.currentWorkspace.browserProfiles.count, 2)
-        XCTAssertEqual(model.currentWorkspace.browserProfiles["com.google.chrome"], "Profile 1")
-        XCTAssertEqual(model.currentWorkspace.browserProfiles["org.mozilla.firefox"], "default")
+        #expect(model.currentWorkspace.browserProfiles.count == 2)
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == "Profile 1")
+        #expect(model.currentWorkspace.browserProfiles["org.mozilla.firefox"] == "default")
 
         // Clear Chrome profile, Firefox should remain
         model.updateWorkspaceBrowserProfile(id: workspaceId, bundleId: "com.google.chrome", profile: nil)
-        XCTAssertEqual(model.currentWorkspace.browserProfiles.count, 1)
-        XCTAssertNil(model.currentWorkspace.browserProfiles["com.google.chrome"])
-        XCTAssertEqual(model.currentWorkspace.browserProfiles["org.mozilla.firefox"], "default")
+        #expect(model.currentWorkspace.browserProfiles.count == 1)
+        #expect(model.currentWorkspace.browserProfiles["com.google.chrome"] == nil)
+        #expect(model.currentWorkspace.browserProfiles["org.mozilla.firefox"] == "default")
     }
 }

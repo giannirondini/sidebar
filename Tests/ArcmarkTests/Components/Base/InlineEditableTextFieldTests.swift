@@ -1,77 +1,71 @@
-import XCTest
+import AppKit
+import Testing
 @testable import ArcmarkCore
 
 @MainActor
-final class InlineEditableTextFieldTests: XCTestCase {
+@Suite struct InlineEditableTextFieldTests {
 
-    var editableTextField: InlineEditableTextField!
+    let editableTextField: InlineEditableTextField
 
-    nonisolated override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated { [unowned self] in
-            editableTextField = InlineEditableTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 30))
-        }
-    }
 
-    nonisolated override func tearDown() {
-        MainActor.assumeIsolated { [unowned self] in
-            editableTextField = nil
-        }
-        super.tearDown()
+    init() {
+
+        editableTextField = InlineEditableTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 30))
+
     }
 
     // MARK: - Initialization Tests
 
-    func testInitialState() {
-        XCTAssertFalse(editableTextField.isEditing)
-        XCTAssertFalse(editableTextField.textField.isEditable)
-        XCTAssertFalse(editableTextField.textField.isSelectable)
-        XCTAssertFalse(editableTextField.textField.isBordered)
-        XCTAssertFalse(editableTextField.textField.drawsBackground)
+    @Test func testInitialState() {
+        #expect(!editableTextField.isEditing)
+        #expect(!editableTextField.textField.isEditable)
+        #expect(!editableTextField.textField.isSelectable)
+        #expect(!editableTextField.textField.isBordered)
+        #expect(!editableTextField.textField.drawsBackground)
     }
 
-    func testTextFieldIsConfiguredCorrectly() {
-        XCTAssertNotNil(editableTextField.textField)
-        XCTAssertEqual(editableTextField.textField.lineBreakMode, .byTruncatingTail)
-        XCTAssertEqual(editableTextField.textField.focusRingType, .none)
+    @Test func testTextFieldIsConfiguredCorrectly() {
+        #expect(editableTextField.textField != nil)
+        #expect(editableTextField.textField.lineBreakMode == .byTruncatingTail)
+        #expect(editableTextField.textField.focusRingType == .none)
     }
 
     // MARK: - Text Property Tests
 
-    func testTextPropertyGetterAndSetter() {
+    @Test func testTextPropertyGetterAndSetter() {
         editableTextField.text = "Test Title"
-        XCTAssertEqual(editableTextField.text, "Test Title")
-        XCTAssertEqual(editableTextField.textField.stringValue, "Test Title")
+        #expect(editableTextField.text == "Test Title")
+        #expect(editableTextField.textField.stringValue == "Test Title")
     }
 
     // MARK: - Font Property Tests
 
-    func testFontPropertyGetterAndSetter() {
+    @Test func testFontPropertyGetterAndSetter() {
         let customFont = NSFont.systemFont(ofSize: 16, weight: .bold)
         editableTextField.font = customFont
 
-        XCTAssertEqual(editableTextField.font, customFont)
-        XCTAssertEqual(editableTextField.textField.font, customFont)
+        #expect(editableTextField.font == customFont)
+        #expect(editableTextField.textField.font == customFont)
     }
 
-    func testFontPropertyDefaultValue() {
+    @Test func testFontPropertyDefaultValue() {
         // Should use ThemeConstants.Fonts.bodyRegular as default
-        XCTAssertNotNil(editableTextField.font)
+        #expect(editableTextField.font != nil)
     }
 
     // MARK: - Text Color Property Tests
 
-    func testTextColorPropertyGetterAndSetter() {
+    @Test func testTextColorPropertyGetterAndSetter() {
         let customColor = NSColor.red
         editableTextField.textColor = customColor
 
-        XCTAssertEqual(editableTextField.textColor, customColor)
-        XCTAssertEqual(editableTextField.textField.textColor, customColor)
+        #expect(editableTextField.textColor == customColor)
+        #expect(editableTextField.textField.textColor == customColor)
     }
 
     // MARK: - Begin Inline Rename Tests
 
-    func testBeginInlineRenameEntersEditMode() {
+    @Test func testBeginInlineRenameEntersEditMode() {
         var commitCalled = false
         var cancelCalled = false
 
@@ -81,12 +75,12 @@ final class InlineEditableTextFieldTests: XCTestCase {
             onCancel: { cancelCalled = false }
         )
 
-        XCTAssertTrue(editableTextField.isEditing)
-        XCTAssertTrue(editableTextField.textField.isEditable)
-        XCTAssertTrue(editableTextField.textField.isSelectable)
+        #expect(editableTextField.isEditing)
+        #expect(editableTextField.textField.isEditable)
+        #expect(editableTextField.textField.isSelectable)
     }
 
-    func testBeginInlineRenameIgnoresWhenAlreadyEditing() {
+    @Test func testBeginInlineRenameIgnoresWhenAlreadyEditing() {
         var firstCommitCalled = false
         var secondCommitCalled = false
 
@@ -102,14 +96,14 @@ final class InlineEditableTextFieldTests: XCTestCase {
         )
 
         // Should still be in editing mode from first call
-        XCTAssertTrue(editableTextField.isEditing)
+        #expect(editableTextField.isEditing)
         // Second commit handler should not be set
-        XCTAssertFalse(secondCommitCalled)
+        #expect(!secondCommitCalled)
     }
 
     // MARK: - Cancel Inline Rename Tests
 
-    func testCancelInlineRenameRestoresOriginalText() {
+    @Test func testCancelInlineRenameRestoresOriginalText() {
         editableTextField.text = "Original Title"
 
         var cancelCalled = false
@@ -124,24 +118,24 @@ final class InlineEditableTextFieldTests: XCTestCase {
         // Cancel the edit
         editableTextField.cancelInlineRename()
 
-        XCTAssertEqual(editableTextField.text, "Original Title")
-        XCTAssertTrue(cancelCalled)
-        XCTAssertFalse(editableTextField.isEditing)
+        #expect(editableTextField.text == "Original Title")
+        #expect(cancelCalled)
+        #expect(!editableTextField.isEditing)
     }
 
-    func testCancelInlineRenameIgnoresWhenNotEditing() {
+    @Test func testCancelInlineRenameIgnoresWhenNotEditing() {
         var cancelCalled = false
 
         // Try to cancel without being in edit mode
         editableTextField.cancelInlineRename()
 
         // Should not crash and editing state should remain false
-        XCTAssertFalse(editableTextField.isEditing)
+        #expect(!editableTextField.isEditing)
     }
 
     // MARK: - Finish Inline Rename Tests
 
-    func testFinishInlineRenameResetsEditingState() {
+    @Test func testFinishInlineRenameResetsEditingState() {
         editableTextField.text = "Original"
 
         var commitCalled = false
@@ -164,12 +158,12 @@ final class InlineEditableTextFieldTests: XCTestCase {
 
         editableTextField.controlTextDidEndEditing(notification)
 
-        XCTAssertFalse(editableTextField.isEditing)
-        XCTAssertFalse(editableTextField.textField.isEditable)
-        XCTAssertTrue(commitCalled)
+        #expect(!editableTextField.isEditing)
+        #expect(!editableTextField.textField.isEditable)
+        #expect(commitCalled)
     }
 
-    func testFinishInlineRenameWithEmptyTextCancels() {
+    @Test func testFinishInlineRenameWithEmptyTextCancels() {
         editableTextField.text = "Original"
 
         var commitCalled = false
@@ -191,12 +185,12 @@ final class InlineEditableTextFieldTests: XCTestCase {
 
         editableTextField.controlTextDidEndEditing(notification)
 
-        XCTAssertFalse(commitCalled)
-        XCTAssertTrue(cancelCalled)
-        XCTAssertEqual(editableTextField.text, "Original")
+        #expect(!commitCalled)
+        #expect(cancelCalled)
+        #expect(editableTextField.text == "Original")
     }
 
-    func testFinishInlineRenameWithEscapeCancels() {
+    @Test func testFinishInlineRenameWithEscapeCancels() {
         editableTextField.text = "Original"
 
         var commitCalled = false
@@ -218,14 +212,14 @@ final class InlineEditableTextFieldTests: XCTestCase {
 
         editableTextField.controlTextDidEndEditing(notification)
 
-        XCTAssertFalse(commitCalled)
-        XCTAssertTrue(cancelCalled)
-        XCTAssertEqual(editableTextField.text, "Original")
+        #expect(!commitCalled)
+        #expect(cancelCalled)
+        #expect(editableTextField.text == "Original")
     }
 
     // MARK: - Whitespace Trimming Tests
 
-    func testFinishInlineRenameTrimsWhitespace() {
+    @Test func testFinishInlineRenameTrimsWhitespace() {
         editableTextField.text = "Original"
 
         var committedValue: String?
@@ -245,7 +239,7 @@ final class InlineEditableTextFieldTests: XCTestCase {
 
         editableTextField.controlTextDidEndEditing(notification)
 
-        XCTAssertEqual(committedValue, "New Title")
-        XCTAssertEqual(editableTextField.text, "New Title")
+        #expect(committedValue == "New Title")
+        #expect(editableTextField.text == "New Title")
     }
 }

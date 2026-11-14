@@ -1,8 +1,9 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ArcmarkCore
 
 @MainActor
-final class NoteServerTests: XCTestCase {
+@Suite struct NoteServerTests {
     private func makeStore() -> DataStore {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         return DataStore(baseDirectory: temp)
@@ -20,7 +21,7 @@ final class NoteServerTests: XCTestCase {
             if server.port > 0 { break }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        XCTAssertGreaterThan(server.port, 0, "Server did not bind to a port")
+        #expect(server.port > 0, "Server did not bind to a port")
         return (server, model)
     }
 
@@ -47,13 +48,13 @@ final class NoteServerTests: XCTestCase {
         return (httpResponse.statusCode, data)
     }
 
-    func testServerStartsOnEphemeralPort() async throws {
+    @Test func testServerStartsOnEphemeralPort() async throws {
         let (server, _) = try await startServer()
         defer { server.stop() }
-        XCTAssertGreaterThan(server.port, 0)
+        #expect(server.port > 0)
     }
 
-    func testGetReturnsNoteJSON() async throws {
+    @Test func testGetReturnsNoteJSON() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
         let noteId = model.addNote(title: "Server Test", parentId: nil)
@@ -63,13 +64,13 @@ final class NoteServerTests: XCTestCase {
             path: "/api/notes/\(noteId.uuidString)",
             port: server.port
         )
-        XCTAssertEqual(status, 200)
+        #expect(status == 200)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-        XCTAssertEqual(json?["title"] as? String, "Server Test")
-        XCTAssertTrue((json?["content"] as? String ?? "").contains("# Untitled"))
+        #expect(json?["title"] as? String == "Server Test")
+        #expect((json?["content"] as? String ?? "").contains("# Untitled"))
     }
 
-    func testGetReturns404WhenNoteDeleted() async throws {
+    @Test func testGetReturns404WhenNoteDeleted() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
         let noteId = model.addNote(title: "Doomed", parentId: nil)
@@ -80,10 +81,10 @@ final class NoteServerTests: XCTestCase {
             path: "/api/notes/\(noteId.uuidString)",
             port: server.port
         )
-        XCTAssertEqual(status, 404)
+        #expect(status == 404)
     }
 
-    func testPutReturns404WhenNoteDeleted() async throws {
+    @Test func testPutReturns404WhenNoteDeleted() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
         let noteId = model.addNote(title: "Doomed", parentId: nil)
@@ -96,11 +97,11 @@ final class NoteServerTests: XCTestCase {
             body: body,
             port: server.port
         )
-        XCTAssertEqual(status, 404)
-        XCTAssertEqual(model.noteStorage.read(id: noteId), "")
+        #expect(status == 404)
+        #expect(model.noteStorage.read(id: noteId) == "")
     }
 
-    func testPutWritesContent() async throws {
+    @Test func testPutWritesContent() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
         let noteId = model.addNote(title: "Writable", parentId: nil)
@@ -112,8 +113,8 @@ final class NoteServerTests: XCTestCase {
             body: body,
             port: server.port
         )
-        XCTAssertEqual(status, 200)
-        XCTAssertEqual(model.noteStorage.read(id: noteId), "## Updated")
+        #expect(status == 200)
+        #expect(model.noteStorage.read(id: noteId) == "## Updated")
     }
 
     // MARK: - Agent API round-trips
@@ -130,7 +131,7 @@ final class NoteServerTests: XCTestCase {
         return (status, parsed)
     }
 
-    func testWorkspaceRoundTrip() async throws {
+    @Test func testWorkspaceRoundTrip() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
 
@@ -139,118 +140,118 @@ final class NoteServerTests: XCTestCase {
             body: ["name": "Reading", "colorId": "leaf"],
             port: server.port
         )
-        XCTAssertEqual(createStatus, 200)
-        XCTAssertEqual(createJson["ok"] as? Bool, true)
-        let id = try XCTUnwrap(createJson["id"] as? String)
-        let uuid = try XCTUnwrap(UUID(uuidString: id))
-        XCTAssertTrue(model.workspaces.contains(where: { $0.id == uuid }))
+        #expect(createStatus == 200)
+        #expect(createJson["ok"] as? Bool == true)
+        let id = try #require(createJson["id"] as? String)
+        let uuid = try #require(UUID(uuidString: id))
+        #expect(model.workspaces.contains(where: { $0.id == uuid }))
 
         let (renameStatus, _) = try await apiRequest(
             "PATCH", "/api/workspaces/\(id)",
             body: ["name": "Reading List"],
             port: server.port
         )
-        XCTAssertEqual(renameStatus, 200)
-        XCTAssertEqual(model.workspaces.first(where: { $0.id == uuid })?.name, "Reading List")
+        #expect(renameStatus == 200)
+        #expect(model.workspaces.first(where: { $0.id == uuid })?.name == "Reading List")
     }
 
-    func testFolderRoundTrip() async throws {
+    @Test func testFolderRoundTrip() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id).uuidString
+        let wsId = try #require(model.workspaces.first?.id).uuidString
 
         let (createStatus, createJson) = try await apiRequest(
             "POST", "/api/folders",
             body: ["workspace_id": wsId, "name": "Inbox"],
             port: server.port
         )
-        XCTAssertEqual(createStatus, 200)
-        let id = try XCTUnwrap(createJson["id"] as? String)
-        let uuid = try XCTUnwrap(UUID(uuidString: id))
+        #expect(createStatus == 200)
+        let id = try #require(createJson["id"] as? String)
+        let uuid = try #require(UUID(uuidString: id))
 
-        let node = try XCTUnwrap(model.nodeAcrossWorkspaces(id: uuid))
-        guard case .folder(let folder) = node else { return XCTFail("Expected folder") }
-        XCTAssertEqual(folder.name, "Inbox")
+        let node = try #require(model.nodeAcrossWorkspaces(id: uuid))
+        guard case .folder(let folder) = node else { Issue.record("Expected folder"); return }
+        #expect(folder.name == "Inbox")
 
         let (renameStatus, _) = try await apiRequest(
             "PATCH", "/api/folders/\(id)",
             body: ["name": "Triage", "expanded": false],
             port: server.port
         )
-        XCTAssertEqual(renameStatus, 200)
-        if case .folder(let updated) = try XCTUnwrap(model.nodeAcrossWorkspaces(id: uuid)) {
-            XCTAssertEqual(updated.name, "Triage")
-            XCTAssertFalse(updated.isExpanded)
+        #expect(renameStatus == 200)
+        if case .folder(let updated) = try #require(model.nodeAcrossWorkspaces(id: uuid)) {
+            #expect(updated.name == "Triage")
+            #expect(!updated.isExpanded)
         } else {
-            XCTFail("Expected folder after rename")
+            Issue.record("Expected folder after rename")
         }
     }
 
-    func testLinkRoundTrip() async throws {
+    @Test func testLinkRoundTrip() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id).uuidString
+        let wsId = try #require(model.workspaces.first?.id).uuidString
 
         let (status, createJson) = try await apiRequest(
             "POST", "/api/links",
             body: ["workspace_id": wsId, "url": "https://anthropic.com", "title": "Anthropic"],
             port: server.port
         )
-        XCTAssertEqual(status, 200)
-        let id = try XCTUnwrap(createJson["id"] as? String)
-        let uuid = try XCTUnwrap(UUID(uuidString: id))
-        guard case .link(let link) = try XCTUnwrap(model.nodeAcrossWorkspaces(id: uuid)) else {
-            return XCTFail("Expected link")
+        #expect(status == 200)
+        let id = try #require(createJson["id"] as? String)
+        let uuid = try #require(UUID(uuidString: id))
+        guard case .link(let link) = try #require(model.nodeAcrossWorkspaces(id: uuid)) else {
+            Issue.record("Expected link"); return
         }
-        XCTAssertEqual(link.url, "https://anthropic.com")
-        XCTAssertEqual(link.title, "Anthropic")
+        #expect(link.url == "https://anthropic.com")
+        #expect(link.title == "Anthropic")
 
         let (patchStatus, _) = try await apiRequest(
             "PATCH", "/api/links/\(id)",
             body: ["title": "Anthropic AI", "url": "https://www.anthropic.com"],
             port: server.port
         )
-        XCTAssertEqual(patchStatus, 200)
-        if case .link(let updated) = try XCTUnwrap(model.nodeAcrossWorkspaces(id: uuid)) {
-            XCTAssertEqual(updated.title, "Anthropic AI")
-            XCTAssertEqual(updated.url, "https://www.anthropic.com")
+        #expect(patchStatus == 200)
+        if case .link(let updated) = try #require(model.nodeAcrossWorkspaces(id: uuid)) {
+            #expect(updated.title == "Anthropic AI")
+            #expect(updated.url == "https://www.anthropic.com")
         } else {
-            XCTFail("Expected link after patch")
+            Issue.record("Expected link after patch")
         }
     }
 
-    func testNoteRoundTrip() async throws {
+    @Test func testNoteRoundTrip() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id).uuidString
+        let wsId = try #require(model.workspaces.first?.id).uuidString
 
         let (status, createJson) = try await apiRequest(
             "POST", "/api/notes",
             body: ["workspace_id": wsId, "title": "Plan", "content": "# Hello"],
             port: server.port
         )
-        XCTAssertEqual(status, 200)
-        let id = try XCTUnwrap(createJson["id"] as? String)
-        let uuid = try XCTUnwrap(UUID(uuidString: id))
-        XCTAssertEqual(model.noteStorage.read(id: uuid), "# Hello")
+        #expect(status == 200)
+        let id = try #require(createJson["id"] as? String)
+        let uuid = try #require(UUID(uuidString: id))
+        #expect(model.noteStorage.read(id: uuid) == "# Hello")
 
         let (renameStatus, _) = try await apiRequest(
             "PATCH", "/api/notes/\(id)",
             body: ["title": "Renamed"],
             port: server.port
         )
-        XCTAssertEqual(renameStatus, 200)
-        if case .note(let note) = try XCTUnwrap(model.nodeAcrossWorkspaces(id: uuid)) {
-            XCTAssertEqual(note.title, "Renamed")
+        #expect(renameStatus == 200)
+        if case .note(let note) = try #require(model.nodeAcrossWorkspaces(id: uuid)) {
+            #expect(note.title == "Renamed")
         } else {
-            XCTFail("Expected note after patch")
+            Issue.record("Expected note after patch")
         }
     }
 
-    func testMoveAcrossWorkspaces() async throws {
+    @Test func testMoveAcrossWorkspaces() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let sourceWsId = try XCTUnwrap(model.workspaces.first?.id)
+        let sourceWsId = try #require(model.workspaces.first?.id)
         let destWsId = model.createWorkspace(name: "Other", colorId: .moss)
 
         // Note: createWorkspace also flips selectedWorkspaceId. Re-select source
@@ -263,86 +264,86 @@ final class NoteServerTests: XCTestCase {
             body: ["workspace_id": sourceWsId.uuidString, "url": "https://example.com"],
             port: server.port
         )
-        let linkId = try XCTUnwrap(createJson["id"] as? String)
-        let linkUUID = try XCTUnwrap(UUID(uuidString: linkId))
+        let linkId = try #require(createJson["id"] as? String)
+        let linkUUID = try #require(UUID(uuidString: linkId))
 
         let (moveStatus, moveJson) = try await apiRequest(
             "POST", "/api/nodes/\(linkId)/move",
             body: ["to_workspace_id": destWsId.uuidString],
             port: server.port
         )
-        XCTAssertEqual(moveStatus, 200)
-        XCTAssertEqual(moveJson["ok"] as? Bool, true)
+        #expect(moveStatus == 200)
+        #expect(moveJson["ok"] as? Bool == true)
 
-        XCTAssertEqual(model.workspaceId(forNodeId: linkUUID), destWsId)
+        #expect(model.workspaceId(forNodeId: linkUUID) == destWsId)
     }
 
-    func testDeleteNode() async throws {
+    @Test func testDeleteNode() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id).uuidString
+        let wsId = try #require(model.workspaces.first?.id).uuidString
 
         let (_, createJson) = try await apiRequest(
             "POST", "/api/notes",
             body: ["workspace_id": wsId, "title": "Doomed", "content": "bye"],
             port: server.port
         )
-        let id = try XCTUnwrap(createJson["id"] as? String)
-        let uuid = try XCTUnwrap(UUID(uuidString: id))
-        XCTAssertNotNil(model.nodeAcrossWorkspaces(id: uuid))
+        let id = try #require(createJson["id"] as? String)
+        let uuid = try #require(UUID(uuidString: id))
+        #expect(model.nodeAcrossWorkspaces(id: uuid) != nil)
 
         let (status, _) = try await apiRequest(
             "DELETE", "/api/nodes/\(id)",
             port: server.port
         )
-        XCTAssertEqual(status, 200)
-        XCTAssertNil(model.nodeAcrossWorkspaces(id: uuid))
+        #expect(status == 200)
+        #expect(model.nodeAcrossWorkspaces(id: uuid) == nil)
         // The note .md file is cleaned up by deleteNode.
-        XCTAssertEqual(model.noteStorage.read(id: uuid), "")
+        #expect(model.noteStorage.read(id: uuid) == "")
     }
 
-    func testStateAndTreeEndpoints() async throws {
+    @Test func testStateAndTreeEndpoints() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id).uuidString
+        let wsId = try #require(model.workspaces.first?.id).uuidString
 
         let (stateStatus, stateJson) = try await apiRequest("GET", "/api/state", port: server.port)
-        XCTAssertEqual(stateStatus, 200)
-        XCTAssertEqual(stateJson["ok"] as? Bool, true)
-        XCTAssertNotNil(stateJson["state"])
+        #expect(stateStatus == 200)
+        #expect(stateJson["ok"] as? Bool == true)
+        #expect(stateJson["state"] != nil)
 
         let (treeStatus, treeJson) = try await apiRequest("GET", "/api/workspaces/\(wsId)/tree", port: server.port)
-        XCTAssertEqual(treeStatus, 200)
-        XCTAssertNotNil(treeJson["workspace"])
+        #expect(treeStatus == 200)
+        #expect(treeJson["workspace"] != nil)
     }
 
-    func testCurrentWorkspaceReturnsSelected() async throws {
+    @Test func testCurrentWorkspaceReturnsSelected() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id)
+        let wsId = try #require(model.workspaces.first?.id)
         model.selectWorkspace(id: wsId)
 
         let (status, json) = try await apiRequest("GET", "/api/workspaces/current", port: server.port)
-        XCTAssertEqual(status, 200)
-        XCTAssertEqual(json["selected"] as? Bool, true)
-        XCTAssertEqual(json["settingsSelected"] as? Bool, false)
-        let workspace = try XCTUnwrap(json["workspace"] as? [String: Any])
-        XCTAssertEqual(workspace["id"] as? String, wsId.uuidString)
+        #expect(status == 200)
+        #expect(json["selected"] as? Bool == true)
+        #expect(json["settingsSelected"] as? Bool == false)
+        let workspace = try #require(json["workspace"] as? [String: Any])
+        #expect(workspace["id"] as? String == wsId.uuidString)
     }
 
-    func testCurrentWorkspaceReportsSettings() async throws {
+    @Test func testCurrentWorkspaceReportsSettings() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
         model.selectSettings()
 
         let (status, json) = try await apiRequest("GET", "/api/workspaces/current", port: server.port)
-        XCTAssertEqual(status, 200)
-        XCTAssertEqual(json["selected"] as? Bool, false)
-        XCTAssertEqual(json["settingsSelected"] as? Bool, true)
-        XCTAssertTrue(json["workspace"] is NSNull)
+        #expect(status == 200)
+        #expect(json["selected"] as? Bool == false)
+        #expect(json["settingsSelected"] as? Bool == true)
+        #expect(json["workspace"] is NSNull)
     }
 
-    func testCreateWorkspaceRejectsUnknownColor() async throws {
+    @Test func testCreateWorkspaceRejectsUnknownColor() async throws {
         // Bind `model` so NoteServer's weak reference stays alive.
         let (server, model) = try await startServer()
         defer { server.stop() }
@@ -352,18 +353,18 @@ final class NoteServerTests: XCTestCase {
             body: ["name": "X", "colorId": "puce"],
             port: server.port
         )
-        XCTAssertEqual(status, 400)
-        XCTAssertEqual(json["code"] as? String, "bad_color")
+        #expect(status == 400)
+        #expect(json["code"] as? String == "bad_color")
     }
 
-    func testNoDeleteWorkspaceRoute() async throws {
+    @Test func testNoDeleteWorkspaceRoute() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let wsId = try XCTUnwrap(model.workspaces.first?.id).uuidString
+        let wsId = try #require(model.workspaces.first?.id).uuidString
         let (status, _) = try await apiRequest(
             "DELETE", "/api/workspaces/\(wsId)",
             port: server.port
         )
-        XCTAssertEqual(status, 404)
+        #expect(status == 404)
     }
 }

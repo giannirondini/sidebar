@@ -1,7 +1,8 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ArcmarkCore
 
-final class ArcImportTests: XCTestCase {
+@Suite struct ArcImportTests {
 
     // MARK: - Test Data Generation
 
@@ -76,7 +77,7 @@ final class ArcImportTests: XCTestCase {
 
     // MARK: - Null Field Tests
 
-    func testSpaceWithNullTitle() async throws {
+    @Test func testSpaceWithNullTitle() async throws {
         // Arrange: Create Arc data with a space that has null title
         let spaces = [
             createSpace(id: "space1", title: nil) // NULL title
@@ -109,15 +110,15 @@ final class ArcImportTests: XCTestCase {
         // Assert: Import should succeed with fallback to "Untitled"
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.workspacesCreated, 1, "Should import workspace even with null title")
-            XCTAssertEqual(importResult.workspaces[0].name, "Untitled", "Should use 'Untitled' for null space title")
-            XCTAssertEqual(importResult.linksImported, 1, "Should import the link")
+            #expect(importResult.workspacesCreated == 1, "Should import workspace even with null title")
+            #expect(importResult.workspaces[0].name == "Untitled", "Should use 'Untitled' for null space title")
+            #expect(importResult.linksImported == 1, "Should import the link")
         case .failure(let error):
-            XCTFail("Import should succeed with null space title, but failed with: \(error)")
+            Issue.record("Import should succeed with null space title, but failed with: \(error)")
         }
     }
 
-    func testLinkWithNullSavedTitle() async throws {
+    @Test func testLinkWithNullSavedTitle() async throws {
         // Arrange: Create Arc data with a link that has null savedTitle
         let spaces = [
             createSpace(id: "space1", title: "My Space")
@@ -149,20 +150,20 @@ final class ArcImportTests: XCTestCase {
         // Assert: Import should succeed with fallback to "Untitled"
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.linksImported, 1, "Should import link even with null savedTitle")
+            #expect(importResult.linksImported == 1, "Should import link even with null savedTitle")
             let firstNode = importResult.workspaces[0].nodes.first
             if case .link(let link) = firstNode {
-                XCTAssertEqual(link.title, "Untitled", "Should use 'Untitled' for null savedTitle")
-                XCTAssertEqual(link.url, "https://example.com")
+                #expect(link.title == "Untitled", "Should use 'Untitled' for null savedTitle")
+                #expect(link.url == "https://example.com")
             } else {
-                XCTFail("Expected link node")
+                Issue.record("Expected link node")
             }
         case .failure(let error):
-            XCTFail("Import should succeed with null savedTitle, but failed with: \(error)")
+            Issue.record("Import should succeed with null savedTitle, but failed with: \(error)")
         }
     }
 
-    func testLinkWithNullSavedURL() async throws {
+    @Test func testLinkWithNullSavedURL() async throws {
         // Arrange: Create Arc data with a link that has null savedURL
         let spaces = [
             createSpace(id: "space1", title: "My Space")
@@ -194,13 +195,13 @@ final class ArcImportTests: XCTestCase {
         // Assert: Link with null URL should be skipped (invalid)
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.linksImported, 0, "Should skip link with null savedURL")
+            #expect(importResult.linksImported == 0, "Should skip link with null savedURL")
         case .failure(let error):
-            XCTFail("Import should succeed but skip invalid link, but failed with: \(error)")
+            Issue.record("Import should succeed but skip invalid link, but failed with: \(error)")
         }
     }
 
-    func testFolderWithNullTitle() async throws {
+    @Test func testFolderWithNullTitle() async throws {
         // Arrange: Create Arc data with a folder that has null title
         let spaces = [
             createSpace(id: "space1", title: "My Space")
@@ -238,20 +239,20 @@ final class ArcImportTests: XCTestCase {
         // Assert: Import should succeed with fallback to "Untitled Folder"
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.foldersImported, 1, "Should import folder even with null title")
+            #expect(importResult.foldersImported == 1, "Should import folder even with null title")
             let firstNode = importResult.workspaces[0].nodes.first
             if case .folder(let folder) = firstNode {
-                XCTAssertEqual(folder.name, "Untitled Folder", "Should use 'Untitled Folder' for null folder title")
-                XCTAssertEqual(folder.children.count, 1, "Should import child link")
+                #expect(folder.name == "Untitled Folder", "Should use 'Untitled Folder' for null folder title")
+                #expect(folder.children.count == 1, "Should import child link")
             } else {
-                XCTFail("Expected folder node")
+                Issue.record("Expected folder node")
             }
         case .failure(let error):
-            XCTFail("Import should succeed with null folder title, but failed with: \(error)")
+            Issue.record("Import should succeed with null folder title, but failed with: \(error)")
         }
     }
 
-    func testMultipleItemsWithMixedNullFields() async throws {
+    @Test func testMultipleItemsWithMixedNullFields() async throws {
         // Arrange: Real-world scenario with mix of valid and null fields
         let spaces = [
             createSpace(id: "space1", title: "Valid Space", containerIDs: ["pinned", "container1"]),
@@ -313,22 +314,22 @@ final class ArcImportTests: XCTestCase {
         // Assert
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.workspacesCreated, 2, "Should import both spaces")
-            XCTAssertEqual(importResult.linksImported, 3, "Should import 3 valid links (skip link3 with null URL)")
-            XCTAssertEqual(importResult.foldersImported, 1, "Should import 1 folder")
+            #expect(importResult.workspacesCreated == 2, "Should import both spaces")
+            #expect(importResult.linksImported == 3, "Should import 3 valid links (skip link3 with null URL)")
+            #expect(importResult.foldersImported == 1, "Should import 1 folder")
 
             // Verify space 2 has "Untitled" name
             if importResult.workspaces.count == 2 {
-                XCTAssertEqual(importResult.workspaces[1].name, "Untitled", "Space 2 should use 'Untitled'")
+                #expect(importResult.workspaces[1].name == "Untitled", "Space 2 should use 'Untitled'")
             }
         case .failure(let error):
-            XCTFail("Import should succeed with mixed null fields, but failed with: \(error)")
+            Issue.record("Import should succeed with mixed null fields, but failed with: \(error)")
         }
     }
 
     // MARK: - childrenIds Traversal Tests
 
-    func testChildrenIdsTraversal_FolderChildrenFoundViaChildrenIds() async throws {
+    @Test func testChildrenIdsTraversal_FolderChildrenFoundViaChildrenIds() async throws {
         // Arc stores parent-child relationships in childrenIds. The parentID field
         // on the child may NOT match the folder's id — it can point to the container.
         let spaces = [
@@ -387,9 +388,9 @@ final class ArcImportTests: XCTestCase {
 
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.workspacesCreated, 1)
-            XCTAssertEqual(importResult.linksImported, 2, "Should find both links")
-            XCTAssertEqual(importResult.foldersImported, 1)
+            #expect(importResult.workspacesCreated == 1)
+            #expect(importResult.linksImported == 2, "Should find both links")
+            #expect(importResult.foldersImported == 1)
 
             // The folder should contain the nested link (found via childrenIds)
             let folderNode = importResult.workspaces[0].nodes.compactMap { node -> Folder? in
@@ -397,21 +398,21 @@ final class ArcImportTests: XCTestCase {
                 return nil
             }.first
 
-            XCTAssertNotNil(folderNode, "Should have a folder")
-            XCTAssertEqual(folderNode?.children.count, 1, "Folder should have 1 child via childrenIds")
+            #expect(folderNode != nil, "Should have a folder")
+            #expect(folderNode?.children.count == 1, "Folder should have 1 child via childrenIds")
 
             if case .link(let link) = folderNode?.children.first {
-                XCTAssertEqual(link.title, "Nested Link")
-                XCTAssertEqual(link.url, "https://nested.example.com")
+                #expect(link.title == "Nested Link")
+                #expect(link.url == "https://nested.example.com")
             } else {
-                XCTFail("Expected link inside folder")
+                Issue.record("Expected link inside folder")
             }
         case .failure(let error):
-            XCTFail("Import failed: \(error)")
+            Issue.record("Import failed: \(error)")
         }
     }
 
-    func testChildrenIdsTraversal_DeepNesting() async throws {
+    @Test func testChildrenIdsTraversal_DeepNesting() async throws {
         // Verify childrenIds traversal works for deeply nested structures
         let spaces = [
             createSpace(id: "space1", title: "Deep Space")
@@ -462,38 +463,38 @@ final class ArcImportTests: XCTestCase {
 
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.linksImported, 1)
-            XCTAssertEqual(importResult.foldersImported, 2)
+            #expect(importResult.linksImported == 1)
+            #expect(importResult.foldersImported == 2)
 
             // Verify the nesting: Top > Middle > Deep Link
             guard let topFolder = importResult.workspaces[0].nodes.compactMap({ node -> Folder? in
                 if case .folder(let f) = node { return f }
                 return nil
             }).first else {
-                XCTFail("Expected top folder"); return
+                Issue.record("Expected top folder"); return
             }
 
-            XCTAssertEqual(topFolder.name, "Top")
-            XCTAssertEqual(topFolder.children.count, 1)
+            #expect(topFolder.name == "Top")
+            #expect(topFolder.children.count == 1)
 
             if case .folder(let midFolder) = topFolder.children.first {
-                XCTAssertEqual(midFolder.name, "Middle")
-                XCTAssertEqual(midFolder.children.count, 1)
+                #expect(midFolder.name == "Middle")
+                #expect(midFolder.children.count == 1)
 
                 if case .link(let link) = midFolder.children.first {
-                    XCTAssertEqual(link.title, "Deep Link")
+                    #expect(link.title == "Deep Link")
                 } else {
-                    XCTFail("Expected link inside middle folder")
+                    Issue.record("Expected link inside middle folder")
                 }
             } else {
-                XCTFail("Expected middle folder inside top folder")
+                Issue.record("Expected middle folder inside top folder")
             }
         case .failure(let error):
-            XCTFail("Import failed: \(error)")
+            Issue.record("Import failed: \(error)")
         }
     }
 
-    func testChildrenIdsTraversal_PreservesOrdering() async throws {
+    @Test func testChildrenIdsTraversal_PreservesOrdering() async throws {
         // childrenIds defines the canonical order — verify it's preserved
         let spaces = [
             createSpace(id: "space1", title: "Ordered Space")
@@ -544,23 +545,23 @@ final class ArcImportTests: XCTestCase {
         switch result {
         case .success(let importResult):
             let nodes = importResult.workspaces[0].nodes
-            XCTAssertEqual(nodes.count, 3)
+            #expect(nodes.count == 3)
 
             // Verify order matches childrenIds: C, A, B
-            if case .link(let first) = nodes[0] { XCTAssertEqual(first.title, "Charlie") }
-            else { XCTFail("Expected link at index 0") }
+            if case .link(let first) = nodes[0] { #expect(first.title == "Charlie") }
+            else { Issue.record("Expected link at index 0") }
 
-            if case .link(let second) = nodes[1] { XCTAssertEqual(second.title, "Alpha") }
-            else { XCTFail("Expected link at index 1") }
+            if case .link(let second) = nodes[1] { #expect(second.title == "Alpha") }
+            else { Issue.record("Expected link at index 1") }
 
-            if case .link(let third) = nodes[2] { XCTAssertEqual(third.title, "Beta") }
-            else { XCTFail("Expected link at index 2") }
+            if case .link(let third) = nodes[2] { #expect(third.title == "Beta") }
+            else { Issue.record("Expected link at index 2") }
         case .failure(let error):
-            XCTFail("Import failed: \(error)")
+            Issue.record("Import failed: \(error)")
         }
     }
 
-    func testParentIDFallback_WhenContainerNotInItems() async throws {
+    @Test func testParentIDFallback_WhenContainerNotInItems() async throws {
         // When the pinned container ID doesn't exist as an item in the map,
         // the importer should fall back to parentID-based filtering
         let spaces = [
@@ -595,13 +596,13 @@ final class ArcImportTests: XCTestCase {
 
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.linksImported, 2, "Fallback should find both links via parentID")
+            #expect(importResult.linksImported == 2, "Fallback should find both links via parentID")
         case .failure(let error):
-            XCTFail("Import failed: \(error)")
+            Issue.record("Import failed: \(error)")
         }
     }
 
-    func testContainerIDs_UnpinnedBeforePinned() async throws {
+    @Test func testContainerIDs_UnpinnedBeforePinned() async throws {
         // Real Arc data puts "unpinned" BEFORE "pinned" in containerIDs
         let spaces = [
             createSpace(
@@ -648,21 +649,21 @@ final class ArcImportTests: XCTestCase {
 
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.linksImported, 1, "Should only import pinned link")
+            #expect(importResult.linksImported == 1, "Should only import pinned link")
             if case .link(let link) = importResult.workspaces[0].nodes.first {
-                XCTAssertEqual(link.title, "Pinned")
+                #expect(link.title == "Pinned")
             } else {
-                XCTFail("Expected pinned link")
+                Issue.record("Expected pinned link")
             }
         case .failure(let error):
-            XCTFail("Import failed: \(error)")
+            Issue.record("Import failed: \(error)")
         }
     }
 
     // MARK: - Integration Test with Real File
 
     /// Test with the actual user file if it exists
-    func testRealUserFile() async throws {
+    @Test func testRealUserFile() async throws {
         let fileURL = URL(fileURLWithPath: "/Users/ahmedsulaiman/Downloads/StorableSidebar.json")
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -680,16 +681,16 @@ final class ArcImportTests: XCTestCase {
             print("   Links: \(importResult.linksImported)")
             print("   Folders: \(importResult.foldersImported)")
 
-            XCTAssertGreaterThan(importResult.workspacesCreated, 0, "Should import at least one workspace")
-            XCTAssertGreaterThan(importResult.linksImported, 0, "Should import at least one link")
+            #expect(importResult.workspacesCreated > 0, "Should import at least one workspace")
+            #expect(importResult.linksImported > 0, "Should import at least one link")
         case .failure(let error):
-            XCTFail("Failed to import user's file: \(error)")
+            Issue.record("Failed to import user's file: \(error)")
         }
     }
 
     // MARK: - Regression Test for User's File
 
-    func testUserFileWithNullSavedTitle() async throws {
+    @Test func testUserFileWithNullSavedTitle() async throws {
         // This test simulates the exact issue from the user's StorableSidebar.json
         // where item D5547566-F700-4C85-BB55-DEC3AD41D2A1 has savedTitle: null
 
@@ -739,12 +740,12 @@ final class ArcImportTests: XCTestCase {
         // AFTER the fix, it should successfully import all 3 links
         switch result {
         case .success(let importResult):
-            XCTAssertEqual(importResult.workspacesCreated, 1, "Should create workspace")
-            XCTAssertEqual(importResult.linksImported, 3, "Should import all 3 links despite null savedTitle")
+            #expect(importResult.workspacesCreated == 1, "Should create workspace")
+            #expect(importResult.linksImported == 3, "Should import all 3 links despite null savedTitle")
 
             // Verify the problematic link uses "Untitled"
             let nodes = importResult.workspaces[0].nodes
-            XCTAssertEqual(nodes.count, 3, "Should have 3 link nodes")
+            #expect(nodes.count == 3, "Should have 3 link nodes")
 
             // Find the problematic link by URL since order may vary
             let problematicLink = nodes.compactMap { node -> Link? in
@@ -754,10 +755,10 @@ final class ArcImportTests: XCTestCase {
                 return nil
             }.first
 
-            XCTAssertNotNil(problematicLink, "Should find problematic link")
-            XCTAssertEqual(problematicLink?.title, "Untitled", "Problematic link should use 'Untitled'")
+            #expect(problematicLink != nil, "Should find problematic link")
+            #expect(problematicLink?.title == "Untitled", "Problematic link should use 'Untitled'")
         case .failure(let error):
-            XCTFail("Import should succeed after fix, but failed with: \(error)")
+            Issue.record("Import should succeed after fix, but failed with: \(error)")
         }
     }
 }

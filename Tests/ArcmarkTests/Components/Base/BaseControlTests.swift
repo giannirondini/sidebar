@@ -1,4 +1,5 @@
-import XCTest
+import AppKit
+import Testing
 @testable import ArcmarkCore
 
 // Test subclass to verify base behavior
@@ -23,42 +24,35 @@ fileprivate class TestControl: BaseControl {
 }
 
 @MainActor
-final class BaseControlTests: XCTestCase {
+@Suite struct BaseControlTests {
 
-    fileprivate var control: TestControl!
+    fileprivate let control: TestControl
 
-    nonisolated override func setUp() {
-        super.setUp()
-        MainActor.assumeIsolated { [unowned self] in
-            control = TestControl(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
-        }
-    }
 
-    nonisolated override func tearDown() {
-        MainActor.assumeIsolated { [unowned self] in
-            control = nil
-        }
-        super.tearDown()
+    init() {
+
+        control = TestControl(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
+
     }
 
     // MARK: - Initialization Tests
 
-    func testInitialState() {
-        XCTAssertFalse(control.isHovered)
-        XCTAssertFalse(control.isPressed)
-        XCTAssertTrue(control.wantsLayer)
-        XCTAssertFalse(control.mouseDownCanMoveWindow)
+    @Test func testInitialState() {
+        #expect(!control.isHovered)
+        #expect(!control.isPressed)
+        #expect(control.wantsLayer)
+        #expect(!control.mouseDownCanMoveWindow)
     }
 
-    func testCommonInitSetsWantsLayer() {
+    @Test func testCommonInitSetsWantsLayer() {
         let newControl = TestControl(frame: .zero)
-        XCTAssertTrue(newControl.wantsLayer)
+        #expect(newControl.wantsLayer)
     }
 
     // MARK: - Hover State Tests
 
-    func testMouseEnteredSetsHoverState() {
-        let event = NSEvent.mouseEvent(
+    @Test func testMouseEnteredSetsHoverState() {
+        let event = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -66,19 +60,19 @@ final class BaseControlTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
 
         control.mouseEntered(with: event)
 
-        XCTAssertTrue(control.isHovered)
-        XCTAssertEqual(control.hoverChangeCount, 1)
+        #expect(control.isHovered)
+        #expect(control.hoverChangeCount == 1)
     }
 
-    func testMouseExitedClearsHoverState() {
+    @Test func testMouseExitedClearsHoverState() {
         // First set hover state
-        let enterEvent = NSEvent.mouseEvent(
+        let enterEvent = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -86,13 +80,13 @@ final class BaseControlTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         control.mouseEntered(with: enterEvent)
 
         // Then exit
-        let exitEvent = NSEvent.mouseEvent(
+        let exitEvent = NSEvent.enterExitEvent(
             with: .mouseExited,
             location: NSPoint(x: 150, y: 20),
             modifierFlags: [],
@@ -100,30 +94,30 @@ final class BaseControlTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         control.mouseExited(with: exitEvent)
 
-        XCTAssertFalse(control.isHovered)
-        XCTAssertEqual(control.hoverChangeCount, 2)
+        #expect(!control.isHovered)
+        #expect(control.hoverChangeCount == 2)
     }
 
     // MARK: - Tracking Area Tests
 
-    func testUpdateTrackingAreasCreatesTrackingArea() {
+    @Test func testUpdateTrackingAreasCreatesTrackingArea() {
         control.updateTrackingAreas()
 
         // Verify tracking area was added by checking that hover events would be processed
         // This is a basic test to ensure the method completes without error
-        XCTAssertNotNil(control)
+        #expect(control != nil)
     }
 
     // MARK: - Refresh Hover State Tests
 
-    func testRefreshHoverStateWithoutWindow() {
+    @Test func testRefreshHoverStateWithoutWindow() {
         // First set hover via mouseEntered
-        let enterEvent = NSEvent.mouseEvent(
+        let enterEvent = NSEvent.enterExitEvent(
             with: .mouseEntered,
             location: NSPoint(x: 50, y: 20),
             modifierFlags: [],
@@ -131,47 +125,47 @@ final class BaseControlTests: XCTestCase {
             windowNumber: 0,
             context: nil,
             eventNumber: 0,
-            clickCount: 0,
-            pressure: 0
+            trackingNumber: 0,
+            userData: nil
         )!
         control.mouseEntered(with: enterEvent)
 
         // Verify hover is set
-        XCTAssertTrue(control.isHovered)
+        #expect(control.isHovered)
 
         // Call refresh when there's no window
         control.refreshHoverState()
 
         // Should clear hover state
-        XCTAssertFalse(control.isHovered)
+        #expect(!control.isHovered)
     }
 
     // MARK: - Enabled State Tests
 
-    func testMouseDownIgnoredWhenDisabled() {
+    @Test func testMouseDownIgnoredWhenDisabled() {
         control.isEnabled = false
 
         // Note: We can't fully test mouseDown without a window, but we can verify enabled check
-        XCTAssertFalse(control.isEnabled)
-        XCTAssertFalse(control.isPressed)
+        #expect(!control.isEnabled)
+        #expect(!control.isPressed)
     }
 
     // MARK: - Layout Tests
 
-    func testLayoutCallsRefreshHoverState() {
+    @Test func testLayoutCallsRefreshHoverState() {
         // This test verifies layout() is implemented correctly
         control.layout()
 
         // If no window, hover should be false
-        XCTAssertFalse(control.isHovered)
+        #expect(!control.isHovered)
     }
 
     // MARK: - View Lifecycle Tests
 
-    func testViewDidMoveToWindowCallsRefreshHoverState() {
+    @Test func testViewDidMoveToWindowCallsRefreshHoverState() {
         control.viewDidMoveToWindow()
 
         // Without a window, hover should be false
-        XCTAssertFalse(control.isHovered)
+        #expect(!control.isHovered)
     }
 }
