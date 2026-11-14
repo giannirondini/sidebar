@@ -14,6 +14,7 @@ final class MainViewController: NSViewController {
     private let workspaceSwitcher = WorkspaceSwitcherView(style: .defaultStyle)
     private let searchField = SearchBarView(style: .defaultSearch)
     private let pinnedTabsView = PinnedTabsView()
+    private let spaceHeader = SpaceHeaderView()
     private let scheduledLinksAccordion = ScheduledLinksAccordionView()
     private let pasteButton = IconTitleButton(
         title: "Add links from clipboard",
@@ -117,6 +118,21 @@ final class MainViewController: NSViewController {
             self?.showPinnedTabContextMenu(for: linkId, at: event)
         }
 
+        // Space header (icon and name of the current space)
+        spaceHeader.onRename = { [weak self] newName in
+            guard let self else { return }
+            self.model.renameWorkspace(id: self.model.currentWorkspace.id, newName: newName)
+        }
+        spaceHeader.onIconClicked = { [weak self] anchor in
+            guard let self else { return }
+            let workspace = self.model.currentWorkspace
+            self.showIconPicker(for: workspace.id, relativeTo: anchor, hasCustomIcon: workspace.icon != nil, kind: .space)
+        }
+        spaceHeader.onContextMenu = { [weak self] event in
+            guard let self else { return }
+            self.showWorkspaceContextMenu(for: self.model.currentWorkspace.id, at: event.locationInWindow)
+        }
+
         // Paste button
         pasteButton.translatesAutoresizingMaskIntoConstraints = false
         pasteButton.target = self
@@ -149,12 +165,14 @@ final class MainViewController: NSViewController {
         }
 
         // Workspace content stack (animated during swipe)
-        let contentStack = NSStackView(views: [pinnedTabsView, scheduledLinksAccordion, nodeListViewController.view, bottomBar])
+        let contentStack = NSStackView(views: [pinnedTabsView, spaceHeader, scheduledLinksAccordion, nodeListViewController.view, bottomBar])
         contentStack.orientation = .vertical
         contentStack.spacing = 10
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.alignment = .centerX
         contentStack.wantsLayer = true
+        // The header reads as the first row of the list below it.
+        contentStack.setCustomSpacing(0, after: spaceHeader)
         workspaceContentStack = contentStack
 
         // Clipping container for swipe animation
@@ -213,6 +231,8 @@ final class MainViewController: NSViewController {
             searchField.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -2),
             pinnedTabsView.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 2),
             pinnedTabsView.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -2),
+            spaceHeader.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor),
+            spaceHeader.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor),
             scheduledLinksAccordion.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 2),
             scheduledLinksAccordion.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -2),
         ])
@@ -419,6 +439,8 @@ final class MainViewController: NSViewController {
         let currentWorkspaceId = model.currentWorkspace.id
         if hasLoaded && currentWorkspaceId != lastWorkspaceId {
             nodeListViewController.clearSelections()
+            // A rename in progress belongs to the space we just left.
+            spaceHeader.cancelInlineRename()
             lastWorkspaceId = currentWorkspaceId
         }
 
@@ -430,6 +452,7 @@ final class MainViewController: NSViewController {
             showWorkspaceContent()
             applyWorkspaceStyling()
             pinnedTabsView.update(pinnedLinks: model.currentProfile.favorites)
+            configureSpaceHeader(for: model.currentWorkspace)
             if searchCoordinator.isSearchActive {
                 scheduledLinksAccordion.isHidden = true
             } else {
@@ -473,6 +496,10 @@ final class MainViewController: NSViewController {
         handlePendingWorkspaceRename()
     }
 
+    private func configureSpaceHeader(for workspace: Workspace) {
+        spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.colorId.color)
+    }
+
     private func applyWorkspaceStyling() {
         let newColor = model.currentWorkspace.colorId.backgroundColor
         nodeListViewController.workspaceColor = model.currentWorkspace.colorId
@@ -500,6 +527,7 @@ final class MainViewController: NSViewController {
         // Hide workspace content
         searchField.isHidden = true
         pinnedTabsView.isHidden = true
+        spaceHeader.isHidden = true
         scheduledLinksAccordion.isHidden = true
         pasteButton.isHidden = true
         nodeListViewController.view.isHidden = true
@@ -532,6 +560,7 @@ final class MainViewController: NSViewController {
         // Show workspace content
         searchField.isHidden = false
         pinnedTabsView.isHidden = model.currentProfile.favorites.isEmpty
+        spaceHeader.isHidden = false
         pasteButton.isHidden = false
         nodeListViewController.view.isHidden = false
 
@@ -548,7 +577,7 @@ final class MainViewController: NSViewController {
         let count = model.workspaces.count
         let actions = SpaceMenu.Actions(
             rename: { [weak self] in
-                self?.workspaceSwitcher.beginInlineRename(workspaceId: workspaceId)
+                self?.beginSpaceRename(workspaceId)
             },
             changeIcon: { [weak self] in
                 guard let self else { return }
@@ -650,13 +679,24 @@ final class MainViewController: NSViewController {
         pendingWorkspaceRenameId = workspaceId
     }
 
+    /// Renames happen in the space header, so a space that isn't current is
+    /// selected first and the rename starts after the reload.
+    private func beginSpaceRename(_ workspaceId: UUID) {
+        if workspaceId == model.currentWorkspace.id && !model.isSettingsShown {
+            spaceHeader.beginInlineRename()
+        } else {
+            scheduleWorkspaceInlineRename(for: workspaceId)
+            model.selectWorkspace(id: workspaceId)
+        }
+    }
+
     private func handlePendingWorkspaceRename() {
         guard let workspaceId = pendingWorkspaceRenameId else { return }
         pendingWorkspaceRenameId = nil
 
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.workspaceSwitcher.beginInlineRename(workspaceId: workspaceId)
+            guard let self, self.model.currentWorkspace.id == workspaceId, !self.model.isSettingsShown else { return }
+            self.spaceHeader.beginInlineRename()
         }
     }
 
@@ -1315,6 +1355,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         // Switch to the adjacent workspace and update views without animation
         model.selectWorkspace(id: nextWorkspace.id)
         pinnedTabsView.update(pinnedLinks: model.profile(for: nextWorkspace).favorites)
+        configureSpaceHeader(for: nextWorkspace)
         scheduledLinksAccordion.update(entries: model.scheduledLinks(in: nextWorkspace.id))
         let filteredNodes = searchCoordinator.filter(nodes: ScheduledLinkFiltering.hideScheduled(nextWorkspace.items))
         nodeListViewController.reloadData(with: filteredNodes, forceExpand: false, animated: false)
@@ -1335,6 +1376,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         model.selectWorkspace(id: currentId)
         let currentWorkspace = model.currentWorkspace
         pinnedTabsView.update(pinnedLinks: model.currentProfile.favorites)
+        configureSpaceHeader(for: currentWorkspace)
         scheduledLinksAccordion.update(entries: model.scheduledLinks(in: currentWorkspace.id))
         let currentNodes = searchCoordinator.filter(nodes: ScheduledLinkFiltering.hideScheduled(currentWorkspace.items))
         nodeListViewController.reloadData(with: currentNodes, forceExpand: searchCoordinator.isSearchActive, animated: false)
