@@ -971,6 +971,7 @@ final class SettingsContentViewController: NSViewController {
             • \(importResult.workspacesCreated) workspaces
             • \(importResult.linksImported) links
             • \(importResult.foldersImported) folders
+            • \(importResult.profiles.reduce(0) { $0 + $1.favorites.count }) favorites
             """
             showImportStatus(message, isError: false)
 
@@ -985,27 +986,7 @@ final class SettingsContentViewController: NSViewController {
     }
 
     private func applyImport(_ result: ArcImportResult) {
-        guard let appModel = appModel else { return }
-
-        // Remember the currently selected workspace
-        let previousWorkspaceId = appModel.state.selectedWorkspaceId
-
-        for workspace in result.workspaces {
-            // Create the workspace using AppModel's method
-            _ = appModel.createWorkspace(name: workspace.name, colorId: workspace.colorId)
-
-            // The workspace is now selected, add all nodes to it
-            for node in workspace.nodes {
-                addNodeToWorkspace(node, parentId: nil, appModel: appModel)
-            }
-        }
-
-        // Restore the previously selected workspace
-        if let previousWorkspaceId = previousWorkspaceId {
-            appModel.selectWorkspace(id: previousWorkspaceId)
-        }
-
-        // Reload the workspace list to reflect the newly imported workspaces
+        appModel?.applyArcImport(result)
         reloadWorkspaces()
     }
 

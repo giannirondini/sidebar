@@ -325,4 +325,38 @@ import Testing
         #expect(state.workspaces[0].profileId == state.profiles[0].id)
         #expect(state.workspaces[0].name == "A")
     }
+
+    // MARK: - Opt-in acceptance check against a real v1 data.json
+
+    /// Set SIDEBARC_V1_FIXTURE to a **copy** of a real v1 data.json to run this.
+    /// The copy is migrated in a temp directory; the source file is only read.
+    /// Prints only counts, never titles or URLs.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SIDEBARC_V1_FIXTURE"] != nil))
+    func realV1FileMigratesWithZeroLostLinks() throws {
+        let path = try #require(ProcessInfo.processInfo.environment["SIDEBARC_V1_FIXTURE"])
+        let original = try Data(contentsOf: URL(fileURLWithPath: path))
+        let old = try decodeV1(original)
+        let before = old.workspaces.flatMap { allLinkIds(in: $0.items) + $0.pinnedLinks.map(\.id) }
+
+        let directory = makeTempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try original.write(to: directory.appendingPathComponent("data.json"))
+
+        let state = DataStore(baseDirectory: directory).load()
+        let after = state.workspaces.flatMap { allLinkIds(in: $0.items) } + state.profiles.flatMap { $0.favorites.map(\.id) }
+        let folders = state.workspaces.flatMap(\.items).compactMap { node -> Int? in
+            if case .folder(let folder) = node, folder.name == SchemaMigration.migratedFavoritesFolderName { return folder.children.count }
+            return nil
+        }
+        print("v1 fixture: \(old.workspaces.count) spaces, \(old.workspaces.reduce(0) { $0 + $1.pinnedLinks.count }) pinned links, \(before.count) links total")
+        print("v2 result: \(state.profiles.count) profile(s), favorites \(state.profiles.map { $0.favorites.count }), \(folders.count) migrated folder(s) holding \(folders.reduce(0, +)) links, \(after.count) links total")
+
+        #expect(state.schemaVersion == 2)
+        #expect(before.count == after.count)
+        #expect(Set(before) == Set(after))
+        #expect(state.workspaces.map(\.id) == old.workspaces.map(\.id))
+        // Re-reading gives the same state (persisted once, no second migration).
+        #expect(DataStore(baseDirectory: directory).load() == state)
+    }
 }

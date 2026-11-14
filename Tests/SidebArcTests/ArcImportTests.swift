@@ -9,7 +9,8 @@ import Testing
     /// Creates minimal valid Arc JSON data for testing
     private func createArcJSON(
         spaces: [[String: Any?]],
-        items: [[String: Any?]]
+        items: [[String: Any?]],
+        topApps: [Any] = []
     ) throws -> Data {
         let arcData: [String: Any] = [
             "version": 1,
@@ -19,7 +20,7 @@ import Testing
                     [
                         "spaces": spaces,
                         "items": items,
-                        "topAppsContainerIDs": []
+                        "topAppsContainerIDs": topApps
                     ]
                 ]
             ]
@@ -760,5 +761,122 @@ import Testing
         case .failure(let error):
             Issue.record("Import should succeed after fix, but failed with: \(error)")
         }
+    }
+
+    // MARK: - Profiles and favorites (topAppsContainerIDs)
+
+    private func importJSON(_ data: Data) async throws -> ArcImportResult {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        switch await ArcImportService.shared.importFromArc(fileURL: url) {
+        case .success(let result): return result
+        case .failure(let error): throw error
+        }
+    }
+
+    /// Real Arc layout: `[{"default": true}, "<container id>"]`, favorites are tab items
+    /// whose parent is that container item.
+    @Test func testFavoritesOfDefaultProfileAreImported() async throws {
+        var space = createSpace(id: "s1", title: "Home")
+        space["profile"] = ["default": true]
+        let favContainer: [String: Any?] = [
+            "id": "fav", "title": nil, "parentID": nil, "childrenIds": ["f1", "f2"],
+            "data": ["itemContainer": ["containerType": ["topApps": ["_0": ["default": true]]]]]
+        ]
+        let items = [
+            createLinkItem(id: "l1", parentID: "container1", savedTitle: "List", savedURL: "https://list.com"),
+            favContainer,
+            createLinkItem(id: "f1", parentID: "fav", savedTitle: "Mail", savedURL: "https://mail.com"),
+            createLinkItem(id: "f2", parentID: "fav", savedTitle: "Docs", savedURL: "https://docs.com"),
+        ]
+        let result = try await importJSON(createArcJSON(spaces: [space], items: items, topApps: [["default": true], "fav"]))
+
+        #expect(result.workspaces.map(\.name) == ["Home"])
+        #expect(result.workspaces[0].arcProfile == .default)
+        #expect(result.profiles.count == 1)
+        #expect(result.profiles[0].arcProfile.name == "Default")
+        #expect(result.profiles[0].favorites.map(\.url) == ["https://mail.com", "https://docs.com"])
+        // Favorites are not counted as list links.
+        #expect(result.linksImported == 1)
+    }
+
+    @Test func testCustomProfileGetsItsOwnKeyAndName() async throws {
+        let custom: [String: Any] = ["custom": ["_0": ["directoryBasename": "Profile 1"]]]
+        var work = createSpace(id: "s2", title: "Work", containerIDs: ["pinned", "c2"])
+        work["profile"] = custom
+        var home = createSpace(id: "s1", title: "Home")
+        home["profile"] = ["default": true]
+        let items = [
+            createLinkItem(id: "l1", parentID: "container1", savedTitle: "A", savedURL: "https://a.com"),
+            createLinkItem(id: "l2", parentID: "c2", savedTitle: "B", savedURL: "https://b.com"),
+            createLinkItem(id: "f1", parentID: "workFav", savedTitle: "W", savedURL: "https://w.com"),
+        ]
+        let result = try await importJSON(createArcJSON(spaces: [home, work], items: items, topApps: [custom, "workFav"]))
+
+        let workProfile = try #require(result.workspaces.first(where: { $0.name == "Work" })?.arcProfile)
+        #expect(workProfile.name == "Arc Profile 1")
+        #expect(workProfile != .default)
+        #expect(result.profiles.map(\.arcProfile) == [workProfile])
+    }
+
+    @Test func testMissingOrMalformedTopAppsImportsNoFavorites() async throws {
+        let items = [createLinkItem(id: "l1", parentID: "container1", savedTitle: "A", savedURL: "https://a.com")]
+        for topApps in [[], ["dangling-profile-only"], [["default": true]]] as [[Any]] {
+            let result = try await importJSON(createArcJSON(spaces: [createSpace(title: "S")], items: items, topApps: topApps))
+            #expect(result.profiles.isEmpty)
+            #expect(result.workspacesCreated == 1)
+        }
+    }
+
+    @Test func testSpaceWithoutProfileFieldUsesDefault() async throws {
+        let items = [createLinkItem(id: "l1", parentID: "container1", savedTitle: "A", savedURL: "https://a.com")]
+        let result = try await importJSON(createArcJSON(spaces: [createSpace(title: "S")], items: items))
+        #expect(result.workspaces[0].arcProfile == .default)
+    }
+
+    // MARK: - Opt-in acceptance check against a real StorableSidebar.json
+
+    /// Set SIDEBARC_ARC_FIXTURE to a copy of a real StorableSidebar.json to run this.
+    /// Prints only counts, never titles or URLs.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["SIDEBARC_ARC_FIXTURE"] != nil))
+    func testRealArcFileImportsFavoritesPerProfile() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["SIDEBARC_ARC_FIXTURE"])
+        let raw = try Data(contentsOf: URL(fileURLWithPath: path))
+        let result = try await importJSON(raw)
+
+        // Ground truth from the raw JSON: the tab children of each favorites container.
+        let root = try #require(try JSONSerialization.jsonObject(with: raw) as? [String: Any])
+        let containers = try #require((root["sidebar"] as? [String: Any])?["containers"] as? [Any])
+        let data = try #require(containers.compactMap { $0 as? [String: Any] }.first(where: { $0["spaces"] != nil }))
+        let items = (data["items"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        let byId = Dictionary(items.compactMap { item in (item["id"] as? String).map { ($0, item) } }, uniquingKeysWith: { a, _ in a })
+        let topApps = data["topAppsContainerIDs"] as? [Any] ?? []
+        var expectedFavorites = 0
+        for index in stride(from: 1, to: topApps.count, by: 2) {
+            let children = (byId[topApps[index] as? String ?? ""]?["childrenIds"] as? [String]) ?? []
+            expectedFavorites += children.filter { id in
+                let tab = (byId[id]?["data"] as? [String: Any])?["tab"] as? [String: Any]
+                return !((tab?["savedURL"] as? String) ?? "").isEmpty
+            }.count
+        }
+
+        let imported = result.profiles.reduce(0) { $0 + $1.favorites.count }
+        print("Arc fixture: \(result.workspacesCreated) spaces, \(result.linksImported) links, \(result.foldersImported) folders, \(result.profiles.count) profile(s) with \(imported) favorites (expected \(expectedFavorites))")
+        #expect(imported == expectedFavorites)
+        #expect(expectedFavorites > 0)
+
+        // Apply to a fresh model: nothing is dropped.
+        let store = DataStore(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+        model.applyArcImport(result)
+        let favoritesInModel = model.profiles.reduce(0) { $0 + $1.favorites.count }
+        let migratedFolder = model.workspaces.flatMap(\.items).compactMap { node -> Int? in
+            if case .folder(let folder) = node, folder.name == AppModel.arcFavoritesFolderName { return folder.children.count }
+            return nil
+        }.reduce(0, +)
+        print("Applied: \(model.profiles.count) profile(s), \(model.workspaces.count) spaces, \(favoritesInModel) favorites + \(migratedFolder) in overflow folders")
+        #expect(favoritesInModel + migratedFolder == imported)
     }
 }

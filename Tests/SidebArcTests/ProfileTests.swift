@@ -131,4 +131,64 @@ import Testing
         model.setLinkBrowserOverride(id: favorite, bundleId: nil)
         #expect(model.pinnedLinkById(favorite)?.browserBundleId == nil)
     }
+
+    // MARK: - Arc import mapping
+
+    private func link(_ url: String) -> Link {
+        Link(id: UUID(), title: url, url: url, faviconPath: nil)
+    }
+
+    @Test func arcImportMapsDefaultProfileToDefaultAndMergesFavorites() {
+        let defaultId = model.currentProfile.id
+        let existing = pinNewLink("https://mail.com")
+        let selectedBefore = model.state.selectedWorkspaceId
+
+        let result = ArcImportResult(
+            workspaces: [ImportWorkspace(name: "Home", colorId: .ember, nodes: [.link(link("https://list.com"))], arcProfile: .default)],
+            profiles: [ImportProfile(arcProfile: .default, favorites: [link("https://MAIL.com/"), link("https://docs.com")])],
+            workspacesCreated: 1, linksImported: 1, foldersImported: 0
+        )
+        model.applyArcImport(result)
+
+        #expect(model.profiles.map(\.id) == [defaultId])
+        let home = model.workspaces.first(where: { $0.name == "Home" })!
+        #expect(home.profileId == defaultId)
+        #expect(model.profile(id: defaultId)?.favorites.map(\.url) == ["https://mail.com", "https://docs.com"])
+        #expect(model.profile(id: defaultId)?.favorites.first?.id == existing)
+        // The duplicate lands in a folder at the top of the imported space.
+        guard case .folder(let folder) = home.items.first else {
+            Issue.record("Expected the Arc favorites folder")
+            return
+        }
+        #expect(folder.name == AppModel.arcFavoritesFolderName)
+        #expect(linkIds(in: folder.children).count == 1)
+        #expect(model.state.selectedWorkspaceId == selectedBefore)
+    }
+
+    @Test func arcImportCreatesProfileForCustomArcProfileAndKeepsFavoritesOfSkippedSpaces() {
+        let custom = ArcProfileKey(.object(["custom": .object(["_0": .object(["directoryBasename": .string("Profile 1")])])]))
+        let result = ArcImportResult(
+            workspaces: [],  // every Work space was empty, so none was imported
+            profiles: [ImportProfile(arcProfile: custom, favorites: [link("https://w.com")])],
+            workspacesCreated: 0, linksImported: 0, foldersImported: 0
+        )
+        model.applyArcImport(result)
+
+        let created = model.profiles.first(where: { $0.name == "Arc Profile 1" })
+        #expect(created?.favorites.map(\.url) == ["https://w.com"])
+        #expect(model.profiles.count == 2)
+
+        // A second import reuses the profile by name.
+        model.applyArcImport(result)
+        #expect(model.profiles.count == 2)
+    }
+
+    @Test func arcImportWithoutProfilesJoinsCurrentProfile() {
+        let current = model.currentProfile.id
+        model.applyArcImport(ArcImportResult(
+            workspaces: [ImportWorkspace(name: "Plain", colorId: .ocean, nodes: [])],
+            workspacesCreated: 1, linksImported: 0, foldersImported: 0
+        ))
+        #expect(model.workspaces.first(where: { $0.name == "Plain" })?.profileId == current)
+    }
 }

@@ -140,6 +140,66 @@ final class AppModel {
         persist()
     }
 
+    static let arcFavoritesFolderName = "Favorites (from Arc)"
+
+    /// Adds the spaces and favorites of an Arc import, in one mutation.
+    ///
+    /// Each Arc profile maps to the fork profile with the same name (Arc's default
+    /// profile → "Default"), or to a new profile with that name. Spaces without an
+    /// Arc profile join the current space's profile. Favorites are merged into the
+    /// mapped profile (deduplicated, capped); those that don't fit go into a
+    /// "Favorites (from Arc)" folder at the top of that profile's first imported
+    /// space (or its first space), so nothing is dropped. Selection is unchanged.
+    func applyArcImport(_ result: ArcImportResult) {
+        var next = state.repaired()
+        let fallbackProfileId = profile(for: currentWorkspace).id
+        var profileIdByArcKey: [String: UUID] = [:]
+        var firstImportedSpaceByProfile: [UUID: UUID] = [:]
+
+        func profileId(for arcProfile: ArcProfileKey?) -> UUID {
+            guard let arcProfile else { return fallbackProfileId }
+            if let known = profileIdByArcKey[arcProfile.key] { return known }
+            let id: UUID
+            if let existing = next.profiles.first(where: { $0.name.caseInsensitiveCompare(arcProfile.name) == .orderedSame }) {
+                id = existing.id
+            } else {
+                let created = Profile(name: arcProfile.name)
+                next.profiles.append(created)
+                id = created.id
+            }
+            profileIdByArcKey[arcProfile.key] = id
+            return id
+        }
+
+        for imported in result.workspaces {
+            let pid = profileId(for: imported.arcProfile)
+            let workspace = Workspace(id: UUID(), name: imported.name, colorId: imported.colorId, items: imported.nodes, profileId: pid)
+            next.workspaces.append(workspace)
+            if firstImportedSpaceByProfile[pid] == nil {
+                firstImportedSpaceByProfile[pid] = workspace.id
+            }
+        }
+
+        for imported in result.profiles where !imported.favorites.isEmpty {
+            let pid = profileId(for: imported.arcProfile)
+            guard let profileIndex = next.profiles.firstIndex(where: { $0.id == pid }) else { continue }
+            let leftovers = next.profiles[profileIndex].appendFavorites(imported.favorites)
+            guard !leftovers.isEmpty else { continue }
+            let targetSpaceId = firstImportedSpaceByProfile[pid]
+                ?? next.workspaces.first(where: { $0.profileId == pid })?.id
+                ?? next.workspaces.first?.id
+            guard let spaceIndex = next.workspaces.firstIndex(where: { $0.id == targetSpaceId }) else {
+                // No space at all to hold them: keep the state unchanged rather than drop links.
+                return
+            }
+            let folder = Folder(id: UUID(), name: Self.arcFavoritesFolderName, children: leftovers.map { .link($0) }, isExpanded: true)
+            next.workspaces[spaceIndex].items.insert(.folder(folder), at: 0)
+        }
+
+        state = next
+        persist()
+    }
+
     /// Sets or clears (nil) the per-link browser override, for a link in any
     /// space's list or in any profile's favorites.
     func setLinkBrowserOverride(id: UUID, bundleId: String?) {

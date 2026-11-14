@@ -43,11 +43,102 @@ enum ArcContainer: Codable {
     }
 }
 
+/// Arbitrary JSON, for Arc fields whose shape is only partly known.
+indirect enum ArcJSON: Codable, Equatable {
+    case object([String: ArcJSON])
+    case array([ArcJSON])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([ArcJSON].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: ArcJSON].self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+
+    /// Stable text form (sorted keys), used as an identity key.
+    var canonical: String {
+        switch self {
+        case .object(let value):
+            let body = value.keys.sorted().map { "\"\($0)\":\(value[$0]!.canonical)" }.joined(separator: ",")
+            return "{\(body)}"
+        case .array(let value): return "[\(value.map(\.canonical).joined(separator: ","))]"
+        case .string(let value): return "\"\(value)\""
+        case .number(let value): return String(value)
+        case .bool(let value): return value ? "true" : "false"
+        case .null: return "null"
+        }
+    }
+
+    subscript(key: String) -> ArcJSON? {
+        if case .object(let value) = self { return value[key] }
+        return nil
+    }
+
+    var stringValue: String? {
+        if case .string(let value) = self { return value }
+        return nil
+    }
+}
+
+/// An Arc profile as it appears in `space.profile` and `topAppsContainerIDs`:
+/// `{"default": true}` for the default profile. Other profiles are assumed to be
+/// `{"custom": {"_0": {"directoryBasename": "..."}}}` (not seen in real data yet),
+/// so any other shape still gets a stable key and a generic name.
+struct ArcProfileKey: Hashable, Sendable {
+    /// Canonical JSON of the profile value; equal profiles have equal keys.
+    let key: String
+    /// Name for the matching fork profile.
+    let name: String
+
+    static let defaultName = Profile.defaultName
+
+    init(_ json: ArcJSON) {
+        key = json.canonical
+        if case .bool(true)? = json["default"] {
+            name = Self.defaultName
+        } else if let basename = json["custom"]?["_0"]?["directoryBasename"]?.stringValue, !basename.isEmpty {
+            name = "Arc \(basename)"
+        } else {
+            name = "Arc Profile"
+        }
+    }
+
+    static let `default` = ArcProfileKey(.object(["default": .bool(true)]))
+}
+
 /// Arc container object containing spaces and items
 struct ArcContainerObject: Codable {
     let spaces: [ArcSpaceOrString]?
     let items: [ArcItemOrString]?
-    let topAppsContainerIDs: [String]?
+    /// Alternating `[profile, containerId, profile, containerId, …]`: the Favorites
+    /// ("top apps") container of each Arc profile.
+    let topAppsContainerIDs: [ArcJSON]?
 
     enum CodingKeys: String, CodingKey {
         case spaces
@@ -61,7 +152,16 @@ struct ArcContainerObject: Codable {
         // Decode each field, but don't fail if any are missing or invalid
         self.spaces = try? container.decode([ArcSpaceOrString].self, forKey: .spaces)
         self.items = try? container.decode([ArcItemOrString].self, forKey: .items)
-        self.topAppsContainerIDs = try? container.decode([String].self, forKey: .topAppsContainerIDs)
+        self.topAppsContainerIDs = try? container.decode([ArcJSON].self, forKey: .topAppsContainerIDs)
+    }
+
+    /// Favorites container id per Arc profile, from `topAppsContainerIDs`.
+    var favoritesContainerIds: [(profile: ArcProfileKey, containerId: String)] {
+        guard let entries = topAppsContainerIDs else { return [] }
+        return stride(from: 0, to: entries.count - 1, by: 2).compactMap { index in
+            guard let containerId = entries[index + 1].stringValue else { return nil }
+            return (ArcProfileKey(entries[index]), containerId)
+        }
     }
 }
 
@@ -100,6 +200,12 @@ struct ArcSpace: Codable {
     let id: String
     let title: String?
     let containerIDs: [String]
+    /// `{"default": true}` or another profile shape; see `ArcProfileKey`.
+    let profile: ArcJSON?
+
+    var profileKey: ArcProfileKey {
+        profile.map(ArcProfileKey.init) ?? .default
+    }
 
     // Helper to get pinned container ID
     var pinnedContainerId: String? {
@@ -169,11 +275,20 @@ struct ImportWorkspace: Sendable {
     let name: String
     let colorId: WorkspaceColorId
     let nodes: [Node]
+    /// Arc profile of the space; nil for sources without profiles.
+    var arcProfile: ArcProfileKey? = nil
+}
+
+/// Favorites of one Arc profile.
+struct ImportProfile: Sendable {
+    let arcProfile: ArcProfileKey
+    let favorites: [Link]
 }
 
 /// Result of an Arc import operation
 struct ArcImportResult: Sendable {
     let workspaces: [ImportWorkspace]
+    var profiles: [ImportProfile] = []
     let workspacesCreated: Int
     let linksImported: Int
     let foldersImported: Int
@@ -231,8 +346,9 @@ final class ArcImportService: Sendable {
                 // Parse Arc data - this is CPU intensive
                 let arcData = try self.parseArcData(data)
 
-                // Convert to Arcmark workspaces - also CPU intensive
+                // Convert to workspaces and per-profile favorites - also CPU intensive
                 let workspaces = try self.convertToWorkspaces(arcData)
+                let profiles = try self.convertFavorites(arcData)
 
                 // Calculate statistics
                 var totalLinks = 0
@@ -246,6 +362,7 @@ final class ArcImportService: Sendable {
 
                 let result = ArcImportResult(
                     workspaces: workspaces,
+                    profiles: profiles,
                     workspacesCreated: workspaces.count,
                     linksImported: totalLinks,
                     foldersImported: totalFolders
@@ -273,23 +390,39 @@ final class ArcImportService: Sendable {
         }
     }
 
-    /// Convert Arc data to Arcmark workspaces
-    private func convertToWorkspaces(_ arcData: ArcData) throws -> [ImportWorkspace] {
-        // Find container with spaces and items
-        var containerObject: ArcContainerObject?
-
+    /// The container that holds spaces and items.
+    private func dataContainer(_ arcData: ArcData) throws -> ArcContainerObject {
         for container in arcData.sidebar.containers {
-            if case .object(let obj) = container,
-               obj.spaces != nil,
-               obj.items != nil {
-                containerObject = obj
-                break
+            if case .object(let obj) = container, obj.spaces != nil, obj.items != nil {
+                return obj
             }
         }
+        throw ArcImportError.noDataContainer
+    }
 
-        guard let container = containerObject else {
-            throw ArcImportError.noDataContainer
+    /// Favorites ("top apps") of each Arc profile, flattened to links in Arc's order.
+    private func convertFavorites(_ arcData: ArcData) throws -> [ImportProfile] {
+        let container = try dataContainer(arcData)
+        let itemsMap = buildItemsMap(container.items ?? [])
+        return container.favoritesContainerIds.compactMap { entry in
+            let links = flattenLinks(buildNodeHierarchy(parentId: entry.containerId, items: itemsMap))
+            return links.isEmpty ? nil : ImportProfile(arcProfile: entry.profile, favorites: links)
         }
+    }
+
+    private func flattenLinks(_ nodes: [Node]) -> [Link] {
+        nodes.flatMap { node -> [Link] in
+            switch node {
+            case .link(let link): return [link]
+            case .folder(let folder): return flattenLinks(folder.children)
+            case .note: return []
+            }
+        }
+    }
+
+    /// Convert Arc data to workspaces
+    private func convertToWorkspaces(_ arcData: ArcData) throws -> [ImportWorkspace] {
+        let container = try dataContainer(arcData)
 
         guard let spacesData = container.spaces,
               let itemsData = container.items else {
@@ -343,7 +476,8 @@ final class ArcImportService: Sendable {
             let workspace = ImportWorkspace(
                 name: workspaceName,
                 colorId: colorId,
-                nodes: nodes
+                nodes: nodes,
+                arcProfile: space.profileKey
             )
 
             workspaces.append(workspace)
