@@ -1,10 +1,10 @@
 # Chrome Bookmarks HTML Import Architecture
 
-This document describes how Chrome exports bookmarks, the Netscape Bookmark HTML format, and how Arcmark parses and imports them.
+This document describes how Chrome exports bookmarks, the Netscape Bookmark HTML format, and how SidebArc parses and imports them.
 
 ## Overview
 
-Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file via the Bookmark Manager. Unlike Arc, which stores bookmarks in a JSON file at a known path, Chrome has no stable file-system path that can be read directly — the user must manually export. Arcmark provides a file picker for the user to select the exported HTML file, then parses it into an Arcmark workspace.
+Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file via the Bookmark Manager. Unlike Arc, which stores bookmarks in a JSON file at a known path, Chrome has no stable file-system path that can be read directly — the user must manually export. SidebArc provides a file picker for the user to select the exported HTML file, then parses it into an SidebArc workspace.
 
 ## The Netscape Bookmark File Format
 
@@ -81,7 +81,7 @@ Chrome always exports with these top-level folders:
 | `Other bookmarks` | "Other Bookmarks" section | not set |
 | `Mobile bookmarks` | Synced mobile bookmarks | not set |
 
-These are structural containers, not user-created folders. The importer **flattens** them — their children are merged into the root level of the Arcmark workspace.
+These are structural containers, not user-created folders. The importer **flattens** them — their children are merged into the root level of the SidebArc workspace.
 
 ## How to Export from Chrome
 
@@ -213,9 +213,9 @@ let topLevelFolderNames: Set<String> = [
 
 Flattening means: when a `</DL>` closes one of these folders and the stack depth would return to the root level (`stack.count == 1` after pop), the folder's children are appended directly to the root rather than being wrapped in a Folder node.
 
-This ensures the user doesn't see Chrome's internal folder structure in Arcmark. A user with bookmarks in both "Bookmarks bar" and "Other bookmarks" gets all of them at the root level.
+This ensures the user doesn't see Chrome's internal folder structure in SidebArc. A user with bookmarks in both "Bookmarks bar" and "Other bookmarks" gets all of them at the root level.
 
-### Phase 5: Apply to Arcmark
+### Phase 5: Apply to SidebArc
 
 1. **Create workspace** named "Imported Bookmarks" with `.ember` color:
    ```swift
@@ -233,7 +233,7 @@ This ensures the user doesn't see Chrome's internal folder structure in Arcmark.
 
 ## Data Mapping
 
-| Chrome HTML Element | Arcmark Concept | Notes |
+| Chrome HTML Element | SidebArc Concept | Notes |
 |---------------------|-----------------|-------|
 | `<H3>` folder header | Folder node | Name extracted from inner text |
 | `<A HREF>` link | Link node | URL from HREF attribute, title from inner text |
@@ -307,7 +307,7 @@ The line-by-line regex approach is simple, fast, and robust for this specific fo
 </DL><p>
 ```
 
-### Output: Arcmark Structure
+### Output: SidebArc Structure
 ```
 Workspace: "Imported Bookmarks" (color: ember)
 ├── Link: "GitHub" (https://github.com)
@@ -366,7 +366,7 @@ Favicons are NOT extracted from the HTML file's `ICON` or `ICON_URI` attributes.
 1. Links are created with `faviconPath: nil`
 2. When displayed in the UI, `NodeCollectionViewItem` automatically requests favicons from `FaviconService`
 3. `FaviconService` fetches fresh favicons asynchronously from each site
-4. Favicons are cached in `~/Library/Application Support/Arcmark/Icons/`
+4. Favicons are cached in `~/Library/Application Support/io.github.giannirondini.sidebarc/Icons/`
 
 Rationale: Chrome's exported `ICON` attributes contain base64-encoded data URIs that would need to be decoded and saved to disk. Fetching fresh favicons is simpler, produces consistent results with the rest of the app, and avoids storing potentially stale icons.
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Arcmark is a macOS bookmark management application built with Swift and AppKit. It provides a workspace-based organization system for links and folders with features like drag-and-drop, inline editing, and automatic favicon/title fetching.
+SidebArc is a macOS bookmark management application built with Swift and AppKit (a fork of Arcmark; the Swift modules still carry the original `Arcmark*` names until a planned rename). It provides a workspace-based organization system for links and folders with features like drag-and-drop, inline editing, and automatic favicon/title fetching.
 
 ## Development Commands
 
@@ -28,13 +28,19 @@ Arcmark is a macOS bookmark management application built with Swift and AppKit. 
 ./scripts/create-dmg.sh             # Create DMG from existing build
 ./scripts/run.sh                    # Build and run the app
 
-# Testing
-swift test                          # Run all tests
-swift test --filter ModelTests.testJSONRoundTrip  # Run single test
+# Testing (swift-testing; the plugin path works around an intermittent
+# "TestingMacros plugin not found" build failure with Command Line Tools only)
+swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+# Single test: --filter is a regex over "Suite/testName"
+swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host/plugins/testing" --filter 'ModelTests/testJSONRoundTrip\('
 
 # Library build (Swift PM only)
 swift build -c release
 ```
+
+**Prerequisite:** `brew install mint`. swift-bundler runs through Mint at the revision pinned in `Mintfile`; the first build installs it.
+
+**App identity:** `Bundler.toml` is the single source. Its `[apps.SidebArc]` key names `SidebArc.app` and the executable inside it; `identifier` is the bundle id (`io.github.giannirondini.sidebarc`). Scripts read both via `scripts/lib/app-config.sh`; Swift mirrors them in `AppIdentity` (`Constants.swift`), and `AppIdentityTests` fails if they drift. There is no in-app updater: "Check for Updates…" opens `AppIdentity.releasesURL`.
 
 **Build System:** The app uses Swift Bundler to create macOS app bundles. The build script automatically:
 - Reads version from `VERSION` file and syncs to Bundler.toml
@@ -74,7 +80,7 @@ The application follows a unidirectional data flow pattern:
    - Automatically persists to disk via `DataStore` after every mutation
 
 2. **DataStore** - Handles persistence layer
-   - Saves/loads JSON to `~/Library/Application Support/Arcmark/data.json`
+   - Saves/loads JSON to `~/Library/Application Support/io.github.giannirondini.sidebarc/data.json` (folder named after the bundle id, `AppIdentity.dataDirectoryName`)
    - Manages favicon storage in `Icons/` subdirectory
    - Provides default state initialization
 
@@ -234,7 +240,9 @@ WorkspaceColorId enum defines 8 color themes (Blush, Apricot, Butter, Leaf, Mint
 - Tests use temporary directory for DataStore to avoid polluting real data
 - Model operations tested via AppModel integration (not isolated units)
 - Tests verify both state mutation and JSON round-trip encoding
-- Base class tests exist but are currently skipped due to Swift 6 concurrency requirements with XCTest
+- All tests use swift-testing (`import Testing`, `@Suite`, `@Test`, `#expect`, `#require`); XCTest is not available with Command Line Tools only
+- swift-testing runs tests in parallel: don't share mutable global state (UserDefaults, real data dir) between tests
+- Fixtures go in the suite's `init()` (a fresh instance per test), not `setUp`
 - ThemeConstants has comprehensive unit tests validating all design values
 
 ## Refactoring History

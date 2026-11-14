@@ -1,287 +1,173 @@
 # Build Process and Code Signing
 
-This document explains how Arcmark is built, bundled, code-signed, and how to verify the build artifacts.
+How SidebArc is built, bundled, code-signed, and verified. Release and DMG workflow: [DISTRIBUTION.md](DISTRIBUTION.md).
 
-## Build System
+## Toolchain
 
-Arcmark uses [Swift Bundler](https://github.com/stackotter/swift-bundler) to create macOS app bundles from Swift Package Manager projects without requiring Xcode.
+| Tool | Role | Notes |
+|---|---|---|
+| Swift 6.2+ (Command Line Tools are enough) | Compiles the package | Xcode is **not** required |
+| [Mint](https://github.com/yonaskolb/Mint) (`brew install mint`) | Runs swift-bundler at a pinned revision | The first build installs swift-bundler (a few minutes) |
+| [swift-bundler](https://github.com/stackotter/swift-bundler) | Turns the SwiftPM product into `SidebArc.app` | Pinned in `Mintfile` to `d49cb27` (v3.0.0) |
 
-### Build Configuration
+**Why that swift-bundler revision**: from commit `0f7aa1f` (2025-08-12) swift-bundler depends on ErrorKit, whose `.xcstrings` resource needs `xcstringstool`, which ships only with Xcode. Later revisions fail to build with Command Line Tools. Bump the pin deliberately and rebuild.
 
-The build is configured in `Bundler.toml`:
+## Single source of identity
+
+`Bundler.toml` defines the app once:
 
 ```toml
 format_version = 2
 
-[apps.Arcmark]
-identifier = 'com.arcmark.app'
-product = 'Arcmark'
-version = '1.0.0'
-category = 'public.app-category.productivity'
-
-[apps.Arcmark.plist]
-CFBundleIdentifier = 'com.arcmark.app'
+[apps.SidebArc]                                 # app name: SidebArc.app and its executable
+identifier = 'io.github.giannirondini.sidebarc' # bundle id
+product = 'sidebarc'                            # SwiftPM executable product (Package.swift)
+version = '1.0.0'                               # synced from VERSION by build.sh
+icon = 'Resources/AppIcon.png'
 ```
 
-**Note:** Swift Bundler v2.0.7 has a known issue where `[apps.*.plist]` values don't always merge into the final Info.plist. The build script includes a post-build patch to ensure `CFBundleIdentifier` is always present.
+- Scripts read the app name and bundle id through `scripts/lib/app-config.sh` (`APP_NAME`, `BUNDLE_ID`, `APP_BUNDLE`, `INFO_PLIST`, `APP_EXECUTABLE`). No script hard-codes them.
+- Swift mirrors them in `AppIdentity` (`Sources/ArcmarkCore/Constants.swift`): bundle id, data directory name, logger subsystem, display name, releases URL. `AppIdentityTests` fails if Swift and `Bundler.toml` drift, or if the agent skill CLI points at another data directory.
+- The minimum macOS version comes from `platforms` in `Package.swift` (swift-bundler v3 rejects `minimum_macos_version`).
+- The Swift module and target names (`ArcmarkCore`, `ArcmarkApp`, `ArcmarkTests`) are unchanged on purpose; a rename is planned separately.
 
-## Build Scripts
+## Build scripts
+
+> Run these yourself; they are not meant to be run by coding agents (see CLAUDE.md).
 
 ### `scripts/build.sh`
 
-Builds a release version of Arcmark:
-
 ```bash
-./scripts/build.sh
+./scripts/build.sh                     # release build, ad-hoc signed
+./scripts/build.sh --dmg               # + DMG
+./scripts/build.sh --production        # Developer ID signing, hardened runtime
+./scripts/build.sh --production --dmg  # + notarized DMG
 ```
 
-**What it does:**
-1. Runs `mint run swift-bundler bundle -c release`
-2. Patches `Info.plist` to ensure `CFBundleIdentifier` is set to `com.arcmark.app`
-3. Code signs the app bundle with an ad-hoc signature
-4. Verifies the bundle ID and code signature
+Steps:
 
-**Output:** `.build/bundler/Arcmark.app`
+1. Fails early with install instructions if Mint is missing.
+2. Syncs `VERSION` into `Bundler.toml`.
+3. `mint run swift-bundler bundle -c release`.
+4. **Unwraps the nested resource bundle** (`unwrap_nested_resource_bundles`). Swift 6.4's default `swiftbuild` build system already emits the SwiftPM resource bundle as a full macOS bundle, and swift-bundler v3 wraps it again (`…/Contents/Resources/Contents/Resources/NoteEditor`). Without this step the note editor is not found at runtime. `--build-system native` is not a way out: it is deprecated, and its warning on stdout breaks swift-bundler's `--show-bin-path` parsing.
+5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist (belt and braces; swift-bundler v3 already writes them).
+6. Code signs (ad-hoc, or Developer ID with `--production`).
+7. Prints the bundle id, version and signing identifier; `--dmg` then calls `scripts/create-dmg.sh`.
+
+**Output**: `.build/bundler/SidebArc.app` (executable `Contents/MacOS/SidebArc`).
 
 ### `scripts/run.sh`
 
-Builds and runs the app in development mode:
+Debug build, the same unwrap and Info.plist steps, ad-hoc signing, then `open`.
+
+### `scripts/verify-build.sh`
 
 ```bash
-./scripts/run.sh
+./scripts/verify-build.sh [path-to-app]   # default: .build/bundler/SidebArc.app
 ```
 
-Uses `mint run swift-bundler run` which builds and launches the app directly.
+Fails unless all of these hold:
 
-## Code Signing
+- Info.plist is valid; `CFBundleIdentifier` equals the `Bundler.toml` identifier; `CFBundleExecutable` equals the app name.
+- The code signature identifier equals the bundle id, and the signature verifies.
+- `Contents/MacOS/<app name>` exists.
+- The note editor is at `Contents/Resources/*.bundle/Contents/Resources/NoteEditor/index.html`. The bundle is matched by content, not name, the same rule as `NoteServer.resolveBundledResourcesURL()`. A missing editor once crashed the app at launch, and a double-wrapped bundle silently disables notes.
+- Regression guards: no `SUFeedURL` in Info.plist and no `Sparkle.framework` (the app has no in-app updater).
 
-### Why Code Signing Matters
+## Code signing
 
-macOS requires proper code signing for:
-- **Accessibility Permissions:** Apps need a valid bundle identifier in their code signature to appear in System Settings > Privacy & Security > Accessibility
-- **Gatekeeper:** Running apps from outside the App Store
-- **TCC (Transparency, Consent, and Control):** Managing privacy permissions
+macOS needs a valid signature whose identifier matches `CFBundleIdentifier` for:
 
-### Ad-hoc Signing
+- **Accessibility** (window attachment) and, later, **Automation**: TCC tracks grants by bundle id plus signature.
+- **Gatekeeper** when the app runs outside the App Store.
 
-For local development, Arcmark uses ad-hoc signing (no developer certificate):
+### Ad-hoc (development)
 
 ```bash
-codesign --force --deep --sign - Arcmark.app
+codesign --force --deep --sign - .build/bundler/SidebArc.app
 ```
 
-**Flags explained:**
-- `--force`: Replace existing signature
-- `--deep`: Sign all nested code (frameworks, helper tools, etc.)
-- `--sign -`: Use ad-hoc signature (no identity)
+An ad-hoc signature changes on every build, so TCC may treat each rebuild as a new app and drop the Accessibility grant. If that happens, remove and re-add SidebArc in System Settings, or reset it (below). A stable self-signed identity for development is planned.
 
-### Distribution Signing
+### Developer ID (distribution)
 
-For distribution, sign with a Developer ID:
+`./scripts/build.sh --production` reads `SIGNING_IDENTITY` from `.notarization-config` and signs with `--options runtime --timestamp`. Setup: [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+
+## Info.plist as built
+
+```text
+CFBundleExecutable        SidebArc
+CFBundleIdentifier        io.github.giannirondini.sidebarc
+CFBundleName              SidebArc
+CFBundleShortVersionString / CFBundleVersion   from VERSION
+CFBundleIconFile          AppIcon
+LSApplicationCategoryType public.app-category.productivity
+LSMinimumSystemVersion    13.0   (from Package.swift)
+```
+
+## Runtime data
+
+| What | Where |
+|---|---|
+| Data (`data.json`, `Icons/`, `Notes/`, `Backups/`, `agent-endpoint.json`) | `~/Library/Application Support/io.github.giannirondini.sidebarc/` |
+| Preferences (`UserDefaults`) | domain `io.github.giannirondini.sidebarc` |
+| Logs | `os.Logger` subsystem `io.github.giannirondini.sidebarc` |
+
+Nothing is shared with an Arcmark install on the same Mac.
 
 ```bash
-codesign --force --deep --sign "Developer ID Application: Your Name (TEAM_ID)" Arcmark.app
+log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc"'
 ```
 
-## Info.plist Requirements
-
-### Critical Keys for Permissions
-
-The `Info.plist` must include:
-
-```xml
-<key>CFBundleIdentifier</key>
-<string>com.arcmark.app</string>
-```
-
-**Why it's required:**
-- macOS uses `CFBundleIdentifier` to track app permissions in the TCC database
-- Without it, the app cannot request or be granted accessibility permissions
-- The identifier must be present in both the Info.plist AND the code signature
-
-### Complete Info.plist Structure
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>Arcmark</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.arcmark.app</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleIconName</key>
-    <string>AppIcon</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>Arcmark</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
-    <key>CFBundleSupportedPlatforms</key>
-    <array>
-        <string>MacOSX</string>
-    </array>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.productivity</string>
-</dict>
-</plist>
-```
-
-## Verification Commands
-
-### Check Info.plist Values
-
-#### Read specific key:
-```bash
-defaults read /path/to/Arcmark.app/Contents/Info.plist CFBundleIdentifier
-```
-
-#### Read entire plist:
-```bash
-cat /path/to/Arcmark.app/Contents/Info.plist
-```
-
-#### Verify plist is valid:
-```bash
-plutil -lint /path/to/Arcmark.app/Contents/Info.plist
-```
-
-#### Using PlistBuddy for detailed inspection:
-```bash
-/usr/libexec/PlistBuddy -c "Print" /path/to/Arcmark.app/Contents/Info.plist
-```
-
-### Check Code Signature
-
-#### Verbose signature details:
-```bash
-codesign -dvv /path/to/Arcmark.app
-```
-
-**Key fields to check:**
-- `Identifier`: Should be `com.arcmark.app`
-- `Format`: Should be `app bundle with Mach-O thin (arm64)`
-- `Signature`: `adhoc` for development, or certificate details for distribution
-
-#### Verify signature is valid:
-```bash
-codesign --verify --verbose=4 /path/to/Arcmark.app
-```
-
-No output means the signature is valid. Errors indicate signature problems.
-
-#### Check if Info.plist is properly bound:
-```bash
-codesign -dvv /path/to/Arcmark.app 2>&1 | grep "Info.plist"
-```
-
-Should show: `Info.plist entries=XX` where XX is the number of keys.
-
-### Check Accessibility Permissions
-
-#### Check if app is trusted for accessibility:
-```bash
-# This returns nothing useful from command line, must check in Swift code
-# Use WindowAttachmentService.shared.checkAccessibilityPermissions()
-```
-
-#### Reset TCC permissions for testing:
-```bash
-tccutil reset Accessibility com.arcmark.app
-```
-
-### Quick Verification Script
-
-Run all checks at once:
+## Verification commands
 
 ```bash
-APP_PATH=".build/bundler/Arcmark.app"
+APP=.build/bundler/SidebArc.app
 
-echo "=== Info.plist ==="
-defaults read "$(pwd)/$APP_PATH/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || echo "ERROR: CFBundleIdentifier not found"
-plutil -lint "$APP_PATH/Contents/Info.plist"
-
-echo ""
-echo "=== Code Signature ==="
-codesign -dvv "$APP_PATH" 2>&1 | grep -E "^(Identifier|Format|Signature|Info.plist)"
-
-echo ""
-echo "=== Verification ==="
-codesign --verify --verbose=4 "$APP_PATH" && echo "✅ Signature valid" || echo "❌ Signature invalid"
+/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"
+plutil -lint "$APP/Contents/Info.plist"
+codesign -dvv "$APP" 2>&1 | grep -E "^(Identifier|Format|Signature|Info.plist)"
+codesign --verify --deep --strict --verbose=2 "$APP"
+ls "$APP"/Contents/Resources/*.bundle/Contents/Resources/NoteEditor/index.html
 ```
+
+## Tests
+
+```bash
+swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+```
+
+All tests use swift-testing (XCTest is not available without Xcode). The plugin path works around an intermittent "TestingMacros plugin not found" failure with Command Line Tools.
 
 ## Troubleshooting
 
-### App doesn't appear in Accessibility permissions
+### `mint` not found
 
-**Symptoms:**
-- Can't find Arcmark in System Settings > Privacy & Security > Accessibility
-- Permission checks always return false
+`brew install mint`, then rerun the build.
 
-**Causes:**
-1. Missing `CFBundleIdentifier` in Info.plist
-2. Code signature doesn't match bundle identifier
-3. TCC database has stale entries
+### swift-bundler fails to build under Mint
 
-**Solutions:**
+Most likely the `Mintfile` pin was moved past `d49cb27`, and the new revision needs Xcode (`xcstringstool`). Revert the pin, or install Xcode.
 
-1. Verify bundle ID in Info.plist:
+### "Encountered unexpected key … minimum_macos_version"
+
+swift-bundler v3 rejects that key. Set the minimum in `Package.swift` `platforms`.
+
+### Notes show "editor unavailable"
+
+The resource bundle was not unwrapped. Rebuild with `./scripts/build.sh` (not a bare `mint run swift-bundler bundle`) and run `./scripts/verify-build.sh`.
+
+### SidebArc doesn't appear in Accessibility, or the grant doesn't stick
+
+1. Check the bundle id and the signature identifier match (`./scripts/verify-build.sh`).
+2. Reset the grant and relaunch:
    ```bash
-   defaults read .build/bundler/Arcmark.app/Contents/Info.plist CFBundleIdentifier
+   tccutil reset Accessibility io.github.giannirondini.sidebarc
    ```
-   Should return: `com.arcmark.app`
-
-2. Verify code signature identifier:
-   ```bash
-   codesign -dvv .build/bundler/Arcmark.app 2>&1 | grep "^Identifier="
-   ```
-   Should return: `Identifier=com.arcmark.app`
-
-3. If they don't match, rebuild:
-   ```bash
-   ./scripts/build.sh
-   ```
-
-4. Reset TCC permissions:
-   ```bash
-   tccutil reset Accessibility com.arcmark.app
-   ```
-
-5. Fully quit and relaunch Arcmark
-
-### Permission state doesn't update after granting
-
-**Cause:** macOS caches TCC permission checks. The `AXIsProcessTrustedWithOptions` API may return stale results.
-
-**Solutions:**
-1. Fully quit and relaunch Arcmark (most reliable)
-2. Switch to another app and back (triggers app activation observer)
-3. Click "Refresh Status" button in Preferences
-4. Close and reopen Preferences window
-
-### Swift Bundler doesn't apply plist values
-
-**Cause:** Swift Bundler v2.0.7 has a bug where `[apps.*.plist]` section doesn't always merge into Info.plist.
-
-**Solution:** The build script now includes a post-build patch that ensures `CFBundleIdentifier` is always present.
-
-If you need to manually patch:
-```bash
-/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string 'com.arcmark.app'" \
-    .build/bundler/Arcmark.app/Contents/Info.plist
-
-codesign --force --deep --sign - .build/bundler/Arcmark.app
-```
+3. macOS caches the check: quit and relaunch SidebArc, or use "Refresh Status" in Settings.
 
 ## References
 
-- [Swift Bundler Documentation](https://swiftbundler.dev/documentation/swift-bundler/)
-- [Swift Bundler Configuration](https://swiftbundler.dev/documentation/swift-bundler/configuration/)
-- [Apple Code Signing Guide](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/)
-- [Info.plist Keys Reference](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/)
-- [TCC (Transparency, Consent, Control) Database](https://www.rainforestqa.com/blog/macos-tcc-db-deep-dive)
+- [Swift Bundler documentation](https://swiftbundler.dev/documentation/swift-bundler/)
+- [Apple: Code Signing Guide](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/)
+- [Apple: Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution)

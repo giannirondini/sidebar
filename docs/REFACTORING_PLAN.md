@@ -1,3 +1,5 @@
+> **Historical document.** Completed refactoring of the upstream codebase (2026-02-10), before the fork. "Arcmark" here is the former product name; the Swift module names it mentions (`ArcmarkCore`, `ArcmarkTests`) are still current.
+
 # Arcmark Refactoring Plan
 
 **Date:** 2026-02-10

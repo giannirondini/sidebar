@@ -1,6 +1,6 @@
 # Component Usage Guide
 
-This guide provides practical examples for using Arcmark's base classes and design system components.
+This guide provides practical examples for using SidebArc's base classes and design system components.
 
 ## Table of Contents
 1. [ThemeConstants](#themeconstants)
@@ -613,7 +613,7 @@ let cornerRadius = ThemeConstants.CornerRadius.medium
 
 ## Additional Resources
 
-- See [REFACTORING_PLAN.md](/REFACTORING_PLAN.md) for the full refactoring history
+- See [REFACTORING_PLAN.md](REFACTORING_PLAN.md) for the full refactoring history
 - See [CLAUDE.md](/CLAUDE.md) for architecture overview
 - Check the source code for `BaseControl`, `BaseView`, and `InlineEditableTextField` for implementation details
 - Look at existing components like `IconTitleButton`, `NodeRowView`, and `WorkspaceRowView` for real-world examples

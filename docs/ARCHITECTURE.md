@@ -1,11 +1,11 @@
-# Arcmark Architecture
+# SidebArc Architecture
 
 **Last Updated:** 2026-02-10
 **Status:** Post-Refactoring (All 5 Phases Complete)
 
 ## Overview
 
-Arcmark is a macOS bookmark management application built with Swift and AppKit. It uses a workspace-based organization system with hierarchical folders and links, featuring drag-and-drop, inline editing, and automatic favicon/title fetching.
+SidebArc is a macOS bookmark management application built with Swift and AppKit. It uses a workspace-based organization system with hierarchical folders and links, featuring drag-and-drop, inline editing, and automatic favicon/title fetching.
 
 ## Architecture Patterns
 

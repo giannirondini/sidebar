@@ -1,149 +1,62 @@
-# Quick Reference: Build Verification Commands
+# Quick Reference
 
-## Common Verification Commands
+Details: [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md) · [DISTRIBUTION.md](DISTRIBUTION.md)
 
-### Check Bundle Identifier in Info.plist
+## Build and run
+
 ```bash
-defaults read .build/bundler/Arcmark.app/Contents/Info.plist CFBundleIdentifier
-# Expected: com.arcmark.app
+brew install mint                 # once; swift-bundler is pinned in Mintfile
+./scripts/build.sh                # → .build/bundler/SidebArc.app
+./scripts/run.sh                  # debug build + launch
+./scripts/verify-build.sh         # full bundle check
+./scripts/build.sh --dmg          # + .build/dmg/SidebArc-<version>.dmg
 ```
 
-### Check Code Signature Identifier
+## Tests
+
 ```bash
-codesign -dvv .build/bundler/Arcmark.app 2>&1 | grep "^Identifier="
-# Expected: Identifier=com.arcmark.app
+swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
 ```
 
-### Verify Info.plist is Valid
+## Verify by hand
+
 ```bash
-plutil -lint .build/bundler/Arcmark.app/Contents/Info.plist
-# Expected: .build/bundler/Arcmark.app/Contents/Info.plist: OK
+APP=.build/bundler/SidebArc.app
+/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"   # io.github.giannirondini.sidebarc
+codesign -dvv "$APP" 2>&1 | grep "^Identifier="                                     # same id
+codesign --verify --deep --strict "$APP"                                            # no output = valid
+ls "$APP"/Contents/Resources/*.bundle/Contents/Resources/NoteEditor/index.html      # note editor present
 ```
 
-### Verify Code Signature is Valid
+## Install
+
 ```bash
-codesign --verify --verbose=4 .build/bundler/Arcmark.app
-# Expected: (no output means valid)
+rm -rf /Applications/SidebArc.app
+cp -R .build/bundler/SidebArc.app /Applications/
 ```
 
-### View Complete Info.plist
+## Permissions
+
 ```bash
-cat .build/bundler/Arcmark.app/Contents/Info.plist
-```
-
-### View Complete Code Signature Details
-```bash
-codesign -dvv .build/bundler/Arcmark.app
-```
-
-### Run All Verifications at Once
-```bash
-./scripts/verify-build.sh
-```
-
-## Build Commands
-
-### Build Release App
-```bash
-./scripts/build.sh
-```
-
-### Build and Run in Development Mode
-```bash
-./scripts/run.sh
-```
-
-### Manual Build Steps (if needed)
-```bash
-# 1. Build with Swift Bundler
-mint run swift-bundler bundle -c release
-
-# 2. Add CFBundleIdentifier to Info.plist
-/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string 'com.arcmark.app'" \
-    .build/bundler/Arcmark.app/Contents/Info.plist
-
-# 3. Code sign
-codesign --force --deep --sign - .build/bundler/Arcmark.app
-
-# 4. Verify
-./scripts/verify-build.sh
-```
-
-## Installation
-
-### Install to Applications Folder
-```bash
-cp -R .build/bundler/Arcmark.app /Applications/
-```
-
-### Remove Old Version First (recommended)
-```bash
-rm -rf /Applications/Arcmark.app
-cp -R .build/bundler/Arcmark.app /Applications/
-```
-
-## Permissions Management
-
-### Reset Accessibility Permissions
-```bash
-tccutil reset Accessibility com.arcmark.app
-```
-
-### Open System Settings to Accessibility
-```bash
+tccutil reset Accessibility io.github.giannirondini.sidebarc
 open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 ```
 
-## Troubleshooting
+If SidebArc is missing from the Accessibility list or the grant doesn't stick: run `./scripts/verify-build.sh`, reset as above, quit and relaunch. Ad-hoc signatures change on every build, so a rebuild can drop the grant.
 
-### App Not in Accessibility List
-
-1. Check bundle identifier exists:
-   ```bash
-   defaults read .build/bundler/Arcmark.app/Contents/Info.plist CFBundleIdentifier
-   ```
-
-2. Check signature matches:
-   ```bash
-   codesign -dvv .build/bundler/Arcmark.app 2>&1 | grep "^Identifier="
-   ```
-
-3. Rebuild if needed:
-   ```bash
-   ./scripts/build.sh
-   ```
-
-4. Reinstall:
-   ```bash
-   rm -rf /Applications/Arcmark.app
-   cp -R .build/bundler/Arcmark.app /Applications/
-   ```
-
-5. Reset TCC permissions:
-   ```bash
-   tccutil reset Accessibility com.arcmark.app
-   ```
-
-6. Restart Arcmark
-
-### Permission State Not Updating
-
-1. Fully quit Arcmark (⌘Q)
-2. Relaunch from Applications
-3. Grant permission in System Settings
-4. Switch back to Arcmark (triggers app activation observer)
-5. Click "Refresh Status" button in Preferences if needed
-
-### Swift Bundler Not Found
+## Data and logs
 
 ```bash
-mint install stackotter/swift-bundler
+open ~/Library/Application\ Support/io.github.giannirondini.sidebarc
+defaults read io.github.giannirondini.sidebarc
+log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc"'
 ```
 
-## Key Files
+## Key files
 
-- **Build config:** `Bundler.toml`
-- **Build script:** `scripts/build.sh`
-- **Run script:** `scripts/run.sh`
-- **Verification script:** `scripts/verify-build.sh`
-- **Full documentation:** `docs/BUILD_AND_CODESIGN.md`
+| File | Purpose |
+|---|---|
+| `Bundler.toml` | App name, bundle id, version, icon (single source) |
+| `Mintfile` | Pinned swift-bundler revision |
+| `scripts/lib/app-config.sh` | Names and helpers shared by every script |
+| `Sources/ArcmarkCore/Constants.swift` | `AppIdentity`: Swift mirror of the identity |
