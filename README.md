@@ -10,7 +10,7 @@
 
 SidebArc is a native macOS bookmark manager built with Swift and AppKit that attaches to any browser window as a sidebar, organized the way Arc browser's sidebar organizes tabs.
 
-SidebArc is a fork of [Arcmark](https://github.com/Geek-1001/arcmark) (MIT). It runs independently of an Arcmark install on the same Mac: separate bundle id, data and settings.
+SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: separate bundle id, data and settings.
 
 ## Why SidebArc?
 
@@ -53,9 +53,6 @@ SidebArc is a fork of [Arcmark](https://github.com/Geek-1001/arcmark) (MIT). It 
 1. Download the latest `.dmg` file from the [Releases](https://github.com/giannirondini/sidebarc/releases) page
 2. Open the downloaded DMG file
 3. Drag **SidebArc.app** to your **Applications** folder
-
-![Installation](./Resources/screenshots/screenshot-3-dmg.png)
-
 4. Launch SidebArc from your Applications folder
 
 ## Setup
