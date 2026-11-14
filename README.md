@@ -34,7 +34,8 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 - **Sidebar Attachment** - Automatically attaches to browser windows and follows them across spaces. If you prefer, you can still use SidebArc as a standalone bookmark manager window, not attaching it anywhere.
 - **Supported Browsers** - Chrome, Arc, Safari, Brave, etc.
 - **Always-on-Top Mode** - Pin the SidebArc window to stay visible on top of all apps.
-- **Arc Import** - Import links (aka pinned tabs) directly from Arc browser via settings.
+- **Profiles** - Group spaces into profiles (e.g. Personal, Work). Each profile can open links in its own browser and browser profile, and shares one Favorites grid across its spaces. Any link can be set to always open in a specific browser.
+- **Arc Import** - Import pinned tabs, folders and Favorites directly from Arc browser via settings; Arc profiles map to SidebArc profiles.
 - **Browser Import** - Import bookmarks exported as HTML from Chrome, Safari or Firefox.
 
 ### Organization

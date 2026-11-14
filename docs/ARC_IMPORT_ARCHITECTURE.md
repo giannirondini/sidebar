@@ -46,7 +46,7 @@ Arc uses a containers array that typically has 2 elements. The order and structu
     {    // Container 1: May contain the bookmark data
       "spaces": [/* array of spaces */],
       "items": [/* array of items */],
-      "topAppsContainerIDs": [/* array of IDs */]
+      "topAppsContainerIDs": [/* [profile, containerId, …] pairs, e.g. [{"default": true}, "15C1…"] */]
     }
   ]
 }
@@ -276,28 +276,17 @@ func buildNodeHierarchy(parentId: String, items: [String: ArcItem]) -> [Node] {
 }
 ```
 
-### Phase 5: Apply to SidebArc
+### Phase 5: Profiles and favorites
 
-For each ImportWorkspace:
+Each space has a `profile` field: `{"default": true}` for Arc's default profile (the only shape seen in real data so far; other profiles are assumed to be `{"custom": {"_0": {"directoryBasename": "…"}}}`). Both it and the entries of `topAppsContainerIDs` are decoded as opaque JSON (`ArcJSON`) and reduced to an `ArcProfileKey` (canonical key + name). `topAppsContainerIDs` alternates `[profile, containerId, …]`; each container is an `itemContainer` item whose children are the profile's **Favorites** (tab items), flattened to links in Arc's order (`ImportProfile`).
 
-1. **Create workspace** (auto-selects it):
-   ```swift
-   _ = appModel.createWorkspace(name: workspace.name, colorId: workspace.colorId)
-   ```
+### Phase 6: Apply to SidebArc
 
-2. **Add nodes recursively**:
-   ```swift
-   for node in workspace.nodes {
-       addNodeToWorkspace(node, parentId: nil, appModel: appModel)
-   }
-   ```
+`AppModel.applyArcImport(_:)` applies the result in one mutation (selection unchanged):
 
-3. **Restore previous workspace**:
-   ```swift
-   if let previousWorkspaceId = previousWorkspaceId {
-       appModel.selectWorkspace(id: previousWorkspaceId)
-   }
-   ```
+1. Each Arc profile maps to the profile with the same name (Arc's default → "Default"), or a new one.
+2. Each imported space becomes a workspace in its Arc profile's profile.
+3. Each Arc profile's favorites are merged into that profile (deduplicated, capped at 12). Leftovers go into a "Favorites (from Arc)" folder at the top of the profile's first imported space. Favorites are imported even when all of that profile's spaces were skipped as empty.
 
 ## Data Mapping
 
@@ -306,7 +295,8 @@ For each ImportWorkspace:
 | Space | Workspace | Each Arc space becomes a separate workspace |
 | Pinned container | Workspace root | Only pinned tabs are imported |
 | Unpinned container | (skipped) | Temporary tabs not imported |
-| Top Apps | (skipped) | App launchers not relevant for bookmarks |
+| Top Apps (`topAppsContainerIDs`) | Profile favorites | Per Arc profile; overflow goes to a folder |
+| Space `profile` | Profile | Matched by name; Arc's default → "Default" |
 | Folder item | Folder node | Full nesting preserved |
 | Link item | Link node | URL and title extracted from `data.tab` |
 | `savedTitle` | Link.title | Primary title source |

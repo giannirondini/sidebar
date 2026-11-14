@@ -94,20 +94,34 @@ The application follows a unidirectional data flow pattern:
 
 The data model is defined in `Models.swift`:
 
-- **AppState** - Root container holding workspaces and selected workspace ID
-- **Workspace** - Named container with emoji, color, and hierarchical items
-- **Node** - Enum representing either a `Folder` or `Link`
+- **AppState** - Root container: `schemaVersion` (currently 2), `profiles`, `workspaces`, selected workspace ID, `isSettingsSelected`
+- **Profile** - Groups spaces that share a browser setup and the Favorites grid: `name`, `browserBundleId` (nil = global default browser), `browserProfiles` (browser bundle id → browser profile dir), `favorites: [Link]` (max `Profile.maxFavorites` = 12)
+- **Workspace** - Named, colored container with hierarchical `items` and a `profileId` (every space belongs to exactly one profile)
+- **Node** - Enum of `Folder`, `Link` or `Note`
   - `Folder` - Contains nested children and isExpanded state
-  - `Link` - URL, title, and optional favicon path
+  - `Link` - URL, title, optional favicon path, custom icon, schedule, and `browserBundleId` (per-link browser override)
+  - `Note` - Title and custom icon; the body is a `.md` file in `Notes/`
 
 All models are Codable and use UUID-based identification. The Node enum uses custom encoding to serialize the tagged union structure.
+
+**Schema versions.** `DataStore.load()` reads `schemaVersion` first (`SchemaVersionProbe`). A v1 file is decoded by the read-only `SchemaV1` mirror and upgraded by the pure `SchemaMigration.v1ToV2` (`Persistence/SchemaMigration.swift`); the bytes are first copied to `Backups/pre-v2-migration-<ts>.json`, which the 10-file backup rotation never prunes, then the result is saved. Every load runs `AppState.repaired()` (at least one profile; dangling `profileId`s fall back to the first). The v2 model carries no legacy fields; add a new `SchemaVn` mirror + migration for the next change instead.
+
+### Profiles, Favorites and browser routing
+
+- **Favorites** are the tile grid at the top (`PinnedTabsView`), stored on the space's **profile**, so all spaces in a profile show the same grid. `pinLink` moves a list link into the current profile's favorites; `unpinLink` moves it into the *current* space's list (as in Arc). Async updates (favicons) find a favorite in any profile.
+- **Where a link opens:** `BrowserManager.resolveTarget(link:profile:)` → link override → profile's browser → global default (`UserDefaults`). A browser that isn't installed is skipped (next level applies). The browser profile dir is `profile.browserProfiles[browser]` only when the browser is the profile's own; an override to another browser opens without one. Window attachment, the global browser picker and the note editor deliberately stay on the global default.
+- **Deleting a profile** moves its spaces to the first remaining profile and merges its favorites there (dedupe by `URLNormalization.key`, cap 12); what doesn't fit goes into a "Favorites (from <name>)" folder. The last profile can't be deleted. New spaces join the current space's profile.
+- **Never drop links:** migration, profile deletion and Arc import all use `Profile.appendFavorites`, which returns the leftovers; callers put them in a folder.
+- **UI:** Settings › Profiles (`ProfileSettingsView`: browser and browser-profile pickers, rename/delete); space menus › Profile ▸; link/favorite menus › Open in ▸ / Always open in ▸ (`BrowserMenus`); an override shows the browser icon as a badge (warning symbol if not installed).
+- **Arc import** maps each Arc profile (`space.profile`, `topAppsContainerIDs` pairs) to the fork profile with the same name ("Default" for Arc's default) and imports its favorites (`AppModel.applyArcImport`).
+- **Agent API v2** (`NoteServer`, `skills/sidebarc`): `/api/profiles` (list, create, patch name/browser; no delete), `/api/profiles/:id/favorites`, `/api/favorites/:id` (move, unpin, delete), `profileId` on workspace payloads, `browser_bundle_id` on link patch. The endpoint file reports `schemaVersion: 2` (API version, not the data schema).
 
 ### Key Components
 
 **Services** (all MainActor singletons):
 - **FaviconService** - Async favicon fetching with disk caching and failure cooldown
 - **LinkTitleService** - HTML title extraction from URLs
-- **BrowserManager** - Manages browser selection and URL opening
+- **BrowserManager** - Browser resolution (`resolveTarget`), URL opening, installed browsers, browser-profile detection (Chrome, Chrome Canary, Helium, Firefox)
 
 **UI Components**:
 - **MainViewController** - Collection view-based hierarchical list with animations (reduced from 1352 to 596 lines through Phase 3 refactoring)
@@ -244,6 +258,8 @@ WorkspaceColorId enum defines 8 color themes (Blush, Apricot, Butter, Leaf, Mint
 - swift-testing runs tests in parallel: don't share mutable global state (UserDefaults, real data dir) between tests
 - Fixtures go in the suite's `init()` (a fresh instance per test), not `setUp`
 - ThemeConstants has comprehensive unit tests validating all design values
+- Opt-in acceptance tests run against real files only when an env var points at a **copy**: `SIDEBARC_V1_FIXTURE` (v1 `data.json` → migration, zero lost links) and `SIDEBARC_ARC_FIXTURE` (`StorableSidebar.json` → favorites per profile). They print counts only; never commit those files
+- Menu items with closures use `ClosureMenuItem`. Never name an `@objc` action method `perform(_:)`: `#selector` resolves to NSObject's `performSelector:`, which throws inside AppKit's dispatch and is swallowed, so the item silently does nothing (`ClosureMenuItemTests` guards this)
 
 ## Refactoring History
 

@@ -80,16 +80,26 @@ Sources/SidebArcCore/
 ## Core Data Model
 
 ```swift
-AppState                      // Root container
+AppState                      // Root container (data.json, schemaVersion 2)
+├── schemaVersion: Int
+├── profiles: [Profile]       // At least one
 ├── workspaces: [Workspace]
-└── selectedWorkspaceId: UUID?
+├── selectedWorkspaceId: UUID?
+└── isSettingsSelected: Bool
 
-Workspace                     // Named container
+Profile                       // Spaces sharing a browser setup and Favorites
+├── id: UUID
+├── name: String              // "Default", "Work", …
+├── browserBundleId: String?  // nil → global default browser
+├── browserProfiles: [String: String]  // browser bundle id → browser profile dir
+└── favorites: [Link]         // Tile grid, max 12, shared by the profile's spaces
+
+Workspace                     // A space
 ├── id: UUID
 ├── name: String
-├── emoji: String
-├── color: WorkspaceColorId
-└── items: [Node]             // Root-level items
+├── colorId: WorkspaceColorId
+├── items: [Node]             // Root-level items (the pinned list)
+└── profileId: UUID
 
 Node                          // Recursive tree structure
 ├── .folder(Folder)
@@ -97,12 +107,30 @@ Node                          // Recursive tree structure
 │   ├── name: String
 │   ├── isExpanded: Bool
 │   └── children: [Node]      // Nested items
-└── .link(Link)
-    ├── id: UUID
-    ├── title: String
-    ├── url: URL
-    └── faviconPath: String?
+├── .link(Link)
+│   ├── id: UUID
+│   ├── title: String
+│   ├── url: String
+│   ├── faviconPath: String?
+│   ├── customIcon: CustomIcon?
+│   ├── scheduledOpenAt: Date?
+│   └── browserBundleId: String?  // per-link browser override
+└── .note(Note)               // Body in Notes/<id>.md
 ```
+
+### Schema migration
+
+`DataStore.load()` probes `schemaVersion`. v1 files (Arcmark 0.1.x layout: `pinnedLinks` and `browserProfiles` on each workspace) are decoded by `SchemaV1` and converted by the pure `SchemaMigration.v1ToV2`:
+
+1. Spaces with an identical `browserProfiles` dictionary share one profile ("Default", "Profile 2", …), `browserBundleId = nil`, so every space opens links where it did before.
+2. A profile's favorites are its spaces' pinned links in space order, deduplicated by normalised URL (`URLNormalization`) and capped at 12.
+3. Duplicates and overflow go into a "Favorites (migrated)" folder at the top of the space they came from. No link is dropped.
+
+The original bytes are copied to `Backups/pre-v2-migration-<timestamp>.json` (outside the rotation) before the migrated state is saved.
+
+## Profiles and browser routing
+
+A link opens in: **link override → profile's browser → global default**, skipping any browser that isn't installed (`BrowserManager.resolveTarget`). The browser profile directory comes from the profile's `browserProfiles` for that browser, unless a link override points at a different browser. Favorites belong to the profile, so every space in it shows the same grid; unpinning moves a favorite into the current space. Deleting a profile moves its spaces and favorites to the first remaining profile (leftovers go to a folder). Window attachment and the note editor use the global default browser.
 
 ## Key Design Decisions
 
