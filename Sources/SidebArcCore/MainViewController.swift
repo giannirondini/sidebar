@@ -16,10 +16,11 @@ final class MainViewController: NSViewController {
     private let pinnedTabsView = PinnedTabsView()
     private let spaceHeader = SpaceHeaderView()
     private let scheduledLinksAccordion = ScheduledLinksAccordionView()
+    /// "+ Add from Clipboard": the last row under the pinned list (Arc's "New Tab" row).
     private let pasteButton = IconTitleButton(
-        title: "Add links from clipboard",
+        title: "Add from Clipboard",
         symbolName: "plus",
-        style: .pasteAction
+        style: .listRow
     )
 
     // Swipe animation views

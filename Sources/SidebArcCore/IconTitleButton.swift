@@ -36,6 +36,33 @@ final class IconTitleButton: BaseControl {
             )
         }
 
+        /// A dimmed "+ Title" row that reads as the last row of the pinned list
+        /// (Arc's "New Tab" row): the icon is centred in the list's icon column and
+        /// the title starts where link titles start; the row is as tall as a list row.
+        static var listRow: Style {
+            let metrics = ListMetrics()
+            let font = metrics.linkTitleFont
+            let iconSize = ThemeConstants.Sizing.iconSmall
+            let iconInset = (metrics.iconSize - iconSize) / 2
+            let textHeight = ceil(font.ascender - font.descender)
+            return Style(
+                backgroundColor: ThemeConstants.Colors.darkGray,
+                hoverBackgroundOpacity: ThemeConstants.Opacity.extraSubtle,
+                pressedBackgroundOpacity: ThemeConstants.Opacity.subtle,
+                foregroundColor: ThemeConstants.Colors.darkGray,
+                foregroundInactiveOpacity: ThemeConstants.Opacity.low,
+                foregroundActiveOpacity: ThemeConstants.Opacity.high,
+                font: font,
+                iconPointSize: iconSize,
+                iconWeight: .regular,
+                iconTitleSpacing: ThemeConstants.Spacing.large + iconInset,
+                horizontalPadding: metrics.leftPadding + iconInset,
+                verticalPadding: (metrics.rowHeight - textHeight) / 2,
+                cornerRadius: metrics.rowCornerRadius,
+                fillsWidth: true
+            )
+        }
+
         static var addWorkspace: Style {
             Style(
                 backgroundColor: ThemeConstants.Colors.darkGray,
