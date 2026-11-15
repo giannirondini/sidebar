@@ -183,14 +183,25 @@ final class WindowAttachmentService {
         AXValueGetValue(position as! AXValue, .cgPoint, &cgPoint)
         AXValueGetValue(size as! AXValue, .cgSize, &cgSize)
 
-        // Convert from Accessibility coordinates (top-left origin) to Cocoa coordinates (bottom-left origin)
-        if let screen = NSScreen.main {
-            let screenHeight = screen.frame.height
-            let flippedY = screenHeight - cgPoint.y - cgSize.height
-            return NSRect(x: cgPoint.x, y: flippedY, width: cgSize.width, height: cgSize.height)
+        guard let primaryHeight = Self.primaryScreenHeight() else {
+            return NSRect(origin: cgPoint, size: cgSize)
         }
+        return Self.cocoaFrame(axOrigin: cgPoint, size: cgSize, primaryScreenHeight: primaryHeight)
+    }
 
-        return NSRect(origin: cgPoint, size: cgSize)
+    /// Accessibility reports window positions in global coordinates whose origin is the
+    /// **top**-left of the primary display (the one at (0, 0), with the menu bar);
+    /// AppKit's origin is that display's **bottom**-left. The flip must use the primary
+    /// display's height: `NSScreen.main` (the key window's screen) is wrong as soon as
+    /// displays differ in height, and placed the sidebar too high on an external display.
+    nonisolated static func cocoaFrame(axOrigin: CGPoint, size: CGSize, primaryScreenHeight: CGFloat) -> NSRect {
+        NSRect(x: axOrigin.x, y: primaryScreenHeight - axOrigin.y - size.height, width: size.width, height: size.height)
+    }
+
+    /// Height of the primary display, the reference of both coordinate systems.
+    private static func primaryScreenHeight() -> CGFloat? {
+        let screens = NSScreen.screens
+        return (screens.first { $0.frame.origin == .zero } ?? screens.first)?.frame.height
     }
 
     // MARK: - Position Calculation
