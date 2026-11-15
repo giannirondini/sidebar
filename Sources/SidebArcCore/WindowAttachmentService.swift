@@ -13,6 +13,8 @@ protocol WindowAttachmentServiceDelegate: AnyObject {
     func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool)
     func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService)
     func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService)
+    /// Width of the attached sidebar (the user's, kept within the window's limits).
+    func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat
 }
 
 @MainActor
@@ -28,7 +30,11 @@ final class WindowAttachmentService {
     private var appObserver: AXObserver?
     private var appObserverPid: pid_t?
     private var isEnabled: Bool = false
-    private var currentBrowserBundleId: String?
+    /// Browsers the sidebar attaches to (lowercased bundle ids): every profile's
+    /// browser and the global default (`attachmentBrowserIds`).
+    private var browserBundleIds: Set<String> = []
+    /// The one it follows now: the frontmost browser in `browserBundleIds`.
+    private var attachedBundleId: String?
     private var sidebarPosition: SidebarPosition = .right
     private var lastFrontmostBundleId: String?
 
@@ -50,27 +56,40 @@ final class WindowAttachmentService {
 
     // Smooth animation using NSAnimationContext
     private var isAnimating: Bool = false
-    private let animationDuration: TimeInterval = 0.12 // 120ms smooth animation
 
     private init() {}
 
     // MARK: - Public Interface
 
-    func enable(browserBundleId: String, position: SidebarPosition) {
+    func enable(browserBundleIds: [String], position: SidebarPosition) {
         guard checkAccessibilityPermissions() else {
             print("WindowAttachmentService: Accessibility permissions not granted")
             requestAccessibilityPermissions()
             return
         }
 
-        print("WindowAttachmentService: Enabling attachment to \(browserBundleId), position: \(position)")
+        print("WindowAttachmentService: Enabling attachment to \(browserBundleIds), position: \(position)")
 
-        self.currentBrowserBundleId = browserBundleId
+        self.browserBundleIds = Set(browserBundleIds.map { $0.lowercased() })
         self.sidebarPosition = position
         self.isEnabled = true
 
         setupWorkspaceObservers()
         setupScreenChangeObserver()
+        attachToBrowser()
+    }
+
+    /// Replaces the set of browsers (profiles or the default browser changed). A
+    /// no-op when it is the same set; if the followed browser left the set, the
+    /// sidebar hides until a browser in the set comes to the front.
+    func updateBrowsers(_ bundleIds: [String]) {
+        let next = Set(bundleIds.map { $0.lowercased() })
+        guard isEnabled, next != browserBundleIds else { return }
+        browserBundleIds = next
+        if let attachedBundleId, !next.contains(attachedBundleId) {
+            delegate?.attachmentServiceShouldHideWindow(self)
+            detachFromBrowser()
+        }
         attachToBrowser()
     }
 
@@ -90,7 +109,8 @@ final class WindowAttachmentService {
 
         browserApp = nil
         browserWindowElement = nil
-        currentBrowserBundleId = nil
+        browserBundleIds = []
+        attachedBundleId = nil
         lastBrowserFrame = nil
         lastSidebarFrame = nil
         lastFrontmostBundleId = nil
@@ -110,15 +130,68 @@ final class WindowAttachmentService {
 
     // MARK: - Browser Window Discovery
 
+    // MARK: - Decisions (pure, tested)
+
+    /// The browsers to attach to: each profile's browser (an uninstalled one falls
+    /// back like `BrowserManager.resolveTarget`) and the global default; per-link
+    /// overrides are not included. Unique, compared case-insensitively, in order.
+    static func attachmentBrowserIds(
+        profiles: [Profile],
+        globalDefault: String?,
+        installed: (String) -> Bool
+    ) -> [String] {
+        let candidates = profiles.map {
+            BrowserManager.resolveTarget(link: nil, profile: $0, globalDefault: globalDefault, installed: installed).bundleId
+        } + [globalDefault]
+        var seen = Set<String>()
+        return candidates.compactMap { $0 }.filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    enum ActivationDecision: Equatable {
+        /// A browser in the set came to the front: attach to it.
+        case attach
+        /// SidebArc itself came to the front right after a browser in the set (a
+        /// click on the sidebar): stay visible.
+        case keepVisible
+        case hide
+    }
+
+    nonisolated static func activationDecision(
+        activated: String?,
+        previous: String?,
+        ownBundleId: String?,
+        browsers: Set<String>
+    ) -> ActivationDecision {
+        func isBrowser(_ id: String?) -> Bool { id.map { browsers.contains($0.lowercased()) } ?? false }
+        if isBrowser(activated) { return .attach }
+        if let activated, activated == ownBundleId {
+            return isBrowser(previous) ? .keepVisible : .hide
+        }
+        return .hide
+    }
+
+    private func isAttachable(_ bundleId: String?) -> Bool {
+        bundleId.map { browserBundleIds.contains($0.lowercased()) } ?? false
+    }
+
+    /// Drops the followed browser's window and app observers.
+    private func detachFromBrowser() {
+        cleanupObservers()
+        cleanupAppObserver()
+        browserApp = nil
+        browserWindowElement = nil
+        attachedBundleId = nil
+    }
+
     private func findFrontmostBrowserWindow(activeApp: NSRunningApplication? = nil) -> AXUIElement? {
-        guard let bundleId = currentBrowserBundleId else { return nil }
+        guard let bundleId = attachedBundleId else { return nil }
 
         let app: NSRunningApplication
         if let activeApp = activeApp {
             app = activeApp
         } else {
             guard let active = NSWorkspace.shared.runningApplications.first(where: {
-                $0.bundleIdentifier == bundleId && $0.isActive
+                $0.bundleIdentifier?.lowercased() == bundleId && $0.isActive
             }) else {
                 return nil
             }
@@ -303,8 +376,8 @@ final class WindowAttachmentService {
         let frameChanged = lastBrowserFrame != browserFrame
         lastBrowserFrame = browserFrame
 
-        // Get current SidebArc window width (user may have resized it)
-        let sidebarWidth: CGFloat = 340 // Default width, will be updated by delegate if needed
+        // The user's width (they may have resized the attached sidebar)
+        let sidebarWidth = delegate?.attachmentServiceSidebarWidth(self) ?? ThemeConstants.Sizing.attachedSidebarDefaultWidth
 
         // Calculate new SidebArc frame
         guard let newFrame = calculateSidebarFrame(browserFrame: browserFrame, sidebarWidth: sidebarWidth) else {
@@ -326,30 +399,30 @@ final class WindowAttachmentService {
 
     // MARK: - Browser Attachment
 
+    /// Attaches to the frontmost app if it is a browser in the set, switching from
+    /// the previously followed browser when it is a different one.
     private func attachToBrowser() {
-        guard let bundleId = currentBrowserBundleId else {
-            print("WindowAttachmentService: No browser bundle ID configured")
+        guard !browserBundleIds.isEmpty else {
+            print("WindowAttachmentService: No browsers configured")
             return
         }
 
-        // Check if browser is running
-        guard BrowserManager.isRunning(bundleId: bundleId) else {
-            print("WindowAttachmentService: Browser not running")
-            delegate?.attachmentServiceShouldHideWindow(self)
-            return
-        }
-
-        // Check if browser is active (frontmost)
         guard let frontmost = BrowserManager.frontmostApp() else {
             print("WindowAttachmentService: Could not determine frontmost app")
             delegate?.attachmentServiceShouldHideWindow(self)
             return
         }
 
-        guard frontmost.bundleIdentifier == bundleId else {
-            print("WindowAttachmentService: Browser not active")
+        guard isAttachable(frontmost.bundleIdentifier), let frontmostId = frontmost.bundleIdentifier?.lowercased() else {
+            print("WindowAttachmentService: No attachable browser active")
             delegate?.attachmentServiceShouldHideWindow(self)
             return
+        }
+
+        if attachedBundleId != frontmostId {
+            // Another browser of the set: drop the old one's observers first.
+            detachFromBrowser()
+            attachedBundleId = frontmostId
         }
 
         // Setup app-level observer to detect window focus changes within the browser
@@ -499,27 +572,26 @@ final class WindowAttachmentService {
                 guard let self = self else { return }
 
                 let bundleId = app.bundleIdentifier
+                let ownBundleId = Bundle.main.bundleIdentifier
 
-                if bundleId == self.currentBrowserBundleId {
-                    // Browser became active - attach and show
-                    print("WindowAttachmentService: Browser activated, attaching")
+                switch Self.activationDecision(
+                    activated: bundleId,
+                    previous: self.lastFrontmostBundleId,
+                    ownBundleId: ownBundleId,
+                    browsers: self.browserBundleIds
+                ) {
+                case .attach:
+                    print("WindowAttachmentService: Browser \(bundleId ?? "?") activated, attaching")
                     self.lastFrontmostBundleId = bundleId
                     self.attachToBrowser()
-                } else if bundleId == Bundle.main.bundleIdentifier {
-                    // SidebArc itself activated
-                    // If the previous app was the browser, keep SidebArc visible
-                    // This handles clicking between browser and SidebArc
-                    if self.lastFrontmostBundleId == self.currentBrowserBundleId {
-                        print("WindowAttachmentService: \(AppIdentity.displayName) activated, but browser was previous - keeping visible")
-                        return
+                case .keepVisible:
+                    // Clicking between the browser and the sidebar.
+                    print("WindowAttachmentService: \(AppIdentity.displayName) activated after a browser - keeping visible")
+                case .hide:
+                    print("WindowAttachmentService: Non-browser app activated - hiding")
+                    if bundleId != ownBundleId {
+                        self.lastFrontmostBundleId = bundleId
                     }
-                    // If previous app was not the browser, hide SidebArc
-                    print("WindowAttachmentService: \(AppIdentity.displayName) activated from non-browser app - hiding")
-                    self.delegate?.attachmentServiceShouldHideWindow(self)
-                } else {
-                    // Different app became active - hide SidebArc
-                    print("WindowAttachmentService: Different app activated - hiding")
-                    self.lastFrontmostBundleId = bundleId
                     self.delegate?.attachmentServiceShouldHideWindow(self)
                 }
             }
@@ -537,41 +609,22 @@ final class WindowAttachmentService {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
 
-                if app.bundleIdentifier == self.currentBrowserBundleId {
-                    // Skip cleanup if the browser is still running — the terminated
-                    // process is likely a short-lived instance spawned by Process()
-                    // when opening a URL with a browser profile.
-                    guard !BrowserManager.isRunning(bundleId: self.currentBrowserBundleId ?? "") else {
+                if let attached = self.attachedBundleId, app.bundleIdentifier?.lowercased() == attached {
+                    // Skip cleanup if the browser is still running: the terminated
+                    // process is likely a short-lived instance opened for a browser
+                    // profile.
+                    guard !NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier?.lowercased() == attached }) else {
                         return
                     }
-                    // Browser quit - hide and cleanup
+                    // Followed browser quit - hide and clean up
                     self.delegate?.attachmentServiceShouldHideWindow(self)
-                    self.cleanupObservers()
-                    self.cleanupAppObserver()
+                    self.detachFromBrowser()
                 }
             }
         }
 
-        let launchedObserver = notificationCenter.addObserver(
-            forName: NSWorkspace.didLaunchApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
-                return
-            }
-
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-
-                if app.bundleIdentifier == self.currentBrowserBundleId {
-                    // Browser launched - wait for activation
-                    // Will be handled by didActivateApplicationNotification
-                }
-            }
-        }
-
-        workspaceObservers = [activatedObserver, terminatedObserver, launchedObserver]
+        // A browser that launches is attached when it activates (above).
+        workspaceObservers = [activatedObserver, terminatedObserver]
     }
 
     private func cleanupWorkspaceObservers() {

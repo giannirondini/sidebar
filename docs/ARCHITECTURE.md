@@ -47,9 +47,9 @@ The model (`AppState` → `Profile`, `Workspace` → `Node`) and schema migratio
 | List | `NodeCollectionViewItem`, `NodeRowView`, `ListFlowLayout`, `NodeFiltering`, `ScheduledLinkFiltering`, `Components/ScheduledLinksAccordion/` |
 | Components | `Components/Base/` (`BaseControl`, `BaseView`, `InlineEditableTextField`, `DropIndicatorView`, `FlippedContentView`), `Components/Spaces/` (`SpaceBarView`, `SpaceHeaderView`, `SpaceIconView`, `SpacePageStage`, `SpaceColorPanel`), `Components/PinnedTabs/` (Favorites grid), `Components/Menus/` (`SpaceMenu`, `BrowserMenus`), `Components/Settings/` (`ProfileSettingsView`, `AutomationPermissionView`, `WorkspaceContextMenuCollectionView`), `Components/IconPicker/`, `Components/Buttons/`, `Components/Inputs/ShortcutRecorderView`, `Components/Tooltip/`; at the top level `IconTitleButton`, `CustomTextButton`, `CustomToggle`, `SearchBarView`, `SidebarPositionSelector`, `WorkspaceCollectionViewItem`, `WorkspaceRowView` |
 | Browsers and tabs | `BrowserManager` (`resolveTarget`, opening, profile detection), `Services/TabFocus`, `Services/TabFocusService`, `Services/TabLocator`, `Utilities/TabURLMatcher`, `Utilities/URLNormalization` |
-| Services | `FaviconService`, `LinkTitleService`, `WindowAttachmentService` (follows the browser window over Accessibility), `GlobalHotkeyService`, `SwipeGestureService`, `Services/SchedulerService`, `Services/SchedulePresets`, `ArcImportService`, `ChromeImportService` |
+| Services | `FaviconService`, `LinkTitleService`, `WindowAttachmentService` (follows the frontmost profile browser's window over Accessibility), `GlobalHotkeyService`, `SwipeGestureService`, `Services/SchedulerService`, `Services/SchedulePresets`, `ArcImportService`, `ChromeImportService` |
 | Notes | `Notes/NoteStorage` (`Notes/*.md`), `Notes/NoteServer` (token-authenticated loopback HTTP server for the note editor and the agent API), `NoteEditor/` (the editor's HTML/JS, copied into the bundle's resources) |
-| Utilities | `Utilities/Theme/ThemeConstants`, `Utilities/ClosureMenuItem`, `Utilities/SpaceSwipe` |
+| Utilities | `Utilities/Theme/ThemeConstants`, `Utilities/ClosureMenuItem`, `Utilities/SpaceSwipe`, `Utilities/WindowPlacement` |
 
 ## Key design decisions
 

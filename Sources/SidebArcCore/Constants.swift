@@ -16,6 +16,8 @@ enum UserDefaultsKeys {
     static let alwaysOnTopEnabled = "alwaysOnTopEnabled"
     static let lastSelectedWorkspaceId = "lastSelectedWorkspaceId"
     static let mainWindowSize = "mainWindowSize"
+    /// Width of the sidebar attached to a browser, set by resizing it while attached.
+    static let attachedSidebarWidth = "attachedSidebarWidth"
     static let sidebarAttachmentEnabled = "sidebarAttachmentEnabled"
     static let sidebarPosition = "sidebarPosition"
     static let lastArcImportDate = "lastArcImportDate"

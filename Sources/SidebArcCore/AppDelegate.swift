@@ -31,6 +31,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let noteServer = NoteServer(model: model)
         noteServer.start()
         mainViewController.noteServer = noteServer
+        mainViewController.onModelReload = { [weak self] in self?.refreshAttachmentBrowsers() }
         self.noteServer = noteServer
         publishAgentEndpoint(noteServer: noteServer)
 
@@ -154,6 +155,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
+    }
+
+    /// While attached, the user's resize sets the attached width (kept across launches);
+    /// the sidebar is then placed flush with the browser again.
+    public func windowDidEndLiveResize(_ notification: Notification) {
+        guard isAttachmentMode, let window = notification.object as? NSWindow else { return }
+        UserDefaults.standard.set(Double(window.frame.width), forKey: UserDefaultsKeys.attachedSidebarWidth)
+        WindowAttachmentService.shared.forceUpdate()
     }
 
     public func windowDidResize(_ notification: Notification) {
@@ -405,7 +414,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let positionString = UserDefaults.standard.string(forKey: UserDefaultsKeys.sidebarPosition) ?? "right"
         let position: SidebarPosition = positionString == "left" ? .left : .right
 
-        guard let browserBundleId = BrowserManager.resolveDefaultBrowserBundleId() else {
+        let browserIds = attachmentBrowserIds()
+        guard !browserIds.isEmpty else {
             print("AppDelegate: No browser bundle ID available for attachment")
             return
         }
@@ -418,7 +428,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         isAttachmentMode = true
         updateWindowConstraints()
 
-        WindowAttachmentService.shared.enable(browserBundleId: browserBundleId, position: position)
+        WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position)
+    }
+
+    /// Every profile's browser and the global default (3b.1 option B).
+    private func attachmentBrowserIds() -> [String] {
+        WindowAttachmentService.attachmentBrowserIds(
+            profiles: mainViewController?.model.profiles ?? [],
+            globalDefault: BrowserManager.resolveDefaultBrowserBundleId(),
+            installed: { BrowserManager.isInstalled(bundleId: $0) }
+        )
+    }
+
+    /// Profiles or the default browser changed: attach to the new set (no-op if unchanged).
+    private func refreshAttachmentBrowsers() {
+        guard isAttachmentMode else { return }
+        WindowAttachmentService.shared.updateBrowsers(attachmentBrowserIds())
     }
 
     private func updateWindowConstraints() {
@@ -489,16 +514,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func handleBrowserChanged(_ notification: Notification) {
-        guard isAttachmentMode,
-              let bundleId = notification.userInfo?["bundleId"] as? String else {
-            return
-        }
-
-        let positionString = UserDefaults.standard.string(forKey: UserDefaultsKeys.sidebarPosition) ?? "right"
-        let position: SidebarPosition = positionString == "left" ? .left : .right
-
-        WindowAttachmentService.shared.disable()
-        WindowAttachmentService.shared.enable(browserBundleId: bundleId, position: position)
+        refreshAttachmentBrowsers()
     }
 
     @objc private func handleAlwaysOnTopSettingChanged(_ notification: Notification) {
@@ -528,7 +544,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         if enabled {
             // Enable attachment
-            guard let browserBundleId = BrowserManager.resolveDefaultBrowserBundleId() else {
+            let browserIds = attachmentBrowserIds()
+            guard !browserIds.isEmpty else {
                 print("AppDelegate: No browser bundle ID available for attachment")
                 return
             }
@@ -542,7 +559,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
             isAttachmentMode = true
             updateWindowConstraints()
-            WindowAttachmentService.shared.enable(browserBundleId: browserBundleId, position: position)
+            WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position)
         } else {
             // Disable attachment
             WindowAttachmentService.shared.disable()
@@ -557,16 +574,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     @objc private func handleSidebarPositionChanged(_ notification: Notification) {
         guard isAttachmentMode,
-              let positionString = notification.userInfo?["position"] as? String,
-              let browserBundleId = BrowserManager.resolveDefaultBrowserBundleId() else {
+              let positionString = notification.userInfo?["position"] as? String else {
             return
         }
+        let browserIds = attachmentBrowserIds()
+        guard !browserIds.isEmpty else { return }
 
         let position: SidebarPosition = positionString == "left" ? .left : .right
 
         // Re-enable with new position
         WindowAttachmentService.shared.disable()
-        WindowAttachmentService.shared.enable(browserBundleId: browserBundleId, position: position)
+        WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position)
     }
 
     @objc private func handleToggleSidebarShortcutChanged() {
@@ -613,7 +631,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         // Apply frame with smooth animation
         if animated {
             NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.12
+                context.duration = ThemeConstants.Animation.attachmentDuration
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 window.animator().setFrame(frame, display: true)
             })
@@ -625,6 +643,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService) {
         guard let window, window.isVisible else { return }
         window.orderOut(nil)
+    }
+
+    func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat {
+        let stored = UserDefaults.standard.double(forKey: UserDefaultsKeys.attachedSidebarWidth)
+        let width = stored > 0 ? CGFloat(stored) : ThemeConstants.Sizing.attachedSidebarDefaultWidth
+        guard let window else { return width }
+        return min(max(width, window.minSize.width), window.maxSize.width)
     }
 
     func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService) {

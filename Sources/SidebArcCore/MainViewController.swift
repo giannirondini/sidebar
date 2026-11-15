@@ -3,6 +3,9 @@ import AppKit
 @MainActor
 final class MainViewController: NSViewController {
     let model: AppModel
+    /// Called after every model reload (e.g. to refresh which browsers the sidebar
+    /// attaches to when a profile's browser changes).
+    var onModelReload: (() -> Void)?
     var noteServer: NoteServer?
 
     // Coordinators and child view controllers
@@ -439,6 +442,7 @@ final class MainViewController: NSViewController {
     // MARK: - Data Reload
 
     func reloadData() {
+        defer { onModelReload?() }
         // Cancel any in-progress inline rename if node is deleted
         if let renameId = nodeListViewController.inlineRenameNodeId,
            model.nodeById(renameId) == nil {

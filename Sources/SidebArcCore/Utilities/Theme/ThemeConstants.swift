@@ -242,6 +242,9 @@ struct ThemeConstants {
         /// Standard row height (44pt) - For list and table rows
         static let rowHeight: CGFloat = 44
 
+        /// Width of the sidebar attached to a browser until the user resizes it (340pt)
+        static let attachedSidebarDefaultWidth: CGFloat = 340
+
         /// Height of a full-width Settings control (`SettingsActionButton`, the browser picker; 36pt)
         static let settingsButtonHeight: CGFloat = 36
 
@@ -316,6 +319,9 @@ struct ThemeConstants {
 
         /// Slow animation duration (0.3s) - Deliberate, noticeable animations
         static let durationSlow: TimeInterval = 0.3
+
+        /// The attached sidebar following its browser window (0.12s)
+        static let attachmentDuration: TimeInterval = 0.12
 
         /// How often a colour dragged in the colour panel is applied (and saved) while
         /// the drag goes on (0.15s); the last value is always applied.
