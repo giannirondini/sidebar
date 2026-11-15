@@ -99,10 +99,16 @@ function readEndpoint() {
   } catch (e) {
     fail('endpoint_corrupt', 'agent-endpoint.json is not valid JSON', { endpointFile: ENDPOINT_FILE });
   }
-  if (!parsed || typeof parsed.port !== 'number') {
-    fail('endpoint_corrupt', 'agent-endpoint.json missing port', { endpointFile: ENDPOINT_FILE });
+  if (!parsed || !Number.isInteger(parsed.port) || parsed.port < 1 || parsed.port > 65535) {
+    fail('endpoint_corrupt', 'agent-endpoint.json missing a valid port', { endpointFile: ENDPOINT_FILE });
   }
-  return { host: parsed.host || '127.0.0.1', port: parsed.port };
+  if (parsed.host !== '127.0.0.1') {
+    fail('endpoint_corrupt', 'agent-endpoint.json has an invalid host', { endpointFile: ENDPOINT_FILE });
+  }
+  if (typeof parsed.token !== 'string' || !/^[0-9a-f]{64}$/.test(parsed.token)) {
+    fail('endpoint_corrupt', 'agent-endpoint.json missing a valid access token', { endpointFile: ENDPOINT_FILE });
+  }
+  return { host: parsed.host, port: parsed.port, token: parsed.token };
 }
 
 async function readStdin() {
@@ -128,9 +134,9 @@ function fail(code, message, extra = {}) {
 // ---------- HTTP ----------
 
 async function request(method, route, body) {
-  const { host, port } = readEndpoint();
+  const { host, port, token } = readEndpoint();
   const url = `http://${host}:${port}${route}`;
-  const init = { method, headers: {} };
+  const init = { method, headers: { Authorization: `Bearer ${token}` } };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = typeof body === 'string' ? body : JSON.stringify(body);

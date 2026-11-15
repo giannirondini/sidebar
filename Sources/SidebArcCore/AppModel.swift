@@ -208,6 +208,11 @@ final class AppModel {
         persist()
     }
 
+    func applyChromeImport(_ workspace: ImportWorkspace) {
+        let id = createWorkspace(name: workspace.name, colorId: workspace.colorId)
+        updateWorkspace(id: id) { $0.items = workspace.nodes }
+    }
+
     // MARK: - Data export and import (Phase 3b.3)
 
     /// Writes an export folder of the saved data inside `parent` (`DataTransfer.export`).
@@ -423,7 +428,8 @@ final class AppModel {
 
     @discardableResult
     func addLink(urlString: String, title: String, workspaceId: UUID, parentId: UUID?) -> UUID? {
-        guard state.workspaces.contains(where: { $0.id == workspaceId }) else { return nil }
+        guard state.workspaces.contains(where: { $0.id == workspaceId }),
+              BrowserManager.validatedLinkURL(from: urlString) != nil else { return nil }
         let link = Link(id: UUID(), title: title, url: urlString, faviconPath: nil)
         updateWorkspace(id: workspaceId) { workspace in
             insertNode(.link(link), parentId: parentId, index: nil, nodes: &workspace.items)
@@ -632,17 +638,23 @@ final class AppModel {
         }
     }
 
-    func updateLinkUrl(id: UUID, newUrl: String) {
+    @discardableResult
+    func updateLinkUrl(id: UUID, newUrl: String) -> Bool {
+        let trimmed = newUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard BrowserManager.validatedLinkURL(from: trimmed) != nil,
+              let node = nodeAcrossWorkspaces(id: id),
+              case .link = node else { return false }
         updateNode(id: id) { node in
             switch node {
             case .link(var link):
-                link.url = newUrl
+                link.url = trimmed
                 link.faviconPath = nil
                 node = .link(link)
             case .folder, .note:
                 break
             }
         }
+        return true
     }
 
     func updateLinkTitleIfDefault(id: UUID, newTitle: String) -> Bool {
@@ -711,6 +723,7 @@ final class AppModel {
 
     enum AddFavoriteError: Error, Equatable {
         case profileNotFound
+        case invalidURL
         case full
         /// A favorite with the same normalised URL exists in that profile.
         case duplicate(existingId: UUID)
@@ -718,6 +731,9 @@ final class AppModel {
 
     /// Adds a new link straight to a profile's Favorites.
     func addFavorite(profileId: UUID, urlString: String, title: String) -> Result<UUID, AddFavoriteError> {
+        guard BrowserManager.validatedLinkURL(from: urlString) != nil else {
+            return .failure(.invalidURL)
+        }
         guard let profileIndex = state.profiles.firstIndex(where: { $0.id == profileId }) else {
             return .failure(.profileNotFound)
         }

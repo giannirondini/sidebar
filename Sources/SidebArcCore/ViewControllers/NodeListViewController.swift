@@ -1100,6 +1100,14 @@ extension NodeListViewController: NSMenuDelegate {
         if response == .alertFirstButtonReturn {
             let newUrl = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !newUrl.isEmpty, newUrl != link.url else { return }
+            guard BrowserManager.validatedLinkURL(from: newUrl) != nil else {
+                let errorAlert = NSAlert()
+                errorAlert.messageText = "Invalid URL"
+                errorAlert.informativeText = "Links must use HTTP or HTTPS and include a host."
+                errorAlert.addButton(withTitle: "OK")
+                errorAlert.runModal()
+                return
+            }
             onLinkUrlEdited?(nodeId, newUrl)
         }
     }

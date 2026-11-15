@@ -68,6 +68,40 @@ struct ChromeImportTests {
         }
     }
 
+    @Test("Legacy bookmarks are preserved but cannot be opened")
+    func testUnsupportedURLSchemesArePreserved() async throws {
+        let html = createBookmarksHTML(body: """
+            <DT><A HREF="--renderer-cmd-prefix=/tmp/x">Flag</A>
+            <DT><A HREF="file:///tmp/run.command">File</A>
+            <DT><A HREF="https://example.com">Web</A>
+        """)
+        let fileURL = try writeTempFile(html)
+        defer { cleanup(fileURL) }
+
+        let result = await ChromeImportService.shared.importFromChrome(fileURL: fileURL)
+
+        switch result {
+        case .success(let importResult):
+            #expect(importResult.linksImported == 3)
+            let store = DataStore(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+            let model = AppModel(store: store)
+            model.showSettings()
+            let profileId = model.currentProfile.id
+            model.applyChromeImport(importResult.workspace)
+            #expect(model.isSettingsShown)
+            #expect(model.currentWorkspace.profileId == profileId)
+            let restored = AppModel(store: store).currentWorkspace.items
+            let urls = restored.compactMap { node -> String? in
+                guard case .link(let link) = node else { return nil }
+                return link.url
+            }
+            #expect(urls == ["--renderer-cmd-prefix=/tmp/x", "file:///tmp/run.command", "https://example.com"])
+            #expect(urls.prefix(2).allSatisfy { BrowserManager.validatedLinkURL(from: $0) == nil })
+        case .failure(let error):
+            Issue.record("Import should succeed: \(error)")
+        }
+    }
+
     // MARK: - Folder with Nested Links
 
     @Test("Folder with nested links preserves hierarchy")

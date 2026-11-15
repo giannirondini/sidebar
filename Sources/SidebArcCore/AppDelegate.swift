@@ -1,7 +1,10 @@
 import AppKit
+import os
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WindowAttachmentServiceDelegate, GlobalHotkeyServiceDelegate {
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "app")
+
     public override init() {
         super.init()
     }
@@ -28,12 +31,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let mainViewController = MainViewController(model: model)
         self.mainViewController = mainViewController
 
-        let noteServer = NoteServer(model: model)
-        noteServer.start()
-        mainViewController.noteServer = noteServer
-        mainViewController.onModelReload = { [weak self] in self?.refreshAttachmentBrowsers() }
-        self.noteServer = noteServer
-        publishAgentEndpoint(noteServer: noteServer)
+        do {
+            let noteServer = try NoteServer(model: model)
+            noteServer.start()
+            mainViewController.noteServer = noteServer
+            mainViewController.onModelReload = { [weak self] in self?.refreshAttachmentBrowsers() }
+            self.noteServer = noteServer
+            publishAgentEndpoint(noteServer: noteServer)
+        } catch {
+            logger.error("NoteServer could not generate an access token: \(error.localizedDescription, privacy: .public)")
+        }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 340, height: 680),
@@ -129,31 +136,51 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         noteServer?.stop()
         if let agentEndpointFileURL {
-            try? FileManager.default.removeItem(at: agentEndpointFileURL)
+            do {
+                if FileManager.default.fileExists(atPath: agentEndpointFileURL.path) {
+                    try FileManager.default.removeItem(at: agentEndpointFileURL)
+                }
+            } catch {
+                logger.error("Could not remove agent endpoint: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
     private func publishAgentEndpoint(noteServer: NoteServer) {
-        let url = DataStore().agentEndpointFileURL()
+        let store = DataStore()
+        let url = store.agentEndpointFileURL()
         agentEndpointFileURL = url
-        try? FileManager.default.removeItem(at: url)
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        } catch {
+            logger.error("Could not remove stale agent endpoint: \(error.localizedDescription, privacy: .public)")
+            return
+        }
 
-        Task { @MainActor [weak noteServer] in
+        Task { @MainActor [weak self, weak noteServer] in
             for _ in 0..<200 {
-                if let port = noteServer?.port, port > 0 {
+                guard let noteServer else { return }
+                if noteServer.port > 0 {
                     let payload: [String: Any] = [
-                        "port": Int(port),
+                        "port": Int(noteServer.port),
                         "host": "127.0.0.1",
+                        "token": noteServer.token,
                         // Agent API version, not the data.json schema. 2 = profiles and favorites.
                         "schemaVersion": 2
                     ]
-                    if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) {
-                        try? data.write(to: url, options: [.atomic])
+                    do {
+                        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+                        try store.writeAgentEndpoint(data)
+                    } catch {
+                        self?.logger.error("Could not write agent endpoint: \(error.localizedDescription, privacy: .public)")
                     }
                     return
                 }
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
+            self?.logger.error("NoteServer did not become ready; agent endpoint was not published")
         }
     }
 

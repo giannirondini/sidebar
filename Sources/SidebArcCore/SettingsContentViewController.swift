@@ -1032,13 +1032,7 @@ final class SettingsContentViewController: NSViewController {
     private func applyChromeImport(_ result: ChromeImportResult) {
         guard let appModel = appModel else { return }
 
-        // Create the workspace (this internally selects it for node insertion)
-        _ = appModel.createWorkspace(name: result.workspace.name, colorId: result.workspace.colorId)
-
-        // Add all nodes to the new workspace
-        for node in result.workspace.nodes {
-            addNodeToWorkspace(node, parentId: nil, appModel: appModel)
-        }
+        appModel.applyChromeImport(result.workspace)
 
         // Don't call selectWorkspace — it closes Settings and navigates away.
         // The new workspace is already selected; when the user leaves settings they'll see it.
@@ -1187,21 +1181,6 @@ final class SettingsContentViewController: NSViewController {
 
     private static func counted(_ count: Int, _ singular: String, _ plural: String) -> String {
         "\(count) \(count == 1 ? singular : plural)"
-    }
-
-    private func addNodeToWorkspace(_ node: Node, parentId: UUID?, appModel: AppModel) {
-        switch node {
-        case .link(let link):
-            appModel.addLink(urlString: link.url, title: link.title, parentId: parentId)
-        case .note:
-            break
-        case .folder(let folder):
-            let folderId = appModel.addFolder(name: folder.name, parentId: parentId, isExpanded: false)
-            // Recursively add children
-            for child in folder.children {
-                addNodeToWorkspace(child, parentId: folderId, appModel: appModel)
-            }
-        }
     }
 
     private func showImportStatus(_ message: String, isError: Bool) {
@@ -1444,7 +1423,7 @@ final class SettingsContentViewController: NSViewController {
                 detectedBrowserProfiles: detection.profiles,
                 browserProfilesDenied: detection == .accessDenied,
                 resolvedBrowserName: resolved.flatMap { BrowserManager.appName(bundleId: $0) },
-                browserIsMissing: profile.browserBundleId.map { !BrowserManager.isInstalled(bundleId: $0) } ?? false,
+                browserIsMissing: profile.browserBundleId.map { !BrowserManager.isBrowser(bundleId: $0) } ?? false,
                 tabFocusSupported: resolved.map { TabLocators.isSupported(bundleId: $0) } ?? false,
                 tabFocusAmbiguous: TabFocus.isAmbiguous(target: target, profileTargets: profileTargets)
             )

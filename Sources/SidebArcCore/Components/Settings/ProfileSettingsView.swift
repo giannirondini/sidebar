@@ -192,7 +192,7 @@ private final class ProfileRowView: NSView {
         }
         if let configured = row.profile.browserBundleId {
             if row.browserIsMissing {
-                browserPopup.addItem(withTitle: "\(configured) (not installed)")
+                browserPopup.addItem(withTitle: "\(configured) (not available)")
                 browserPopup.lastItem?.representedObject = configured
                 browserPopup.select(browserPopup.lastItem)
             } else if let index = browserPopup.itemArray.firstIndex(where: {
@@ -209,7 +209,7 @@ private final class ProfileRowView: NSView {
         var arranged: [NSView] = [header, container(for: browserPopup)]
 
         if row.browserIsMissing {
-            let warning = NSTextField(labelWithString: "Not installed on this Mac: links open in the default browser.")
+            let warning = NSTextField(labelWithString: "Not available as a browser on this Mac: links open in the default browser.")
             warning.font = NSFont.systemFont(ofSize: 11)
             warning.textColor = .systemRed
             warning.lineBreakMode = .byWordWrapping

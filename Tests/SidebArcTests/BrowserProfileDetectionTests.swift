@@ -58,5 +58,16 @@ import Testing
         #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: chrome, profileDir: "")) == nil)
         #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: "org.mozilla.firefox", profileDir: "work")) == nil)
         #expect(BrowserManager.launchArguments(url: url, target: BrowserTarget(bundleId: nil, profileDir: "Profile 1")) == nil)
+
+        let flagLike = try #require(URL(string: "--renderer-cmd-prefix=/tmp/x"))
+        #expect(BrowserManager.launchArguments(url: flagLike, target: BrowserTarget(bundleId: chrome, profileDir: "Profile 1")) == nil)
+    }
+
+    @Test func linkURLsMustBeHTTPOrHTTPSWithAHost() {
+        #expect(BrowserManager.validatedLinkURL(from: "https://example.com") != nil)
+        #expect(BrowserManager.validatedLinkURL(from: "HTTP://example.com/path") != nil)
+        #expect(BrowserManager.validatedLinkURL(from: "--remote-debugging-port=9222") == nil)
+        #expect(BrowserManager.validatedLinkURL(from: "file:///tmp/run.command") == nil)
+        #expect(BrowserManager.validatedLinkURL(from: "https:example.com") == nil)
     }
 }

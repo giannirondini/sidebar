@@ -202,6 +202,29 @@ import Testing
         }
     }
 
+    @Test func testUnsupportedURLSchemeIsPreserved() async throws {
+        let items = [
+            createLinkItem(
+                id: "link1",
+                parentID: "container1",
+                savedTitle: "Local file",
+                savedURL: "file:///tmp/run.command"
+            )
+        ]
+        let result = try await importJSON(createArcJSON(
+            spaces: [createSpace(id: "space1", title: "Home")],
+            items: items
+        ))
+
+        #expect(result.linksImported == 1)
+        guard case .link(let link) = try #require(result.workspaces.first?.nodes.first) else {
+            Issue.record("Expected imported link")
+            return
+        }
+        #expect(link.url == "file:///tmp/run.command")
+        #expect(BrowserManager.validatedLinkURL(from: link.url) == nil)
+    }
+
     @Test func testFolderWithNullTitle() async throws {
         // Arrange: Create Arc data with a folder that has null title
         let spaces = [

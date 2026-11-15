@@ -284,6 +284,28 @@ import Testing
         #expect(backups.allSatisfy { !$0.hasPrefix("pre-import-") })
     }
 
+    @Test func backupWithLegacyLinkURLsCanBeRestored() throws {
+        let source = try makeSource()
+        let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
+        var state = DataStore.defaultState()
+        let favorite = Link(id: UUID(), title: "Flag", url: "--renderer-cmd-prefix=/tmp/x", faviconPath: nil)
+        let legacy = Link(id: UUID(), title: "File", url: "file:///tmp/run.command", faviconPath: nil)
+        state.profiles[0].favorites = [favorite]
+        state.workspaces[0].items = [.folder(Folder(id: UUID(), name: "Folder", children: [.link(legacy)], isExpanded: true))]
+        let store = DataStore(baseDirectory: macB)
+        store.save(state)
+        let model = AppModel(store: store)
+
+        let backup = try model.applyDataImport(package)
+        try model.applyDataImport(DataTransfer.readPackage(at: backup))
+
+        let restored = AppModel(store: store).state
+        #expect(restored.profiles[0].favorites.first?.url == favorite.url)
+        #expect(link(legacy.id, in: restored)?.url == legacy.url)
+        #expect(BrowserManager.validatedLinkURL(from: favorite.url) == nil)
+        #expect(BrowserManager.validatedLinkURL(from: legacy.url) == nil)
+    }
+
     // MARK: - Pure parts
 
     @Test func remapDropsFaviconsOutsideIconsAndKeepsOtherCustomIcons() {

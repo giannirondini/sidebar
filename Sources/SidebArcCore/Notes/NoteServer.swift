@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import os
+import Security
 
 /// Minimal loopback-only HTTP server that backs the bundled markdown note editor.
 ///
@@ -13,13 +14,15 @@ final class NoteServer {
     private let noteStorage: NoteStorage
     private let resourcesURL: URL?
 
+    let token: String
     private var listener: NWListener?
     private(set) var port: UInt16 = 0
 
-    init(model: AppModel, resourcesURL: URL? = NoteServer.resolveBundledResourcesURL()) {
+    init(model: AppModel, resourcesURL: URL? = NoteServer.resolveBundledResourcesURL()) throws {
         self.model = model
         self.noteStorage = model.noteStorage
         self.resourcesURL = resourcesURL
+        self.token = try Self.generateToken()
         if resourcesURL == nil {
             logger.error("NoteServer could not locate bundled editor resources; note editor will be unavailable")
         }
@@ -71,7 +74,14 @@ final class NoteServer {
 
     func editorURL(noteId: UUID) -> URL? {
         guard port > 0 else { return nil }
-        return URL(string: "http://127.0.0.1:\(port)/?id=\(noteId.uuidString)")
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = "127.0.0.1"
+        components.port = Int(port)
+        components.path = "/"
+        components.queryItems = [URLQueryItem(name: "id", value: noteId.uuidString)]
+        components.fragment = "token=\(token)"
+        return components.url
     }
 
     // MARK: - Connection handling
@@ -180,6 +190,39 @@ final class NoteServer {
             return
         }
 
+        let expectedOrigin = "http://\(expectedHost)"
+        // The editor's authenticated PUTs carry this same-origin header.
+        if let origin = request.headers["origin"], origin != expectedOrigin {
+            if request.path.hasPrefix("/api/") {
+                sendError(status: 403, code: "origin_not_allowed", message: "Cross-origin requests are not allowed", on: connection)
+            } else {
+                sendStatus(403, message: "Origin Not Allowed", on: connection)
+            }
+            return
+        }
+
+        let requiresToken = request.path.hasPrefix("/api/") || request.path.hasPrefix("/editor/")
+        if requiresToken && request.headers["authorization"] != "Bearer \(token)" {
+            if request.path.hasPrefix("/api/") {
+                sendError(status: 401, code: "unauthorized", message: "A valid bearer token is required", on: connection)
+            } else {
+                sendStatus(401, message: "Unauthorized", on: connection)
+            }
+            return
+        }
+
+        if request.path.hasPrefix("/api/"), ["POST", "PATCH", "PUT"].contains(request.method) {
+            let mediaType = request.headers["content-type"]?
+                .split(separator: ";", maxSplits: 1)
+                .first?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard mediaType == "application/json" else {
+                sendError(status: 415, code: "unsupported_media_type", message: "Content-Type must be application/json", on: connection)
+                return
+            }
+        }
+
         if request.method == "GET" && request.path == "/favicon.ico" {
             sendResponse(status: 204, statusMessage: "No Content", contentType: "image/x-icon", body: Data(), on: connection)
             return
@@ -272,6 +315,15 @@ final class NoteServer {
         default:
             sendStatus(404, message: "Not Found", on: connection)
         }
+    }
+
+    private static func generateToken() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     private func noteTitle(id: UUID) -> String? {
@@ -581,6 +633,10 @@ final class NoteServer {
             sendError(status: 400, code: "bad_url", message: "url is required", on: connection)
             return
         }
+        guard BrowserManager.validatedLinkURL(from: url) != nil else {
+            sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+            return
+        }
         let parentId = Self.parseOptionalUUID(json["parent_id"])
         if let result = validateParent(workspaceId: wsId, parentId: parentId, expectFolder: true) {
             switch result {
@@ -621,10 +677,29 @@ final class NoteServer {
             sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
             return
         }
+        if let value = json["url"] {
+            guard let url = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  BrowserManager.validatedLinkURL(from: url) != nil else {
+                sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+                return
+            }
+        }
+        if let value = json["browser_bundle_id"] {
+            if let bundleId = value as? String {
+                let trimmed = bundleId.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, !BrowserManager.isBrowser(bundleId: trimmed) {
+                    sendError(status: 400, code: "bad_browser", message: "browser_bundle_id must identify an installed browser", on: connection)
+                    return
+                }
+            } else if !(value is NSNull) {
+                sendError(status: 400, code: "bad_browser", message: "browser_bundle_id must be an installed browser or null", on: connection)
+                return
+            }
+        }
         if let title = (json["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
             model.renameNode(id: id, newName: title)
         }
-        if let url = (json["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
+        if let url = json["url"] as? String {
             model.updateLinkUrl(id: id, newUrl: url)
         }
         if let value = json["browser_bundle_id"] {
@@ -698,13 +773,29 @@ final class NoteServer {
             sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
             return
         }
+        let updatesBrowser = json["browser_bundle_id"] != nil
+        var browserBundleId: String?
+        if let value = json["browser_bundle_id"] {
+            // A bundle id sets the profile's browser; null (or "") inherits the default browser.
+            if let raw = value as? String {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                browserBundleId = trimmed.isEmpty ? nil : trimmed
+                if let browserBundleId, !BrowserManager.isBrowser(bundleId: browserBundleId) {
+                    sendError(status: 400, code: "bad_browser", message: "browser_bundle_id must identify an installed browser", on: connection)
+                    return
+                }
+            } else if value is NSNull {
+                browserBundleId = nil
+            } else {
+                sendError(status: 400, code: "bad_browser", message: "browser_bundle_id must be an installed browser or null", on: connection)
+                return
+            }
+        }
         if let name = (json["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             model.renameProfile(id: id, newName: name)
         }
-        if let value = json["browser_bundle_id"] {
-            // A bundle id sets the profile's browser; null (or "") inherits the default browser.
-            let bundleId = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            model.setProfileBrowser(id: id, bundleId: (bundleId?.isEmpty ?? true) ? nil : bundleId)
+        if updatesBrowser {
+            model.setProfileBrowser(id: id, bundleId: browserBundleId)
         }
         sendOk([:], on: connection)
     }
@@ -726,6 +817,10 @@ final class NoteServer {
             sendError(status: 400, code: "bad_url", message: "url is required", on: connection)
             return
         }
+        guard BrowserManager.validatedLinkURL(from: url) != nil else {
+            sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+            return
+        }
         let providedTitle = (json["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = (providedTitle?.isEmpty == false) ? providedTitle! : (URL(string: url)?.host ?? url)
         switch model.addFavorite(profileId: profileId, urlString: url, title: title) {
@@ -733,6 +828,8 @@ final class NoteServer {
             sendOk(["id": id.uuidString], on: connection)
         case .failure(.profileNotFound):
             sendError(status: 404, code: "profile_not_found", message: "Profile not found", on: connection)
+        case .failure(.invalidURL):
+            sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
         case .failure(.full):
             sendError(status: 409, code: "favorites_full", message: "Profile already has \(Profile.maxFavorites) favorites", on: connection)
         case .failure(.duplicate(let existingId)):

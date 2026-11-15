@@ -113,6 +113,34 @@ final class DataStore {
         baseDirectory.appendingPathComponent("agent-endpoint.json")
     }
 
+    func writeAgentEndpoint(_ data: Data) throws {
+        ensureDirectories()
+        let endpointURL = agentEndpointFileURL()
+        let temporaryURL = baseDirectory.appendingPathComponent(".agent-endpoint-\(UUID().uuidString).tmp")
+
+        guard fileManager.createFile(
+            atPath: temporaryURL.path,
+            contents: nil,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: temporaryURL.path])
+        }
+
+        do {
+            let handle = try FileHandle(forWritingTo: temporaryURL)
+            try handle.write(contentsOf: data)
+            try handle.close()
+
+            if fileManager.fileExists(atPath: endpointURL.path) {
+                try fileManager.removeItem(at: endpointURL)
+            }
+            try fileManager.moveItem(at: temporaryURL, to: endpointURL)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
     /// Copies data.json into `Backups/` once per session, before this process
     /// first writes to it. Skips the copy when the file is byte-identical to the
     /// newest existing backup so repeated relaunches don't rotate away the last

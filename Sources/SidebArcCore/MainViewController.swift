@@ -707,6 +707,10 @@ final class MainViewController: NSViewController {
 
     @objc private func pasteLink() {
         guard let pasted = NSPasteboard.general.string(forType: .string) else { return }
+        pasteText(pasted)
+    }
+
+    func pasteText(_ pasted: String) {
         let urls = extractUrls(from: pasted)
         if !urls.isEmpty {
             for url in urls {
@@ -798,11 +802,11 @@ final class MainViewController: NSViewController {
         let lower = trimmed.lowercased()
 
         if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
-            return URL(string: trimmed)
+            return BrowserManager.validatedLinkURL(from: trimmed)
         }
 
         if lower.hasPrefix("localhost") {
-            return URL(string: "http://\(trimmed)")
+            return BrowserManager.validatedLinkURL(from: "http://\(trimmed)")
         }
 
         return nil

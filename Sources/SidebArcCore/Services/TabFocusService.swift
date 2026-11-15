@@ -18,7 +18,7 @@ final class TabFocusService {
     private var inFlight: Set<UUID> = []
 
     func open(link: Link, in profile: Profile, allProfiles: [Profile], source: LinkClickSource, invert: Bool) {
-        guard let url = URL(string: link.url) else { return }
+        guard let url = BrowserManager.validatedLinkURL(from: link.url) else { return }
         let target = BrowserManager.resolveTarget(link: link, profile: profile)
         let profileTargets = allProfiles.map { BrowserManager.resolveTarget(link: nil, profile: $0) }
         let decision = TabFocus.decide(target: target, profile: profile, profileTargets: profileTargets, source: source, invert: invert)

@@ -135,7 +135,6 @@ final class ChromeImportService: Sendable {
                     title = "Untitled"
                 }
 
-                // Skip invalid URLs
                 if urlString.isEmpty ||
                     urlString.hasPrefix("javascript:") ||
                     urlString.hasPrefix("chrome://") ||

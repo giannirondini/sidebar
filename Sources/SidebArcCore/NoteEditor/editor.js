@@ -3,6 +3,7 @@
 
   const params = new URLSearchParams(window.location.search);
   const noteId = params.get("id");
+  const authorization = `Bearer ${window.sidebArcAuthToken}`;
 
   const editor = document.getElementById("editor");
   const previewPane = document.getElementById("pane-preview");
@@ -143,6 +144,7 @@
     }
     try {
       const response = await fetch(`/api/notes/${noteId}`, {
+        headers: { Authorization: authorization },
         cache: "no-store"
       });
       if (response.status === 404) {
@@ -171,7 +173,10 @@
     try {
       const response = await fetch(`/api/notes/${noteId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({ content: getContent() }),
         cache: "no-store"
       });

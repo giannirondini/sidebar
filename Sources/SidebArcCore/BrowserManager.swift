@@ -25,8 +25,8 @@ enum BrowserManager {
     /// Resolves where `link` opens for a space in `profile`.
     ///
     /// Browser precedence: **link override → profile's browser → global default**.
-    /// A configured browser that isn't installed is skipped, so the next level
-    /// applies (an uninstalled global default ends at the system handler in `open`).
+    /// A configured app that isn't an installed browser is skipped, so the next
+    /// level applies (an unavailable global default ends at the system handler in `open`).
     /// The profile directory is `profile.browserProfiles[browser]` when the browser
     /// is the profile's own; a per-link override to a *different* browser opens
     /// without a browser profile.
@@ -34,7 +34,7 @@ enum BrowserManager {
         link: Link?,
         profile: Profile,
         globalDefault: String? = resolveDefaultBrowserBundleId(),
-        installed: (String) -> Bool = { BrowserManager.isInstalled(bundleId: $0) }
+        installed: (String) -> Bool = { BrowserManager.isBrowser(bundleId: $0) }
     ) -> BrowserTarget {
         func available(_ id: String?) -> String? {
             guard let id, installed(id) else { return nil }
@@ -54,8 +54,26 @@ enum BrowserManager {
 
     /// Opens `link` where `resolveTarget` says. Notes use `resolveTarget(link: nil, profile:)`.
     static func open(link: Link, in profile: Profile) {
-        guard let url = URL(string: link.url) else { return }
+        guard let url = validatedLinkURL(from: link.url) else { return }
         open(url: url, target: resolveTarget(link: link, profile: profile))
+    }
+
+    /// SidebArc links are web URLs only. Requiring a host rejects relative strings
+    /// that Chromium could otherwise interpret as command-line switches.
+    static func validatedLinkURL(from string: String) -> URL? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host, !host.isEmpty else { return nil }
+        return components.url
+    }
+
+    static func isValidLinkURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else { return false }
+        return true
     }
 
     static func installedBrowsers() -> [BrowserInfo] {
@@ -76,6 +94,12 @@ enum BrowserManager {
 
     static func isInstalled(bundleId: String) -> Bool {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
+    }
+
+    static func isBrowser(bundleId: String) -> Bool {
+        installedBrowsers().contains {
+            $0.bundleId.caseInsensitiveCompare(bundleId) == .orderedSame
+        }
     }
 
     /// Display name of an installed app, or nil when it isn't installed.
@@ -99,13 +123,13 @@ enum BrowserManager {
     }
 
     /// Badge for a link's browser override: the browser's icon, or a warning
-    /// symbol when that browser isn't installed (the link then falls back, see
+    /// symbol when that browser isn't available (the link then falls back, see
     /// `resolveTarget`). nil when there is no override.
     static func overrideBadge(for bundleId: String?) -> NSImage? {
         guard let bundleId else { return nil }
-        if let icon = appIcon(bundleId: bundleId) { return icon }
+        if isBrowser(bundleId: bundleId), let icon = appIcon(bundleId: bundleId) { return icon }
         let config = NSImage.SymbolConfiguration(paletteColors: [.systemOrange])
-        return NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Browser not installed")?
+        return NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Browser not available")?
             .withSymbolConfiguration(config)
     }
 
@@ -123,7 +147,9 @@ enum BrowserManager {
     }
 
     static func open(url: URL, target: BrowserTarget) {
+        guard isValidLinkURL(url) else { return }
         guard let bundleId = target.bundleId,
+              isBrowser(bundleId: bundleId),
               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
             NSWorkspace.shared.open(url)
             return
@@ -162,6 +188,7 @@ enum BrowserManager {
     /// when the URL should simply be handed to the browser (no profile, or a browser
     /// without profile support).
     static func launchArguments(url: URL, target: BrowserTarget) -> [String]? {
+        guard isValidLinkURL(url) else { return nil }
         guard let bundleId = target.bundleId,
               let profile = target.profileDir, !profile.isEmpty else { return nil }
         let profileArgs = profileArguments(for: bundleId, profile: profile)

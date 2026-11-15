@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import SidebArcCore
@@ -23,6 +24,56 @@ import Testing
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
         #expect(state == decoded)
+    }
+
+    @Test func invalidLinkURLsAreRejectedByModelMutations() {
+        let store = makeStore()
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+        let workspaceId = model.currentWorkspace.id
+
+        #expect(model.addLink(
+            urlString: "--renderer-cmd-prefix=/tmp/x",
+            title: "Flag",
+            workspaceId: workspaceId,
+            parentId: nil
+        ) == nil)
+
+        let linkId = model.addLink(urlString: "https://safe.example", title: "Safe", parentId: nil)
+        #expect(!model.updateLinkUrl(id: linkId, newUrl: "file:///tmp/run.command"))
+        guard case .link(let link) = model.nodeById(linkId) else {
+            Issue.record("Expected link")
+            return
+        }
+        #expect(link.url == "https://safe.example")
+    }
+
+    @Test @MainActor func pastingHostlessURLCreatesNoteInsteadOfCrashing() {
+        _ = NSApplication.shared
+        let model = AppModel(store: makeStore())
+        let controller = MainViewController(model: model)
+
+        controller.pasteText("https://?x")
+
+        guard case .note(let note) = model.currentWorkspace.items.first else {
+            Issue.record("Expected pasted text to become a note")
+            return
+        }
+        #expect(model.noteStorage.read(id: note.id) == "https://?x")
+    }
+
+    @Test func updatingLinkInAnotherSpacePersists() {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        let id = model.addLink(urlString: "https://old.example", title: "Link", parentId: nil)
+        _ = model.createWorkspace(name: "Other", colorId: .moss)
+
+        #expect(model.updateLinkUrl(id: id, newUrl: "https://new.example"))
+        guard case .link(let link) = AppModel(store: store).nodeAcrossWorkspaces(id: id) else {
+            Issue.record("Expected link in the original space")
+            return
+        }
+        #expect(link.url == "https://new.example")
     }
 
     @Test func workspaceIconRoundTripsAndIsOptional() throws {
