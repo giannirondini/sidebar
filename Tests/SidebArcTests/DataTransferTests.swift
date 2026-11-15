@@ -396,7 +396,7 @@ import Testing
         #expect(restored.profiles[0].favorites.first?.url == favorite.url)
         #expect(link(legacy.id, in: restored)?.url == legacy.url)
         #expect(BrowserManager.validatedLinkURL(from: favorite.url) == nil)
-        #expect(BrowserManager.validatedLinkURL(from: legacy.url) == nil)
+        #expect(BrowserManager.validatedLinkURL(from: legacy.url) != nil)
     }
 
     // MARK: - Pure parts

@@ -9,6 +9,40 @@ import Testing
         return DataStore(baseDirectory: temp)
     }
 
+    @Test func unusedLegacyFaviconsAreRemovedOnlyAfterACleanLoad() throws {
+        let store = makeStore()
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+        let icons = store.iconsDirectory()
+        try FileManager.default.createDirectory(at: icons, withIntermediateDirectories: true)
+        let hashed = FaviconService.cacheFileName(for: "new.example.com")
+        for name in ["old.example.com.ico", "kept.example.com.ico", "example.com_8443.ico", hashed, "custom.png"] {
+            try Data([0]).write(to: icons.appendingPathComponent(name))
+        }
+        let linkId = model.addLink(urlString: "https://kept.example.com", title: "Kept", parentId: nil)
+        model.updateLinkFaviconPath(id: linkId, path: icons.appendingPathComponent("kept.example.com.ico").path)
+
+        #expect(model.removeUnusedLegacyFavicons() == 2)
+        let left = Set(try FileManager.default.contentsOfDirectory(atPath: icons.path))
+        #expect(left == ["kept.example.com.ico", hashed, "custom.png"])
+
+        // An unreadable library loads as an empty stand-in: nothing may be deleted.
+        try Data(#"{"schemaVersion": 99}"#.utf8).write(to: store.dataFileURL)
+        try Data([0]).write(to: icons.appendingPathComponent("orphan.example.org.ico"))
+        let blocked = AppModel(store: DataStore(baseDirectory: store.dataFileURL.deletingLastPathComponent()))
+        #expect(blocked.dataLoadIssue != nil)
+        #expect(blocked.removeUnusedLegacyFavicons() == 0)
+        #expect(FileManager.default.fileExists(atPath: icons.appendingPathComponent("orphan.example.org.ico").path))
+
+        // After "Start Empty Library" the next launch loads cleanly, but the
+        // preserved library's icons must stay while its file is there.
+        _ = try blocked.startEmptyLibrary()
+        let nextLaunch = AppModel(store: DataStore(baseDirectory: store.dataFileURL.deletingLastPathComponent()))
+        #expect(nextLaunch.dataLoadIssue == nil)
+        #expect(nextLaunch.removeUnusedLegacyFavicons() == 0)
+        #expect(FileManager.default.fileExists(atPath: icons.appendingPathComponent("orphan.example.org.ico").path))
+    }
+
     @Test func chromeImportNotifiesOnlyAfterTheWholeSpaceIsSaved() throws {
         let store = makeStore()
         let model = AppModel(store: store)
@@ -135,7 +169,7 @@ import Testing
         ) == nil)
 
         let linkId = model.addLink(urlString: "https://safe.example", title: "Safe", parentId: nil)
-        #expect(!model.updateLinkUrl(id: linkId, newUrl: "file:///tmp/run.command"))
+        #expect(!model.updateLinkUrl(id: linkId, newUrl: "javascript:alert(1)"))
         guard case .link(let link) = model.nodeById(linkId) else {
             Issue.record("Expected link")
             return
@@ -157,6 +191,76 @@ import Testing
             return
         }
         #expect(model.noteStorage.read(id: note.id) == "https://?x")
+    }
+
+    @Test @MainActor func pastingAnAppURLCreatesALink() throws {
+        _ = NSApplication.shared
+        let store = makeStore()
+        let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
+        let controller = MainViewController(model: model)
+
+        // mailto: always has a handler on macOS (Mail).
+        controller.pasteText("  mailto:name@example.com\n")
+
+        guard case .link(let link) = try #require(model.currentWorkspace.items.first) else {
+            Issue.record("Expected the pasted URL to become a link")
+            return
+        }
+        #expect(link.url == "mailto:name@example.com")
+        #expect(link.title == "mailto:name@example.com")
+    }
+
+    @Test @MainActor func newLinkAddsIntoAFolderAndOpensIt() throws {
+        _ = NSApplication.shared
+        let store = makeStore()
+        let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
+        let controller = MainViewController(model: model)
+        let folder = model.addFolder(name: "Reading", parentId: nil, isExpanded: false)
+
+        let web = try #require(BrowserManager.typedLinkURL(from: "example.com/article"))
+        let webId = try #require(controller.addLink(web, parentId: folder))
+        let app = try #require(BrowserManager.typedLinkURL(from: "obsidian://open?vault=Notes"))
+        let appId = try #require(controller.addLink(app, parentId: nil))
+
+        guard case .folder(let saved) = try #require(model.nodeById(folder)) else {
+            Issue.record("Expected the folder")
+            return
+        }
+        #expect(saved.isExpanded)
+        #expect(saved.children.map(\.id) == [webId])
+        guard case .link(let webLink) = try #require(model.nodeById(webId)),
+              case .link(let appLink) = try #require(model.nodeById(appId)) else {
+            Issue.record("Expected links")
+            return
+        }
+        #expect(webLink.url == "https://example.com/article")
+        #expect(webLink.title == "example.com")
+        #expect(appLink.title == "obsidian://open?vault=Notes")
+    }
+
+    @Test @MainActor func listMenusOfferNewLink() throws {
+        _ = NSApplication.shared
+        let list = NodeListViewController()
+        _ = list.view
+        let menu = NSMenu()
+        list.menuNeedsUpdate(menu)
+        #expect(menu.items.first?.title == "New Link…")
+        #expect(menu.items.map(\.title).contains("New Folder…"))
+    }
+
+    @Test @MainActor func appLinkPasteRules() {
+        let anyApp: (URL) -> Bool = { _ in true }
+        #expect(MainViewController.appLinkURL(from: "obsidian://open?vault=Notes", canOpen: anyApp) != nil)
+        #expect(MainViewController.appLinkURL(from: "obsidian://open?vault=Notes", canOpen: { _ in false }) == nil)
+        #expect(MainViewController.appLinkURL(from: "todo:buy milk", canOpen: anyApp) == nil)
+        #expect(MainViewController.appLinkURL(from: "https://example.com", canOpen: anyApp) == nil)
+        #expect(MainViewController.appLinkURL(from: "javascript:alert(1)", canOpen: anyApp) == nil)
+        let nested = MainViewController.appLinkURL(from: "obsidian://new?url=https://example.com/a", canOpen: anyApp)
+        #expect(nested?.scheme == "obsidian")
+        #expect(MainViewController.title(forAppLink: URL(fileURLWithPath: "/tmp/My Notes.pdf")) == "My Notes.pdf")
+        #expect(MainViewController.title(forAppLink: URL(string: "obsidian://open?file=My%20Day")!) == "obsidian://open?file=My Day")
     }
 
     @Test func updatingLinkInAnotherSpacePersists() {

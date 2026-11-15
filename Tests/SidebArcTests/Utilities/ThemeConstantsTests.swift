@@ -8,10 +8,17 @@ import Testing
     // MARK: - Color Tests
 
     @Test func testColorsAreValid() {
-        // Verify colors have valid RGB values (0-1 range)
-        #expect(ThemeConstants.Colors.darkGray != nil)
-        #expect(ThemeConstants.Colors.white != nil)
-        #expect(ThemeConstants.Colors.settingsBackground != nil)
+        // Valid sRGB components (0-1) and not fully transparent.
+        for color in [ThemeConstants.Colors.darkGray, ThemeConstants.Colors.white, ThemeConstants.Colors.settingsBackground] {
+            let rgb = color.usingColorSpace(.sRGB)
+            #expect(rgb != nil)
+            if let rgb {
+                for component in [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent] {
+                    #expect((0...1).contains(component))
+                }
+                #expect(rgb.alphaComponent > 0)
+            }
+        }
     }
 
     @Test func testDarkGrayColor() {
@@ -68,11 +75,6 @@ import Testing
     // MARK: - Font Tests
 
     @Test func testFontsAreSystemAvailable() {
-        #expect(ThemeConstants.Fonts.bodyRegular != nil)
-        #expect(ThemeConstants.Fonts.bodySemibold != nil)
-        #expect(ThemeConstants.Fonts.bodyMedium != nil)
-        #expect(ThemeConstants.Fonts.bodyBold != nil)
-
         #expect(ThemeConstants.Fonts.bodyRegular.pointSize == 14)
         #expect(ThemeConstants.Fonts.bodySemibold.pointSize == 14)
         #expect(ThemeConstants.Fonts.bodyMedium.pointSize == 14)
@@ -81,7 +83,6 @@ import Testing
 
     @Test func testSystemFontFunction() {
         let customFont = ThemeConstants.Fonts.systemFont(size: 16, weight: .light)
-        #expect(customFont != nil)
         #expect(customFont.pointSize == 16)
     }
 
@@ -158,9 +159,5 @@ import Testing
     @Test func testAnimationDurationsOrdered() {
         #expect(ThemeConstants.Animation.durationFast < ThemeConstants.Animation.durationNormal)
         #expect(ThemeConstants.Animation.durationNormal < ThemeConstants.Animation.durationSlow)
-    }
-
-    @Test func testAnimationTimingFunction() {
-        #expect(ThemeConstants.Animation.timingFunction != nil)
     }
 }

@@ -36,6 +36,18 @@ import Testing
         #expect(delegate.lostPermissions == 1)
         service.forceUpdate()
         #expect(delegate.lostPermissions == 1)
+
+        // Smoke test 2026-11-15: revoked while nothing moved. The poll's check
+        // alone detaches, once.
+        trusted = true
+        #expect(service.enable(browserBundleIds: [], position: .right))
+        service.checkPermissionNow()
+        #expect(delegate.lostPermissions == 1)
+        trusted = false
+        service.checkPermissionNow()
+        #expect(delegate.lostPermissions == 2)
+        service.checkPermissionNow()
+        #expect(delegate.lostPermissions == 2)
     }
 
     private func profile(_ browser: String?) -> Profile {
@@ -98,11 +110,18 @@ import Testing
 
     @Test func positionUpdatesKeepSidebarVisibleWhenOwnAppIsFrontmost() {
         let ownPid: pid_t = 100
-        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: ownPid, ownPid: ownPid, hasBrowserWindow: false) == .keepVisible)
-        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: ownPid, ownPid: ownPid, hasBrowserWindow: true) == .keepVisible)
-        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: 200, ownPid: ownPid, hasBrowserWindow: false) == .hide)
-        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: nil, ownPid: ownPid, hasBrowserWindow: false) == .hide)
-        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: 200, ownPid: ownPid, hasBrowserWindow: true) == .update)
+        func decide(_ frontmost: pid_t?, active: Bool = false, window: Bool) -> WindowAttachmentService.PositionUpdateDecision {
+            WindowAttachmentService.positionUpdateDecision(frontmostPid: frontmost, ownPid: ownPid, ownAppActive: active, hasBrowserWindow: window)
+        }
+        #expect(decide(ownPid, window: false) == .keepVisible)
+        #expect(decide(ownPid, window: true) == .keepVisible)
+        #expect(decide(200, window: false) == .hide)
+        #expect(decide(nil, window: false) == .hide)
+        #expect(decide(200, window: true) == .update)
+        // Smoke test 2026-11-15: after a sidebar resize the workspace still named
+        // the browser (200) as frontmost while SidebArc was already active.
+        #expect(decide(200, active: true, window: false) == .keepVisible)
+        #expect(decide(nil, active: true, window: false) == .keepVisible)
     }
 
     // MARK: - Short-lived instances (a link opened in a browser profile)

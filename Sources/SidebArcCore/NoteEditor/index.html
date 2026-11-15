@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>SidebArc Note</title>
+  <link rel="stylesheet" href="/editor/editor.css">
 </head>
 <body>
   <header class="topbar">
@@ -29,69 +30,9 @@
     </div>
     <div id="pane-preview" class="pane preview-pane" role="tabpanel" aria-labelledby="tab-preview" hidden></div>
   </main>
-  <script>
-    (function () {
-      "use strict";
-
-      const token = new URLSearchParams(window.location.hash.slice(1)).get("token")
-        || window.history.state?.sidebArcAuthToken;
-      const status = document.getElementById("status");
-      const editor = document.getElementById("editor");
-
-      function failToLoad() {
-        status.textContent = "Editor assets could not be loaded. Reopen this note from SidebArc.";
-        editor.setAttribute("contenteditable", "false");
-      }
-
-      if (!token) {
-        failToLoad();
-        return;
-      }
-
-      window.history.replaceState({ sidebArcAuthToken: token }, "", window.location.pathname + window.location.search);
-      window.sidebArcAuthToken = token;
-      const headers = { Authorization: `Bearer ${token}` };
-
-      async function loadAsset(path, type) {
-        const response = await fetch(path, { headers, cache: "no-store" });
-        if (!response.ok) throw new Error(`Editor asset request failed (${response.status})`);
-        const source = await response.text();
-
-        if (type === "css") {
-          const style = document.createElement("style");
-          style.textContent = source;
-          document.head.appendChild(style);
-          return;
-        }
-
-        const script = document.createElement("script");
-        const objectURL = URL.createObjectURL(new Blob([source], { type: "application/javascript" }));
-        await new Promise(function (resolve, reject) {
-          script.onload = function () {
-            URL.revokeObjectURL(objectURL);
-            resolve();
-          };
-          script.onerror = function () {
-            URL.revokeObjectURL(objectURL);
-            reject(new Error("Editor script could not be evaluated"));
-          };
-          script.src = objectURL;
-          document.head.appendChild(script);
-        });
-      }
-
-      (async function () {
-        try {
-          await loadAsset("/editor/editor.css", "css");
-          await loadAsset("/editor/vendor/marked.min.js", "js");
-          await loadAsset("/editor/vendor/purify.min.js", "js");
-          await loadAsset("/editor/editor.js", "js");
-        } catch (error) {
-          console.error("Note editor failed to load:", error);
-          failToLoad();
-        }
-      })();
-    })();
-  </script>
+  <script src="/editor/auth.js"></script>
+  <script src="/editor/vendor/marked.min.js"></script>
+  <script src="/editor/vendor/purify.min.js"></script>
+  <script src="/editor/editor.js"></script>
 </body>
 </html>

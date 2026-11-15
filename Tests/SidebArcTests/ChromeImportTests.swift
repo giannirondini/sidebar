@@ -68,7 +68,7 @@ struct ChromeImportTests {
         }
     }
 
-    @Test("Legacy bookmarks are preserved but cannot be opened")
+    @Test("Every bookmark is preserved; a relative one can't be opened")
     func testUnsupportedURLSchemesArePreserved() async throws {
         let html = createBookmarksHTML(body: """
             <DT><A HREF="--renderer-cmd-prefix=/tmp/x">Flag</A>
@@ -96,7 +96,8 @@ struct ChromeImportTests {
                 return link.url
             }
             #expect(urls == ["--renderer-cmd-prefix=/tmp/x", "file:///tmp/run.command", "https://example.com"])
-            #expect(urls.prefix(2).allSatisfy { BrowserManager.validatedLinkURL(from: $0) == nil })
+            #expect(BrowserManager.validatedLinkURL(from: urls[0]) == nil)
+            #expect(BrowserManager.validatedLinkURL(from: urls[1]) != nil)
         case .failure(let error):
             Issue.record("Import should succeed: \(error)")
         }

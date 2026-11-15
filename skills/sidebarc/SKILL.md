@@ -32,8 +32,10 @@ file editing.
   **cannot delete workspaces** — this is a hard rule.
 - **Folder** — a named container that can hold links, notes, and other
   folders. Nestable.
-- **Link** — a bookmark with a title and a URL. The app fetches favicons
-  automatically.
+- **Link** — a bookmark with a title and a URL. The URL must be absolute:
+  `https://…`, `file:///…` or an app link such as `mailto:` or `obsidian://`
+  (`javascript:`, `data:` and browser-internal schemes are refused with
+  `bad_url`). The app fetches favicons for web links automatically.
 - **Note** — a markdown document with a title and a body. Body content is
   stored as a `.md` file and read/written with `notes:read` and `notes:write`.
 - **Node** — any of folder, link, or note. Generic operations like
@@ -154,6 +156,9 @@ Combinations:
   `favorite_not_found` are the common ones.
 - Typed delete commands reject a node of a different type; use `nodes:delete`
   only when deleting any node type is intended.
+- `notes:write` replaces the body unconditionally. If the user may be editing
+  the same note in the browser, their open editor tab will report a conflict
+  instead of overwriting your text.
 
 ## Commands Reference
 

@@ -25,7 +25,6 @@ import Testing
     }
 
     @Test func testTextFieldIsConfiguredCorrectly() {
-        #expect(editableTextField.textField != nil)
         #expect(editableTextField.textField.lineBreakMode == .byTruncatingTail)
         #expect(editableTextField.textField.focusRingType == .none)
     }
@@ -50,7 +49,7 @@ import Testing
 
     @Test func testFontPropertyDefaultValue() {
         // Should use ThemeConstants.Fonts.bodyRegular as default
-        #expect(editableTextField.font != nil)
+        #expect(editableTextField.font.pointSize > 0)
     }
 
     // MARK: - Text Color Property Tests
@@ -72,10 +71,12 @@ import Testing
         editableTextField.text = "Original Title"
         editableTextField.beginInlineRename(
             onCommit: { _ in commitCalled = true },
-            onCancel: { cancelCalled = false }
+            onCancel: { cancelCalled = true }
         )
 
         #expect(editableTextField.isEditing)
+        #expect(!commitCalled)
+        #expect(!cancelCalled)
         #expect(editableTextField.textField.isEditable)
         #expect(editableTextField.textField.isSelectable)
     }
@@ -97,6 +98,7 @@ import Testing
 
         // Should still be in editing mode from first call
         #expect(editableTextField.isEditing)
+        #expect(!firstCommitCalled)
         // Second commit handler should not be set
         #expect(!secondCommitCalled)
     }
@@ -124,8 +126,6 @@ import Testing
     }
 
     @Test func testCancelInlineRenameIgnoresWhenNotEditing() {
-        var cancelCalled = false
-
         // Try to cancel without being in edit mode
         editableTextField.cancelInlineRename()
 

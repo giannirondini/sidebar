@@ -222,7 +222,7 @@ import Testing
             return
         }
         #expect(link.url == "file:///tmp/run.command")
-        #expect(BrowserManager.validatedLinkURL(from: link.url) == nil)
+        #expect(BrowserManager.validatedLinkURL(from: link.url) != nil)
     }
 
     @Test func testFolderWithNullTitle() async throws {

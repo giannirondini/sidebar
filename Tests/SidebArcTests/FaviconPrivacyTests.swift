@@ -7,14 +7,25 @@ import Testing
     @Test(arguments: [
         "http://nas.local/page",
         "https://192.168.1.1/page",
+        "https://8.8.8.8/page",
+        "http://[::1]:8080/page",
+        "http://[fd00::1]/page",
         "https://wiki.corp.internal/page",
-        "https://example.com/page"
+        "http://router/page",
+        "http://printer.lan/",
+        "http://box.home.arpa/"
     ])
-    func fallbackRequiresOptIn(_ input: String) throws {
+    func privateHostsAreNeverSentToGoogle(_ input: String) throws {
         let url = try #require(URL(string: input))
-        let (primary, fallback) = FaviconService.faviconURLs(for: url, googleFallbackEnabled: false)
+        let (primary, fallback) = FaviconService.faviconURLs(for: url, googleFallbackEnabled: true)
         #expect(primary?.path == "/favicon.ico")
         #expect(fallback == nil)
+    }
+
+    @Test func publicHostsUseTheFallbackUnlessTurnedOff() throws {
+        let url = try #require(URL(string: "https://news.example.co.uk/page"))
+        #expect(FaviconService.faviconURLs(for: url, googleFallbackEnabled: true).1 != nil)
+        #expect(FaviconService.faviconURLs(for: url, googleFallbackEnabled: false).1 == nil)
     }
 
     @Test func fallbackContainsOnlyTheSiteOrigin() throws {

@@ -79,7 +79,7 @@ final class FaviconService {
         Task {
             let (primaryURL, fallbackURL) = Self.faviconURLs(
                 for: url,
-                googleFallbackEnabled: UserDefaults.standard.bool(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled)
+                googleFallbackEnabled: Self.googleFallbackEnabled
             )
 
             let data = await fetchFaviconData(primary: primaryURL, fallback: fallbackURL)
@@ -126,10 +126,38 @@ final class FaviconService {
         }
     }
 
-    static func cacheFileName(for host: String) -> String {
+    /// A favicon cache file named the pre-1.0 way (`<host>.ico`, `<host>_<port>.ico`)
+    /// rather than `cacheFileName`'s SHA-256 hex.
+    nonisolated static func isLegacyCacheFileName(_ name: String) -> Bool {
+        guard name.hasSuffix(".ico") else { return false }
+        let stem = name.dropLast(4)
+        return !(stem.count == 64 && stem.allSatisfy { $0.isHexDigit && !$0.isUppercase })
+    }
+
+    nonisolated static func cacheFileName(for host: String) -> String {
         SHA256.hash(data: Data(host.lowercased().utf8)).map { String(format: "%02x", $0) }.joined() + ".ico"
     }
 
+    /// The Settings switch; on unless the user turned it off.
+    static var googleFallbackEnabled: Bool {
+        UserDefaults.standard.object(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled) as? Bool ?? true
+    }
+
+    /// Hosts that must never be sent to Google: single-label names, local and
+    /// private suffixes, and IP literals (Google can't resolve them anyway).
+    static func isPrivateHost(_ host: String) -> Bool {
+        let name = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]."))
+        guard name.contains("."), !name.contains(":") else { return true }
+        let privateSuffixes = [".local", ".localhost", ".localdomain", ".internal", ".intranet", ".corp",
+                               ".lan", ".home", ".home.arpa", ".private", ".test", ".invalid", ".example"]
+        if privateSuffixes.contains(where: { name.hasSuffix($0) }) { return true }
+        let labels = name.split(separator: ".")
+        return labels.count == 4 && labels.allSatisfy { UInt8($0) != nil }
+    }
+
+    /// The site's own `/favicon.ico`, and Google's service as a fallback only when
+    /// enabled and the host is public. Both carry the origin only (no path, query,
+    /// fragment or credentials).
     static func faviconURLs(for url: URL, googleFallbackEnabled: Bool) -> (URL?, URL?) {
         guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
               url.host != nil, var site = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
@@ -144,7 +172,7 @@ final class FaviconService {
         site.path = "/favicon.ico"
 
         var fallback: URL?
-        if googleFallbackEnabled {
+        if googleFallbackEnabled, let host = url.host, !isPrivateHost(host) {
             var components = URLComponents(string: "https://www.google.com/s2/favicons")
             components?.queryItems = [URLQueryItem(name: "sz", value: "64"),
                                       URLQueryItem(name: "domain_url", value: siteURL.absoluteString)]
@@ -159,7 +187,7 @@ final class FaviconService {
                 return data
             }
         }
-        if let fallback, UserDefaults.standard.bool(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled) {
+        if let fallback {
             return await fetchData(from: fallback)
         }
         return nil

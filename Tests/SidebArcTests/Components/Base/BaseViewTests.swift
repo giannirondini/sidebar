@@ -95,9 +95,10 @@ fileprivate class TestView: BaseView {
 
     @Test func testUpdateTrackingAreasCreatesTrackingArea() {
         view.updateTrackingAreas()
+        view.updateTrackingAreas()
 
-        // Verify tracking area was added by checking that the method completes without error
-        #expect(view != nil)
+        // Exactly one area: a refresh replaces the old one instead of piling up.
+        #expect(view.trackingAreas.count == 1)
     }
 
     // MARK: - Refresh Hover State Tests

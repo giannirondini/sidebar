@@ -21,7 +21,12 @@ and served by `NoteServer` over a token-authenticated loopback HTTP listener.
 To update, replace the file in `vendor/` with a newer minified build from npm
 and update the table above. There is no build step — the file is shipped as-is.
 
-The editor flushes pending edits on page hide using keepalive requests. Writes
-include a content revision; if another client changed the note, the editor
-keeps the local text visible and reports a conflict rather than overwriting it.
-Keepalive is best effort and browser request size limits still apply.
+`auth.js` takes the per-launch API token from the URL fragment and keeps it in
+the tab's history state; the static files need no token, so the page loads them
+with plain `<script src>`/`<link>` under a CSP that forbids inline code.
+
+The editor sends one save at a time, each based on the content revision it last
+saw; if another client changed the note, the server answers 409 and the editor
+keeps the local text visible instead of overwriting. Pending edits are flushed on
+page hide with a keepalive request (best effort; browsers cap keepalive bodies at
+64 KiB, larger ones are sent normally and may be cut off).

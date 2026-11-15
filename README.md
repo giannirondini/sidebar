@@ -48,10 +48,11 @@ No release has been published yet: for now, [build it from source](#building-fro
 - **Notes** - Markdown notes alongside your links.
 - **Scheduled Links** - Have a link open by itself at a set time.
 - **Drag-and-Drop** - Reorder and move bookmarks between folders and spaces
+- **Any Kind of Link** - Web pages, files and app links (`mailto:`, `obsidian://`, `slack://`, …): paste a URL, or right-click the list and choose **New Link…** (in a folder: **New Link in Folder…**). Typing `example.com` is enough. App links open in their app; a link to an app or script is shown in Finder instead of run.
 - **Inline Editing** - Rename folders and links directly in the list
 - **Search & Filter** - Quickly find bookmarks in any space
 
-SidebArc requests titles and favicons from bookmarked sites. The optional **Google favicon fallback** in Settings is off by default; when enabled, it sends a site's origin (scheme, host and port, including private hosts) to Google if the site's favicon request fails.
+SidebArc requests titles and favicons from bookmarked sites. When a public site's own favicon can't be fetched, it asks Google's favicon service, sending only the site's origin (scheme, host and port). Local and private hosts (`.local`, `.internal`, single-word names, IP addresses, …) are never sent; turn the fallback off entirely with **Ask Google for missing favicons** in Settings.
 
 <p align="center">
   <img src="./Resources/screenshots/settings.jpeg" alt="SidebArc settings" width="100%">

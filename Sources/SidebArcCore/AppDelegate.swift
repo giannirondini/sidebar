@@ -28,9 +28,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         setupMenus()
 
         let model = AppModel()
+        let loadedCleanly = model.dataLoadIssue == nil
         guard handleDataLoadIssue(model: model) else {
             NSApp.terminate(nil)
             return
+        }
+        // Never after "Start Empty Library": the preserved library's icons are
+        // still in Icons/ and must stay for its recovery.
+        if loadedCleanly {
+            model.removeUnusedLegacyFavicons()
         }
         var saveFailureShown = false
         let dataFilePath = model.dataFileURL.path
@@ -48,12 +54,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
         let mainViewController = MainViewController(model: model)
         self.mainViewController = mainViewController
+        mainViewController.onModelReload = { [weak self] in self?.refreshAttachmentBrowsers() }
 
+        // Without the note server (no token could be generated) notes and the agent
+        // API are unavailable; everything else still works.
         do {
             let noteServer = try NoteServer(model: model)
             noteServer.start()
             mainViewController.noteServer = noteServer
-            mainViewController.onModelReload = { [weak self] in self?.refreshAttachmentBrowsers() }
             self.noteServer = noteServer
             publishAgentEndpoint(noteServer: noteServer)
         } catch {

@@ -262,6 +262,35 @@ enum DataTransfer {
         return state
     }
 
+    /// File names (in `Icons/`) that something in `state` shows: link favicons,
+    /// custom favicon icons on links, notes and spaces, and favorites.
+    static func referencedIconFileNames(in state: AppState) -> Set<String> {
+        var names = Set<String>()
+        func add(_ path: String?) {
+            if let path { names.insert(URL(fileURLWithPath: path).lastPathComponent) }
+        }
+        func add(_ icon: CustomIcon?) {
+            if case .cachedFavicon(let path)? = icon { add(path) }
+        }
+        func add(_ link: Link) {
+            add(link.faviconPath)
+            add(link.customIcon)
+        }
+        func visit(_ node: Node) {
+            switch node {
+            case .link(let link): add(link)
+            case .note(let note): add(note.customIcon)
+            case .folder(let folder): folder.children.forEach(visit)
+            }
+        }
+        for workspace in state.workspaces {
+            workspace.items.forEach(visit)
+            add(workspace.icon)
+        }
+        state.profiles.flatMap(\.favorites).forEach(add)
+        return names
+    }
+
     static func summary(of state: AppState) -> Summary {
         func count(_ nodes: [Node]) -> (links: Int, notes: Int) {
             nodes.reduce(into: (0, 0)) { total, node in

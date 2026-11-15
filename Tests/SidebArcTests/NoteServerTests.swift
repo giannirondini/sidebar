@@ -11,11 +11,11 @@ import Testing
         return DataStore(baseDirectory: temp)
     }
 
-    private func startServer() async throws -> (NoteServer, AppModel) {
+    private func startServer(idleTimeout: TimeInterval = NoteServer.defaultIdleTimeout) async throws -> (NoteServer, AppModel) {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
-        let server = try NoteServer(model: model)
+        let server = try NoteServer(model: model, idleTimeout: idleTimeout)
         server.start()
 
         // Wait briefly for the listener to enter .ready
@@ -77,9 +77,7 @@ import Testing
 
     @Test func testEditorTokenSurvivesReloadWithoutRemainingInURL() throws {
         let resources = try #require(NoteServer.resolveBundledResourcesURL())
-        let html = try String(contentsOf: resources.appendingPathComponent("NoteEditor/index.html"), encoding: .utf8)
-        let script = try #require(html.components(separatedBy: "<script>").dropFirst().first?
-            .components(separatedBy: "</script>").first)
+        let script = try String(contentsOf: resources.appendingPathComponent("NoteEditor/auth.js"), encoding: .utf8)
         let context = try #require(JSContext())
         context.evaluateScript("""
             var status = { textContent: "" };
@@ -95,29 +93,83 @@ import Testing
             function URLSearchParams(value) {
               this.get = function () { return value.startsWith("token=") ? value.slice(6) : null; };
             }
-            var authorization;
-            function fetch(path, options) {
-              authorization = options.headers.Authorization;
-              return new Promise(function () {});
-            }
             """)
 
         context.evaluateScript(script)
         #expect(context.exception == nil)
         #expect(context.evaluateScript("window.location.hash").toString() == "")
-        #expect(context.evaluateScript("authorization").toString() == "Bearer secret")
+        #expect(context.evaluateScript("window.sidebArcAuthToken").toString() == "secret")
 
-        context.evaluateScript("authorization = null; window.sidebArcAuthToken = null;")
+        // Reload: no fragment any more, the token comes from the history state.
+        context.evaluateScript("window.sidebArcAuthToken = null;")
         context.evaluateScript(script)
         #expect(context.exception == nil)
-        #expect(context.evaluateScript("authorization").toString() == "Bearer secret")
+        #expect(context.evaluateScript("window.sidebArcAuthToken").toString() == "secret")
         #expect(context.evaluateScript("editor.contenteditable").isUndefined)
 
-        context.evaluateScript("authorization = null; window.history.state = null;")
+        // A tab from an earlier launch (no state): read-only, with a hint.
+        context.evaluateScript("window.sidebArcAuthToken = null; window.history.state = null;")
         context.evaluateScript(script)
         #expect(context.exception == nil)
-        #expect(context.evaluateScript("authorization").isNull)
+        #expect(context.evaluateScript("window.sidebArcAuthToken").isNull)
         #expect(context.evaluateScript("editor.contenteditable").toString() == "false")
+        #expect(context.evaluateScript("status.textContent").toString().contains("Reopen"))
+    }
+
+    @Test func editorSendsOneSaveAtATimeAndFlushesOnPageHide() throws {
+        let resources = try #require(NoteServer.resolveBundledResourcesURL())
+        let script = try String(contentsOf: resources.appendingPathComponent("NoteEditor/editor.js"), encoding: .utf8)
+        let context = try #require(JSContext())
+        context.evaluateScript("""
+            var handlers = {}, calls = [], pending = [];
+            var editor = { innerText: "", classList: { toggle: function() {} },
+                setAttribute: function() {}, addEventListener: function(k, f) { handlers[k] = f; } };
+            Object.defineProperty(editor, "textContent", { set: function(s) { editor.innerText = s; } });
+            var generic = { textContent: "", classList: { add: function(){}, remove: function(){} },
+                setAttribute: function(){}, addEventListener: function(){} };
+            var document = {
+                body: { classList: { add: function(){} } },
+                getElementById: function(id) { return id === "editor" ? editor : generic; },
+                querySelectorAll: function() { return []; }, addEventListener: function(){}
+            };
+            function TextEncoder() { this.encode = function(s) { return s; }; }
+            var window = { location: { search: "?id=123" }, sidebArcAuthToken: "secret", TextEncoder: TextEncoder,
+                crypto: { subtle: { digest: function() { return Promise.resolve(new Uint8Array([10, 255]).buffer); } } },
+                addEventListener: function(k, f) { handlers[k] = f; } };
+            var navigator = { platform: "Mac" };
+            function Blob(parts) { this.size = parts[0].length; }
+            function URLSearchParams() { this.get = function() { return "123"; }; }
+            function setInterval() { return 1; } function clearInterval() {}
+            var scheduledSave;
+            function setTimeout(f) { scheduledSave = f; return 1; } function clearTimeout() {}
+            function fetch(path, options) {
+                calls.push(options);
+                if (options && options.method === "PUT" && !options.keepalive) {
+                    // Held in flight until the test resolves it.
+                    return new Promise(function(resolve) { pending.push(resolve); });
+                }
+                return Promise.resolve({ ok: true, status: 200, json: function() {
+                    return Promise.resolve({ content: "original", revision: "rev", title: "Test" });
+                } });
+            }
+            """)
+        context.evaluateScript(script)
+        #expect(context.exception == nil)
+        // A save goes out and stays in flight.
+        context.evaluateScript("editor.innerText = 'one'; handlers.input(); scheduledSave();")
+        #expect(context.evaluateScript("calls.length").toInt32() == 2)
+        #expect(context.evaluateScript("JSON.parse(calls[1].body).revision").toString() == "rev")
+        // More typing while it is in flight: no second concurrent PUT.
+        context.evaluateScript("editor.innerText = 'two'; handlers.input(); scheduledSave();")
+        #expect(context.evaluateScript("calls.length").toInt32() == 2)
+        // Closing now: the keepalive PUT follows the in-flight one (its revision is
+        // the SHA-256 the in-flight content will have).
+        context.evaluateScript("handlers.pagehide();")
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("calls.length").toInt32() == 3)
+        #expect(context.evaluateScript("calls[2].keepalive").toBool())
+        #expect(context.evaluateScript("JSON.parse(calls[2].body).content").toString() == "two")
+        #expect(context.evaluateScript("JSON.parse(calls[2].body).revision").toString() == "0aff")
     }
 
     @Test func editorFlushesPendingEditsWithRevisionOnPageHide() throws {
@@ -260,37 +312,57 @@ import Testing
         #expect(model.workspaces.count == initialCount)
     }
 
-    @Test func testEditorAssetsRequireBearerToken() async throws {
+    @Test func editorFilesArePublicButTheAPIIsNot() async throws {
         let (server, _) = try await startServer()
         defer { server.stop() }
 
-        let (unauthorizedStatus, _) = try await request(
-            method: "GET",
-            path: "/editor/editor.css",
-            includeAuthorization: false,
-            server: server
-        )
-        #expect(unauthorizedStatus == 401)
-
-        let (authorizedStatus, body) = try await request(
-            method: "GET",
-            path: "/editor/editor.css",
-            server: server
-        )
-        #expect(authorizedStatus == 200)
-        #expect(!body.isEmpty)
+        // Every response carries `nosniff`, so a wrong type would block the file.
+        for (path, type) in [
+            ("/editor/editor.css", "text/css"),
+            ("/editor/auth.js", "application/javascript"),
+            ("/editor/editor.js", "application/javascript"),
+            ("/editor/vendor/marked.min.js", "application/javascript"),
+            ("/editor/vendor/purify.min.js", "application/javascript")
+        ] {
+            let url = try #require(URL(string: "http://127.0.0.1:\(server.port)\(path)"))
+            let (body, response) = try await URLSession.shared.data(from: url)
+            let http = try #require(response as? HTTPURLResponse)
+            #expect(http.statusCode == 200, "\(path)")
+            #expect(http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix(type) == true, "\(path)")
+            #expect(http.value(forHTTPHeaderField: "X-Content-Type-Options") == "nosniff")
+            #expect(!body.isEmpty)
+        }
+        let (apiStatus, _) = try await request(method: "GET", path: "/api/state", includeAuthorization: false, server: server)
+        #expect(apiStatus == 401)
     }
 
-    @Test func editorIndexHasFramingAndScriptPolicy() async throws {
+    @Test func editorPageAllowsOnlyBundledScriptsAndStyles() async throws {
         let (server, _) = try await startServer()
         defer { server.stop() }
-        let url = try #require(URL(string: "http://127.0.0.1:\(server.port)/"))
-        let (_, response) = try await URLSession.shared.data(from: url)
+        let url = try #require(URL(string: "http://127.0.0.1:\(server.port)/?id=\(UUID().uuidString)"))
+        let (data, response) = try await URLSession.shared.data(from: url)
         let http = try #require(response as? HTTPURLResponse)
         let policy = try #require(http.value(forHTTPHeaderField: "Content-Security-Policy"))
+        #expect(policy == NoteServer.editorContentSecurityPolicy)
         #expect(policy.contains("frame-ancestors 'none'"))
-        #expect(policy.contains("script-src 'sha256-"))
-        #expect(policy.contains("blob:"))
+        #expect(policy.contains("script-src 'self';"))
+        #expect(policy.contains("style-src 'self';"))
+        #expect(!policy.contains("blob:"))
+        #expect(!policy.contains("unsafe"))
+        // The CSP blocks inline code, so the page must have none.
+        let html = String(decoding: data, as: UTF8.self)
+        #expect(!html.contains("<script>"))
+        #expect(!html.contains("<style"))
+        #expect(!html.contains(" style="))
+        #expect(!html.contains(" on"))
+    }
+
+    @Test func tokenComparisonIsExact() {
+        #expect(NoteServer.constantTimeEquals("Bearer abc", "Bearer abc"))
+        #expect(!NoteServer.constantTimeEquals("Bearer abd", "Bearer abc"))
+        #expect(!NoteServer.constantTimeEquals("Bearer ab", "Bearer abc"))
+        #expect(!NoteServer.constantTimeEquals("Bearer abc\0", "Bearer abc"))
+        #expect(!NoteServer.constantTimeEquals("", "Bearer abc"))
     }
 
     @Test func testAgentEndpointFileIsOwnerOnly() throws {
@@ -308,7 +380,9 @@ import Testing
     @Test func testGetReturnsNoteJSON() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
-        let noteId = model.addNote(title: "Server Test", parentId: nil)
+        // (This used to expect "# Untitled" through a no-op #expect: new notes
+        // start empty, so check a real body instead.)
+        let noteId = model.addNote(title: "Server Test", parentId: nil, content: "# Heading\n\nBody")
 
         let (status, body) = try await request(
             method: "GET",
@@ -318,7 +392,13 @@ import Testing
         #expect(status == 200)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         #expect(json?["title"] as? String == "Server Test")
-        #expect((json?["content"] as? String ?? "").contains("# Untitled"))
+        let content = try #require(json?["content"] as? String)
+        #expect(content == "# Heading\n\nBody")
+
+        let emptyId = model.addNote(title: "Empty", parentId: nil)
+        let (_, emptyBody) = try await request(method: "GET", path: "/api/notes/\(emptyId.uuidString)", server: server)
+        let emptyJSON = try #require(try JSONSerialization.jsonObject(with: emptyBody) as? [String: Any])
+        #expect(emptyJSON["content"] as? String == "")
     }
 
     @Test func testGetReturns404WhenNoteDeleted() async throws {
@@ -408,28 +488,33 @@ import Testing
         #expect(badPatch == 400)
     }
 
-    @Test func noteRevisionsRejectExternalChangesAndOrderEditorSaves() async throws {
+    @Test func noteRevisionsRejectStaleWrites() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }
         let note = model.addNote(title: "Note", parentId: nil, content: "original")
         let path = "/api/notes/\(note.uuidString)"
         let (_, initial) = try await apiRequest("GET", path, server: server)
         let base = try #require(initial["revision"] as? String)
-        let client = UUID().uuidString
-        let (first, _) = try await apiRequest("PUT", path, body: ["content": "first", "revision": base, "client_id": client, "sequence": 1], server: server)
+
+        // Based on the current revision: accepted; the response names the new one.
+        let (first, firstJSON) = try await apiRequest("PUT", path, body: ["content": "first", "revision": base], server: server)
         #expect(first == 200)
-        let (second, _) = try await apiRequest("PUT", path, body: ["content": "latest", "revision": base, "client_id": client, "sequence": 2], server: server)
+        let next = try #require(firstJSON["revision"] as? String)
+        #expect(next != base)
+        // The editor's next save follows with that revision.
+        let (second, _) = try await apiRequest("PUT", path, body: ["content": "second", "revision": next], server: server)
         #expect(second == 200)
-        let (late, _) = try await apiRequest("PUT", path, body: ["content": "late", "revision": base, "client_id": client, "sequence": 1], server: server)
-        #expect(late == 409)
-        #expect(model.noteStorage.read(id: note) == "latest")
-        let (_, saved) = try await apiRequest("GET", path, server: server)
-        let revision = try #require(saved["revision"] as? String)
-        _ = try await apiRequest("PUT", path, body: ["content": "agent edit"], server: server)
-        let (conflict, json) = try await apiRequest("PUT", path, body: ["content": "stale", "revision": revision, "client_id": client, "sequence": 3], server: server)
-        #expect(conflict == 409)
-        #expect(json["code"] as? String == "note_conflict")
+        // An old base (another tab, or a late request): refused, text kept.
+        let (stale, staleJSON) = try await apiRequest("PUT", path, body: ["content": "stale", "revision": base], server: server)
+        #expect(stale == 409)
+        #expect(staleJSON["code"] as? String == "note_conflict")
+        #expect(model.noteStorage.read(id: note) == "second")
+        // Without a revision (agent CLI): unconditional.
+        let (agent, _) = try await apiRequest("PUT", path, body: ["content": "agent edit"], server: server)
+        #expect(agent == 200)
         #expect(model.noteStorage.read(id: note) == "agent edit")
+        let (badRevision, _) = try await apiRequest("PUT", path, body: ["content": "x", "revision": 3], server: server)
+        #expect(badRevision == 400)
         let (bad, badJSON) = try await apiRequest("GET", "/api/notes/not-a-uuid", server: server)
         #expect(bad == 400)
         #expect(badJSON["code"] as? String == "bad_id")
@@ -476,7 +561,7 @@ import Testing
     }
 
     @Test func idleConnectionsAreLimitedAndReleased() async throws {
-        let (server, model) = try await startServer()
+        let (server, model) = try await startServer(idleTimeout: 1)
         defer { server.stop() }
         let port = server.port
         let sockets = try await Task.detached {
@@ -508,7 +593,7 @@ import Testing
         try await Task.sleep(nanoseconds: 500_000_000)
         let (full, _) = try await request(method: "GET", path: "/api/state", server: server)
         #expect(full == 503)
-        try await Task.sleep(nanoseconds: 15_500_000_000)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
         let (available, _) = try await request(method: "GET", path: "/api/state", server: server)
         #expect(available == 200)
         #expect(!model.workspaces.isEmpty)
@@ -936,7 +1021,7 @@ import Testing
         let (favoriteStatus, favoriteJson) = try await apiRequest(
             "POST",
             "/api/profiles/\(profileId.uuidString)/favorites",
-            body: ["url": "file:///tmp/run.command"],
+            body: ["url": "javascript:alert(1)"],
             server: server
         )
         #expect(favoriteStatus == 400)

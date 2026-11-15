@@ -1,6 +1,9 @@
 (function () {
   "use strict";
 
+  // auth.js found no token: it already said so; nothing to load or save.
+  if (!window.sidebArcAuthToken) return;
+
   const params = new URLSearchParams(window.location.search);
   const noteId = params.get("id");
   const authorization = `Bearer ${window.sidebArcAuthToken}`;
@@ -19,11 +22,14 @@
   let serverTitle = "";
   let noteDeleted = false;
   let serverDisconnected = false;
-  let revision = null;
+  // Saves: one PUT at a time, each carrying the revision (SHA-256 of the content)
+  // it was based on; the server refuses a stale one with 409 (another client wrote).
+  let revision = null;          // the server's revision of the saved text
   let conflict = false;
-  const clientId = crypto.randomUUID();
-  let nextSequence = 0;
-  let latestAcknowledged = 0;
+  let saving = false;           // a PUT is in flight
+  let saveAgain = false;        // edits arrived during it
+  let lastSentContent = null;   // text of the last PUT (or as loaded)
+  let expectedRevision = null;  // revision the in-flight PUT will produce
 
   // Reads/writes against the contenteditable node go through these two
   // helpers so future iterations can layer syntax-aware visual styling
@@ -150,6 +156,7 @@
       const data = await response.json();
       setContent(data.content || "");
       revision = data.revision;
+      lastSentContent = data.content || "";
       editor.setAttribute("contenteditable", "plaintext-only");
       serverTitle = data.title || "";
       refreshTitle();
@@ -161,54 +168,87 @@
     }
   }
 
-  async function saveNote(onPageHide = false) {
+  async function sha256Hex(text) {
+    if (!(window.crypto && window.crypto.subtle && window.TextEncoder)) return null;
+    const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest), function (b) {
+      return b.toString(16).padStart(2, "0");
+    }).join("");
+  }
+
+  function putNote(content, baseRevision, keepalive) {
+    const body = JSON.stringify({ content, revision: baseRevision });
+    return fetch(`/api/notes/${noteId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json"
+      },
+      body,
+      cache: "no-store",
+      // Browsers cap keepalive bodies at 64 KiB; a larger one is sent normally.
+      keepalive: keepalive && new Blob([body]).size <= 60 * 1024
+    });
+  }
+
+  function canSave() {
+    return noteId && revision && !noteDeleted && !serverDisconnected && !conflict;
+  }
+
+  async function saveNote() {
     saveTimer = null;
-    if (!noteId || noteDeleted || serverDisconnected || conflict || !revision) return;
-    const sequence = ++nextSequence;
+    if (!canSave()) return;
+    if (saving) {
+      saveAgain = true;
+      return;
+    }
     const content = getContent();
-    const body = JSON.stringify({ content, revision, client_id: clientId, sequence });
+    if (content === lastSentContent) {
+      lastSavedAt = Date.now();
+      setStatus("saved");
+      scheduleSavedTicker();
+      return;
+    }
+    saving = true;
+    saveAgain = false;
+    lastSentContent = content;
     setStatus("saving…");
     try {
-      const response = await fetch(`/api/notes/${noteId}`, {
-        method: "PUT",
-        headers: {
-          Authorization: authorization,
-          "Content-Type": "application/json"
-        },
-        body,
-        cache: "no-store",
-        keepalive: onPageHide && new Blob([body]).size <= 60 * 1024
-      });
+      const request = putNote(content, revision, false);
+      expectedRevision = await sha256Hex(content);
+      const response = await request;
       if (response.status === 404) {
-        if (sequence < nextSequence) return;
         enterDeletedState();
         return;
       }
       if (response.status === 409) {
-        if (sequence < nextSequence) return;
         conflict = true;
         stopSavedTicker();
         setStatus("conflict — copy your edits and reopen the note");
         return;
       }
       if (!response.ok) {
-        if (sequence < nextSequence) return;
+        lastSentContent = null;
         stopSavedTicker();
         setStatus(`save failed (${response.status})`);
         return;
       }
-      const data = await response.json();
-      if (sequence < latestAcknowledged) return;
-      latestAcknowledged = sequence;
-      revision = data.revision;
-      if (sequence < nextSequence || saveTimer) return;
-      lastSavedAt = Date.now();
-      setStatus("saved");
-      scheduleSavedTicker();
+      revision = (await response.json()).revision;
     } catch (err) {
-      if (sequence < nextSequence) return;
       enterDisconnectedState();
+      return;
+    } finally {
+      saving = false;
+      expectedRevision = null;
     }
+    if (saveTimer) return;  // more typing: its own save follows
+    if (saveAgain) {
+      saveNote();
+      return;
+    }
+    lastSavedAt = Date.now();
+    setStatus("saved");
+    scheduleSavedTicker();
   }
 
   function scheduleSave() {
@@ -218,11 +258,21 @@
     saveTimer = setTimeout(saveNote, 500);
   }
 
+  // Closing the tab within the save delay: send the last edits with keepalive
+  // (best effort). During an in-flight save they are based on the revision that
+  // save will produce, so they follow it instead of conflicting with it.
   window.addEventListener("pagehide", function () {
-    if (saveTimer || nextSequence > latestAcknowledged) {
+    if (!canSave()) return;
+    const content = getContent();
+    if (content === lastSentContent) return;
+    if (saveTimer) {
       clearTimeout(saveTimer);
-      saveNote(true);
+      saveTimer = null;
     }
+    const base = saving ? expectedRevision : revision;
+    if (!base) return;
+    lastSentContent = content;
+    putNote(content, base, true).catch(function () {});
   });
 
   function showEdit() {

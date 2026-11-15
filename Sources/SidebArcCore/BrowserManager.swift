@@ -1,5 +1,6 @@
 import AppKit
 import os
+import UniformTypeIdentifiers
 
 struct BrowserInfo: Equatable {
     let bundleId: String
@@ -54,26 +55,122 @@ enum BrowserManager {
 
     /// Opens `link` where `resolveTarget` says. Notes use `resolveTarget(link: nil, profile:)`.
     static func open(link: Link, in profile: Profile) {
-        guard let url = validatedLinkURL(from: link.url) else { return }
+        guard let url = validatedLinkURL(from: link.url) else {
+            NSSound.beep()
+            return
+        }
         open(url: url, target: resolveTarget(link: link, profile: profile))
     }
 
-    /// SidebArc links are web URLs only. Requiring a host rejects relative strings
-    /// that Chromium could otherwise interpret as command-line switches.
+    /// Schemes a link may never use: they run code in a page or address browser
+    /// internals. Links with them are kept (imports never drop links) but never opened.
+    static let blockedLinkSchemes: Set<String> = [
+        "javascript", "vbscript", "data", "blob", "about", "view-source",
+        "chrome", "chrome-extension", "edge", "brave", "opera", "vivaldi", "arc",
+        // Open Terminal with attacker-shaped arguments (past command-injection bugs).
+        "x-man-page", "telnet"
+    ]
+
+    /// A link's URL when it may be stored and opened: an absolute URL with a scheme
+    /// (never a relative string, which Chromium could read as a `--switch`), not in
+    /// `blockedLinkSchemes`. Web URLs need a host, `file:` URLs a path; any other
+    /// scheme (`mailto:`, `obsidian://`, …) is handed to the system, never to a
+    /// browser's command line (`open(url:target:)`).
     static func validatedLinkURL(from string: String) -> URL? {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              let host = components.host, !host.isEmpty else { return nil }
-        return components.url
+              !blockedLinkSchemes.contains(scheme),
+              let url = components.url else { return nil }
+        switch scheme {
+        case "http", "https":
+            guard let host = components.host, !host.isEmpty else { return nil }
+        case "file":
+            guard !components.path.isEmpty, components.path != "/" else { return nil }
+        default:
+            // Something after "scheme:".
+            guard trimmed.count > scheme.count + 1 else { return nil }
+        }
+        return url
     }
 
-    static func isValidLinkURL(_ url: URL) -> Bool {
+    /// A URL the user typed (New Link…, Edit URL…): like `validatedLinkURL`, but a
+    /// bare host gets a scheme: `example.com/x` → `https://example.com/x`,
+    /// `localhost:3000` → `http://localhost:3000`. `name.example:8080` is a host and
+    /// port, not a scheme (a "scheme" with a dot, or `localhost`, is read as a host).
+    static func typedLinkURL(from string: String) -> URL? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace) else { return nil }
+        if trimmed.contains("://") { return validatedLinkURL(from: trimmed) }
+        let beforeColon = trimmed.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? trimmed
+        let lowerHost = beforeColon.split(separator: "/").first.map { $0.lowercased() } ?? ""
+        let looksLikeHost = lowerHost == "localhost" || lowerHost.contains(".")
+        if trimmed.contains(":"), !looksLikeHost {
+            return validatedLinkURL(from: trimmed)  // mailto:, tel:, …
+        }
+        guard looksLikeHost else { return nil }
+        // Local servers rarely have TLS: plain http for localhost and IPv4 addresses.
+        let isIPv4 = lowerHost.split(separator: ".").count == 4
+            && lowerHost.split(separator: ".").allSatisfy { UInt8($0.split(separator: ":").first ?? "") != nil }
+        let scheme = lowerHost == "localhost" || isIPv4 ? "http" : "https"
+        return validatedLinkURL(from: "\(scheme)://\(trimmed)")
+    }
+
+    /// http/https with a host: the only URLs that go to a browser (and its argv).
+    static func isWebURL(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
               let host = url.host, !host.isEmpty else { return false }
         return true
+    }
+
+    /// Opens a non-web link with the system handler (Mail, Obsidian, Finder, …).
+    /// A `file:` URL to something that would run (an app, a script, an executable)
+    /// is revealed in Finder instead, so a planted link can't launch code in one click.
+    static func openOutsideBrowser(_ url: URL) {
+        guard let scheme = url.scheme?.lowercased(), !blockedLinkSchemes.contains(scheme) else {
+            NSSound.beep()
+            return
+        }
+        if url.isFileURL, revealsInsteadOfOpening(url) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return
+        }
+        if !NSWorkspace.shared.open(url) {
+            logger.notice("No app opened a \(scheme, privacy: .public): link")
+            NSSound.beep()
+        }
+    }
+
+    /// Files that launch something when opened: apps and scripts, plus documents
+    /// that run a command or open another file or URL (Terminal settings, Finder
+    /// location files, Automator, installers).
+    static let runnableFileExtensions: Set<String> = [
+        "app", "command", "tool", "sh", "bash", "zsh", "csh", "ksh", "tcsh", "fish",
+        "py", "rb", "pl", "php", "js", "scpt", "scptd", "applescript", "workflow", "action",
+        "terminal", "fileloc", "inetloc", "webloc", "url", "jar", "pkg", "mpkg",
+        "prefpane", "saver", "osax", "kext", "plugin", "shortcut", "service"
+    ]
+
+    /// Whether opening this file would run code rather than show a document. An
+    /// alias or symlink counts as its target too (either being runnable is enough).
+    static func revealsInsteadOfOpening(_ fileURL: URL) -> Bool {
+        let resolved = ((try? URL(resolvingAliasFileAt: fileURL)) ?? fileURL).resolvingSymlinksInPath()
+        return isRunnableFile(fileURL) || isRunnableFile(resolved)
+    }
+
+    private static func isRunnableFile(_ url: URL) -> Bool {
+        if runnableFileExtensions.contains(url.pathExtension.lowercased()) { return true }
+        guard let values = try? url.resourceValues(forKeys: [.contentTypeKey, .isDirectoryKey, .isExecutableKey, .isAliasFileKey]) else {
+            return false  // Missing: `open` fails and beeps.
+        }
+        if values.isAliasFile == true { return true }  // An alias that didn't resolve.
+        if let type = values.contentType,
+           [UTType.application, .applicationBundle, .executable, .unixExecutable, .script, .shellScript]
+               .contains(where: { type.conforms(to: $0) }) {
+            return true
+        }
+        return values.isDirectory != true && values.isExecutable == true
     }
 
     static func installedBrowsers() -> [BrowserInfo] {
@@ -96,9 +193,31 @@ enum BrowserManager {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
     }
 
+    /// Whether `bundleId` is an installed app registered for http(s). Called on every
+    /// click and row badge, so the set of ids (not the icons) is cached briefly.
     static func isBrowser(bundleId: String) -> Bool {
-        installedBrowsers().contains {
-            $0.bundleId.caseInsensitiveCompare(bundleId) == .orderedSame
+        browserIdCache.ids().contains(bundleId.lowercased())
+    }
+
+    private static let browserIdCache = BrowserIdCache()
+
+    /// Lowercased bundle ids of the http handlers, refreshed after `ttl`
+    /// (installing or removing a browser is rare).
+    private final class BrowserIdCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cached: (ids: Set<String>, at: Date)?
+        private let ttl: TimeInterval = 10
+
+        func ids(now: Date = Date()) -> Set<String> {
+            lock.lock()
+            defer { lock.unlock() }
+            if let cached, now.timeIntervalSince(cached.at) < ttl { return cached.ids }
+            guard let probeURL = URL(string: "http://example.com") else { return [] }
+            let ids = Set(NSWorkspace.shared.urlsForApplications(toOpen: probeURL).compactMap {
+                Bundle(url: $0)?.bundleIdentifier?.lowercased()
+            })
+            cached = (ids, now)
+            return ids
         }
     }
 
@@ -147,7 +266,10 @@ enum BrowserManager {
     }
 
     static func open(url: URL, target: BrowserTarget) {
-        guard isValidLinkURL(url) else { return }
+        guard isWebURL(url) else {
+            openOutsideBrowser(url)
+            return
+        }
         guard let bundleId = target.bundleId,
               isBrowser(bundleId: bundleId),
               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
@@ -188,7 +310,7 @@ enum BrowserManager {
     /// when the URL should simply be handed to the browser (no profile, or a browser
     /// without profile support).
     static func launchArguments(url: URL, target: BrowserTarget) -> [String]? {
-        guard isValidLinkURL(url) else { return nil }
+        guard isWebURL(url) else { return nil }
         guard let bundleId = target.bundleId,
               let profile = target.profileDir, !profile.isEmpty else { return nil }
         let profileArgs = profileArguments(for: bundleId, profile: profile)

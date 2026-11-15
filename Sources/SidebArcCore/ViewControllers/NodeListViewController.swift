@@ -50,6 +50,8 @@ final class NodeListViewController: NSViewController {
     var onNewFolderRequested: ((UUID?) -> Void)?
     var onNewNoteRequested: ((UUID?) -> Void)?
     var onLinkUrlEdited: ((UUID, String) -> Void)?
+    /// New Link…: the parent folder (nil = top level) and the validated URL.
+    var onNewLinkRequested: ((UUID?, URL) -> Void)?
     var onOpenFolderLinks: ((UUID) -> Void)?
     var onBulkOpenLinks: (([UUID]) -> Void)?
     var onPinLink: ((UUID) -> Void)?
@@ -923,6 +925,10 @@ extension NodeListViewController: NSMenuDelegate {
 
         guard let indexPath = contextIndexPath,
               let row = row(at: indexPath) else {
+            let newLink = NSMenuItem(title: "New Link…", action: #selector(contextNewLink(_:)), keyEquivalent: "")
+            newLink.target = self
+            menu.addItem(newLink)
+
             let newFolder = NSMenuItem(title: "New Folder…", action: #selector(contextNewFolder), keyEquivalent: "")
             newFolder.target = self
             menu.addItem(newFolder)
@@ -937,6 +943,11 @@ extension NodeListViewController: NSMenuDelegate {
 
         switch node {
         case .folder(let folder):
+            let newLinkInFolder = NSMenuItem(title: "New Link in Folder…", action: #selector(contextNewLink(_:)), keyEquivalent: "")
+            newLinkInFolder.target = self
+            newLinkInFolder.representedObject = node.id
+            menu.addItem(newLinkInFolder)
+
             let newNested = NSMenuItem(title: "New Nested Folder…", action: #selector(contextNewNestedFolder(_:)), keyEquivalent: "")
             newNested.target = self
             newNested.representedObject = node.id
@@ -1101,40 +1112,59 @@ extension NodeListViewController: NSMenuDelegate {
         beginInlineRename(nodeId: row.id, indexPath: indexPath)
     }
 
+    @objc private func contextNewLink(_ sender: NSMenuItem) {
+        let parentId = sender.representedObject as? UUID
+        guard let url = promptForURL(
+            title: parentId == nil ? "New Link" : "New Link in Folder",
+            message: "Enter a web address or an app link (mailto:, obsidian://, file:///…).",
+            initial: "",
+            confirm: "Add"
+        ) else { return }
+        onNewLinkRequested?(parentId, url)
+    }
+
     @objc private func contextEditUrl(_ sender: NSMenuItem) {
         guard let nodeId = sender.representedObject as? UUID,
               let node = findNodeById?(nodeId),
-              case .link(let link) = node else { return }
+              case .link(let link) = node,
+              let url = promptForURL(title: "Edit URL", message: "Enter the new URL for this link.",
+                                     initial: link.url, confirm: "Save"),
+              url.absoluteString != link.url else { return }
+        onLinkUrlEdited?(nodeId, url.absoluteString)
+    }
 
-        let alert = NSAlert()
-        alert.messageText = "Edit URL"
-        alert.informativeText = "Enter the new URL for this link."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
+    /// Asks for a URL (`BrowserManager.typedLinkURL`: "example.com" gets https://).
+    /// An invalid entry explains why and asks again with the text kept; nil when
+    /// cancelled or left empty.
+    private func promptForURL(title: String, message: String, initial: String, confirm: String) -> URL? {
+        var text = initial
+        while true {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.addButton(withTitle: confirm)
+            alert.addButton(withTitle: "Cancel")
 
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        textField.stringValue = link.url
-        textField.placeholderString = "https://example.com"
-        textField.usesSingleLineMode = true
-        textField.cell?.wraps = false
-        textField.cell?.isScrollable = true
-        textField.lineBreakMode = .byTruncatingTail
-        alert.accessoryView = textField
-        alert.window.initialFirstResponder = textField
+            let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+            textField.stringValue = text
+            textField.placeholderString = "https://example.com"
+            textField.usesSingleLineMode = true
+            textField.cell?.wraps = false
+            textField.cell?.isScrollable = true
+            textField.lineBreakMode = .byTruncatingTail
+            alert.accessoryView = textField
+            alert.window.initialFirstResponder = textField
 
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let newUrl = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !newUrl.isEmpty, newUrl != link.url else { return }
-            guard BrowserManager.validatedLinkURL(from: newUrl) != nil else {
-                let errorAlert = NSAlert()
-                errorAlert.messageText = "Invalid URL"
-                errorAlert.informativeText = "Links must use HTTP or HTTPS and include a host."
-                errorAlert.addButton(withTitle: "OK")
-                errorAlert.runModal()
-                return
-            }
-            onLinkUrlEdited?(nodeId, newUrl)
+            guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+            text = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            if let url = BrowserManager.typedLinkURL(from: text) { return url }
+
+            let errorAlert = NSAlert()
+            errorAlert.messageText = "Invalid URL"
+            errorAlert.informativeText = "Enter a web address such as example.com, or a full link such as mailto:name@example.com or obsidian://open?vault=Notes."
+            errorAlert.addButton(withTitle: "OK")
+            errorAlert.runModal()
         }
     }
 

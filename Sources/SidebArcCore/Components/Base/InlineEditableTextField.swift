@@ -158,12 +158,26 @@ final class InlineEditableTextField: NSView {
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isEditingTitle else { return }
+            self.takeKeyboardFocus()
             self.window?.makeFirstResponder(self.textField)
             if let editor = self.textField.currentEditor() {
                 let length = (self.textField.stringValue as NSString).length
                 editor.selectedRange = NSRange(location: 0, length: length)
             }
         }
+    }
+
+    /// A rename can start while the sidebar isn't the key window (a right-click
+    /// menu while the browser is in front, a popover that kept key status). The
+    /// field then looks editable but keys go elsewhere, so Esc beeps and Return
+    /// does nothing. Make the window key, activating SidebArc if needed (only a
+    /// regular app: never the test runner).
+    private func takeKeyboardFocus() {
+        guard let window, !window.isKeyWindow, window.canBecomeKey else { return }
+        if !NSApp.isActive, NSApp.activationPolicy() == .regular {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        window.makeKey()
     }
 
     /// Cancels inline editing and restores the original text.

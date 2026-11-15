@@ -30,7 +30,7 @@ final class SettingsContentViewController: NSViewController {
     // Display section
     private let tooltipsToggle = CustomToggle(title: "Show full URL tooltip on hover")
     private let swipeToSwitchToggle = CustomToggle(title: "Swipe to switch spaces")
-    private let googleFaviconToggle = CustomToggle(title: "Google favicon fallback")
+    private let googleFaviconToggle = CustomToggle(title: "Ask Google for missing favicons")
 
     // Keyboard Shortcuts section
     private let shortcutRecorder = ShortcutRecorderView()
@@ -254,7 +254,7 @@ final class SettingsContentViewController: NSViewController {
         googleFaviconToggle.target = self
         googleFaviconToggle.action = #selector(googleFaviconChanged)
         googleFaviconToggle.translatesAutoresizingMaskIntoConstraints = false
-        let googleFaviconNote = NSTextField(wrappingLabelWithString: "If a site has no icon, send its host to Google, including private hosts.")
+        let googleFaviconNote = NSTextField(wrappingLabelWithString: "When a public site\u{2019}s own icon can\u{2019}t be fetched, send its address (no path) to Google. Local and private hosts are never sent.")
         googleFaviconNote.font = ThemeConstants.Fonts.bodyRegular
         googleFaviconNote.textColor = .secondaryLabelColor
         googleFaviconNote.translatesAutoresizingMaskIntoConstraints = false
@@ -669,7 +669,7 @@ final class SettingsContentViewController: NSViewController {
         // Load swipe to switch state
         let swipeToSwitchEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.swipeToSwitchEnabled)
         swipeToSwitchToggle.isOn = swipeToSwitchEnabled
-        googleFaviconToggle.isOn = UserDefaults.standard.bool(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled)
+        googleFaviconToggle.isOn = FaviconService.googleFallbackEnabled
 
         // Apply mutual exclusion and enable states
         updateControlStates()

@@ -18,7 +18,15 @@ final class TabFocusService {
     private var inFlight: Set<UUID> = []
 
     func open(link: Link, in profile: Profile, allProfiles: [Profile], source: LinkClickSource, invert: Bool) {
-        guard let url = BrowserManager.validatedLinkURL(from: link.url) else { return }
+        guard let url = BrowserManager.validatedLinkURL(from: link.url) else {
+            NSSound.beep()
+            return
+        }
+        // mailto:, obsidian://, file:… go to the system; there is no tab to find.
+        guard BrowserManager.isWebURL(url) else {
+            BrowserManager.openOutsideBrowser(url)
+            return
+        }
         let target = BrowserManager.resolveTarget(link: link, profile: profile)
         let profileTargets = allProfiles.map { BrowserManager.resolveTarget(link: nil, profile: $0) }
         let decision = TabFocus.decide(target: target, profile: profile, profileTargets: profileTargets, source: source, invert: invert)

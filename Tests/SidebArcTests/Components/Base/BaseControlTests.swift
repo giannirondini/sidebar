@@ -107,10 +107,10 @@ fileprivate class TestControl: BaseControl {
 
     @Test func testUpdateTrackingAreasCreatesTrackingArea() {
         control.updateTrackingAreas()
+        control.updateTrackingAreas()
 
-        // Verify tracking area was added by checking that hover events would be processed
-        // This is a basic test to ensure the method completes without error
-        #expect(control != nil)
+        // Exactly one area: a refresh replaces the old one instead of piling up.
+        #expect(control.trackingAreas.count == 1)
     }
 
     // MARK: - Refresh Hover State Tests

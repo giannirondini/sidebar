@@ -31,6 +31,37 @@ final class AppModel {
     var dataLoadIssue: DataStore.LoadIssue? { store.loadIssue }
     var dataFileURL: URL { store.dataFileURL }
 
+    /// Deletes favicon files with the old `<host>.ico` names that nothing in the
+    /// library uses any more (re-fetched favicons are saved under hashed names).
+    /// Never while a library may need its icons back: not when this load failed
+    /// (the state is a stand-in, every file would look unused), and not while a
+    /// library preserved by "Start Empty Library" (`data.unreadable-*.json`) is
+    /// still beside data.json, on any later launch. Returns how many were removed.
+    @discardableResult
+    func removeUnusedLegacyFavicons() -> Int {
+        guard store.loadIssue == nil else { return 0 }
+        let fileManager = FileManager.default
+        let baseDirectory = store.dataFileURL.deletingLastPathComponent()
+        let siblings = (try? fileManager.contentsOfDirectory(atPath: baseDirectory.path)) ?? []
+        guard !siblings.contains(where: { $0.hasPrefix("data.unreadable-") }) else { return 0 }
+        let referenced = DataTransfer.referencedIconFileNames(in: state)
+        let icons = store.iconsDirectory()
+        let names = (try? fileManager.contentsOfDirectory(atPath: icons.path)) ?? []
+        var removed = 0
+        for name in names where FaviconService.isLegacyCacheFileName(name) && !referenced.contains(name) {
+            do {
+                try fileManager.removeItem(at: icons.appendingPathComponent(name))
+                removed += 1
+            } catch {
+                logger.error("Could not remove an unused favicon: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        if removed > 0 {
+            logger.info("Removed \(removed) unused legacy favicon files")
+        }
+        return removed
+    }
+
     func startEmptyLibrary() throws -> URL {
         let empty = DataStore.defaultState()
         let preserved = try store.startEmptyLibrary(with: empty)
@@ -452,9 +483,11 @@ final class AppModel {
     }
 
     @discardableResult
+    /// Adds to the current space. The caller validates the URL first
+    /// (`BrowserManager.validatedLinkURL`); an invalid one is a programming error.
     func addLink(urlString: String, title: String, parentId: UUID?) -> UUID {
         guard let id = addLink(urlString: urlString, title: title, workspaceId: currentWorkspace.id, parentId: parentId) else {
-            preconditionFailure("currentWorkspace is missing from state.workspaces")
+            preconditionFailure("addLink: invalid URL, or currentWorkspace is missing from state.workspaces")
         }
         return id
     }

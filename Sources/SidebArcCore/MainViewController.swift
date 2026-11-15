@@ -352,6 +352,10 @@ final class MainViewController: NSViewController {
             self?.createNoteAndBeginRename(parentId: parentId)
         }
 
+        nodeListViewController.onNewLinkRequested = { [weak self] parentId, url in
+            self?.addLink(url, parentId: parentId)
+        }
+
         nodeListViewController.onLinkUrlEdited = { [weak self] nodeId, newUrl in
             self?.model.updateLinkUrl(id: nodeId, newUrl: newUrl)
         }
@@ -691,6 +695,24 @@ final class MainViewController: NSViewController {
         nodeListViewController.scheduleInlineRename(for: newId)
     }
 
+    /// New Link…: adds `url` (already validated) in `parentId`, opening that folder.
+    /// A web link starts titled with its host and fetches the page title; an app
+    /// link is titled like a pasted one.
+    @discardableResult
+    func addLink(_ url: URL, parentId: UUID?) -> UUID? {
+        if let parentId {
+            model.setFolderExpanded(id: parentId, isExpanded: true)
+        }
+        let isWeb = BrowserManager.isWebURL(url)
+        let title = isWeb ? titleForUrl(url) : Self.title(forAppLink: url)
+        guard let id = model.addLink(urlString: url.absoluteString, title: title,
+                                     workspaceId: model.currentWorkspace.id, parentId: parentId) else { return nil }
+        if isWeb {
+            fetchTitleForNewLink(id: id, url: url)
+        }
+        return id
+    }
+
     func createNoteAndBeginRename(parentId: UUID?) {
         if let parentId {
             model.setFolderExpanded(id: parentId, isExpanded: true)
@@ -715,6 +737,12 @@ final class MainViewController: NSViewController {
     }
 
     func pasteText(_ pasted: String) {
+        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        // First: one app URL may carry a web URL inside (obsidian://…?url=https://…).
+        if let url = Self.appLinkURL(from: trimmed) {
+            model.addLink(urlString: url.absoluteString, title: Self.title(forAppLink: url), parentId: nil)
+            return
+        }
         let urls = extractUrls(from: pasted)
         if !urls.isEmpty {
             for url in urls {
@@ -723,9 +751,31 @@ final class MainViewController: NSViewController {
             }
             return
         }
-        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         model.addNote(title: "Untitled", parentId: nil, content: trimmed)
+    }
+
+    /// A pasted non-web URL that should become a link: the whole paste is one URL
+    /// (`obsidian://…`, `mailto:…`, `file:///…`) that an installed app can open (or an
+    /// existing file). "todo:buy milk" and other text with a colon stay a note.
+    static func appLinkURL(
+        from text: String,
+        canOpen: (URL) -> Bool = { url in
+            url.isFileURL ? FileManager.default.fileExists(atPath: url.path)
+                          : NSWorkspace.shared.urlForApplication(toOpen: url) != nil
+        }
+    ) -> URL? {
+        guard !text.contains(where: \.isWhitespace),
+              let url = BrowserManager.validatedLinkURL(from: text),
+              !BrowserManager.isWebURL(url),
+              canOpen(url) else { return nil }
+        return url
+    }
+
+    /// File name for a file link; otherwise the readable URL (the user can rename it).
+    static func title(forAppLink url: URL) -> String {
+        if url.isFileURL { return url.lastPathComponent }
+        return url.absoluteString.removingPercentEncoding ?? url.absoluteString
     }
 
     private func linkById(_ id: UUID) -> Link? {

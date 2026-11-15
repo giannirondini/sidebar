@@ -18,18 +18,18 @@ final class NoteServer {
     let token: String
     private var listener: NWListener?
     private(set) var port: UInt16 = 0
-    private struct NoteWrite {
-        let client: String
-        let sequence: Int
-        let bases: [String]
-        let result: String
-    }
-    private var noteWrites: [UUID: NoteWrite] = [:]
+    /// A connection that sends nothing for this long is closed.
+    private let idleTimeout: TimeInterval
 
-    init(model: AppModel, resourcesURL: URL? = NoteServer.resolveBundledResourcesURL()) throws {
+    init(
+        model: AppModel,
+        resourcesURL: URL? = NoteServer.resolveBundledResourcesURL(),
+        idleTimeout: TimeInterval = NoteServer.defaultIdleTimeout
+    ) throws {
         self.model = model
         self.noteStorage = model.noteStorage
         self.resourcesURL = resourcesURL
+        self.idleTimeout = idleTimeout
         self.token = try Self.generateToken()
         if resourcesURL == nil {
             logger.error("NoteServer could not locate bundled editor resources; note editor will be unavailable")
@@ -98,7 +98,7 @@ final class NoteServer {
 
     private static let maxHeaderBytes = 16 * 1024
     private static let maxBodyBytes = 8 * 1024 * 1024
-    private static let idleTimeout: TimeInterval = 15
+    static let defaultIdleTimeout: TimeInterval = 15
     private static let maxConnections = 32
     private var connections: [UUID: NWConnection] = [:]
 
@@ -136,7 +136,7 @@ final class NoteServer {
         let connection = state.connection
         let timeout = DispatchWorkItem { connection.cancel() }
         state.timeout = timeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleTimeout, execute: timeout)
+        DispatchQueue.main.asyncAfter(deadline: .now() + idleTimeout, execute: timeout)
         state.connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             MainActor.assumeIsolated {
@@ -260,13 +260,11 @@ final class NoteServer {
             return
         }
 
-        let requiresToken = request.path.hasPrefix("/api/") || request.path.hasPrefix("/editor/")
-        if requiresToken && request.headers["authorization"] != "Bearer \(token)" {
-            if request.path.hasPrefix("/api/") {
-                sendError(status: 401, code: "unauthorized", message: "A valid bearer token is required", on: connection)
-            } else {
-                sendStatus(401, message: "Unauthorized", on: connection)
-            }
+        // Only the API needs the token. The editor page and its /editor/ files are
+        // the bundled, public sources and hold no data.
+        if request.path.hasPrefix("/api/"),
+           !Self.constantTimeEquals(request.headers["authorization"] ?? "", "Bearer \(token)") {
+            sendError(status: 401, code: "unauthorized", message: "A valid bearer token is required", on: connection)
             return
         }
 
@@ -426,52 +424,40 @@ final class NoteServer {
             sendError(status: 400, code: "bad_body", message: "content must be a string", on: connection)
             return
         }
-        let current = Self.noteRevision(noteStorage.read(id: id))
-        var client: String?
-        var sequence: Int?
-        var priorBases: [String] = []
+        // Optional optimistic check: the revision the write is based on must be the
+        // current one (another client wrote otherwise). Without it the write is
+        // unconditional (older clients, the agent CLI).
         if let value = json["revision"] {
             guard let revision = value as? String else {
                 sendError(status: 400, code: "bad_revision", message: "revision must be a string", on: connection)
                 return
             }
-            if json["client_id"] != nil || json["sequence"] != nil {
-                guard let id = json["client_id"] as? String, UUID(uuidString: id) != nil,
-                      let number = json["sequence"] as? Int, number > 0 else {
-                    sendError(status: 400, code: "bad_revision", message: "Invalid editor write sequence", on: connection)
-                    return
-                }
-                client = id
-                sequence = number
-            }
-            let last = noteWrites[id]
-            let sameClient = last?.client == client && last?.result == current
-            let newer = sequence.map { $0 > (last?.sequence ?? 0) } ?? false
-            let canFollow = sameClient && newer && (last?.bases.contains(revision) ?? false)
-            guard (revision == current && !(sameClient && !newer)) || canFollow else {
+            guard revision == Self.noteRevision(noteStorage.read(id: id)) else {
                 sendError(status: 409, code: "note_conflict", message: "Note changed since it was loaded", on: connection)
                 return
             }
-            if sameClient { priorBases = last?.bases ?? [] }
-        } else if json["client_id"] != nil || json["sequence"] != nil {
-            sendError(status: 400, code: "bad_revision", message: "revision is required with an editor write sequence", on: connection)
-            return
         }
         do {
             try noteStorage.write(id: id, content: content)
-            let revision = Self.noteRevision(content)
-            if let client, let sequence, let base = json["revision"] as? String {
-                priorBases.append(base)
-                priorBases.append(current)
-                noteWrites[id] = NoteWrite(client: client, sequence: sequence, bases: Array(priorBases.suffix(128)), result: revision)
-            } else {
-                noteWrites.removeValue(forKey: id)
-            }
-            sendJSON(["ok": true, "revision": revision], on: connection)
+            sendJSON(["ok": true, "revision": Self.noteRevision(content)], on: connection)
         } catch {
             logger.error("Note write failed: \(error.localizedDescription, privacy: .public)")
             sendError(status: 500, code: "write_failed", message: "Could not write note", on: connection)
         }
+    }
+
+    /// Bundled scripts and styles only (no inline code, no `blob:`); API calls to
+    /// this origin; note images from the web; never framed.
+    static let editorContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src https: http: data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+    /// Compares secrets without an early exit, so timing doesn't reveal a prefix.
+    static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+        let a = Array(lhs.utf8), b = Array(rhs.utf8)
+        var difference = UInt8(a.count == b.count ? 0 : 1)
+        for index in 0..<max(a.count, b.count) {
+            difference |= (index < a.count ? a[index] : 0) ^ (index < b.count ? b[index] : 0)
+        }
+        return difference == 0
     }
 
     private static func noteRevision(_ content: String) -> String {
@@ -743,7 +729,7 @@ final class NoteServer {
             return
         }
         guard BrowserManager.validatedLinkURL(from: url) != nil else {
-            sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+            sendError(status: 400, code: "bad_url", message: "url must be an absolute URL (http or https with a host, file, or an app scheme such as mailto: or obsidian:); javascript:, data: and browser-internal schemes are refused", on: connection)
             return
         }
         guard Self.validOptionalUUID(json["parent_id"]) else {
@@ -793,7 +779,7 @@ final class NoteServer {
         if let value = json["url"] {
             guard let url = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
                   BrowserManager.validatedLinkURL(from: url) != nil else {
-                sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+                sendError(status: 400, code: "bad_url", message: "url must be an absolute URL (http or https with a host, file, or an app scheme such as mailto: or obsidian:); javascript:, data: and browser-internal schemes are refused", on: connection)
                 return
             }
         }
@@ -931,7 +917,7 @@ final class NoteServer {
             return
         }
         guard BrowserManager.validatedLinkURL(from: url) != nil else {
-            sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+            sendError(status: 400, code: "bad_url", message: "url must be an absolute URL (http or https with a host, file, or an app scheme such as mailto: or obsidian:); javascript:, data: and browser-internal schemes are refused", on: connection)
             return
         }
         let providedTitle = (json["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -942,7 +928,7 @@ final class NoteServer {
         case .failure(.profileNotFound):
             sendError(status: 404, code: "profile_not_found", message: "Profile not found", on: connection)
         case .failure(.invalidURL):
-            sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+            sendError(status: 400, code: "bad_url", message: "url must be an absolute URL (http or https with a host, file, or an app scheme such as mailto: or obsidian:); javascript:, data: and browser-internal schemes are refused", on: connection)
         case .failure(.full):
             sendError(status: 409, code: "favorites_full", message: "Profile already has \(Profile.maxFavorites) favorites", on: connection)
         case .failure(.duplicate(let existingId)):
@@ -1358,14 +1344,7 @@ final class NoteServer {
             sendStatus(404, message: "Asset Missing", on: connection)
             return
         }
-        guard let start = html.range(of: "<script>"), let end = html.range(of: "</script>", range: start.upperBound..<html.endIndex) else {
-            sendStatus(500, message: "Invalid Editor", on: connection)
-            return
-        }
-        let script = Data(html[start.upperBound..<end.lowerBound].utf8)
-        let hash = Data(SHA256.hash(data: script)).base64EncodedString()
-        let policy = "default-src 'none'; script-src 'sha256-\(hash)' blob:; style-src 'unsafe-inline'; connect-src 'self'; img-src https: http: data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
-        sendResponse(status: 200, statusMessage: "OK", contentType: "text/html; charset=utf-8", body: Data(html.utf8), on: connection, contentSecurityPolicy: policy)
+        sendResponse(status: 200, statusMessage: "OK", contentType: "text/html; charset=utf-8", body: Data(html.utf8), on: connection, contentSecurityPolicy: Self.editorContentSecurityPolicy)
     }
 
     private func serveEditorAsset(relative: String, on connection: NWConnection) {

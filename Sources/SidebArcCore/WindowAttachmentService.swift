@@ -94,8 +94,32 @@ final class WindowAttachmentService {
 
         setupWorkspaceObservers()
         setupScreenChangeObserver()
+        startPermissionWatch()
         attachToBrowser()
         return true
+    }
+
+    /// Revoking Accessibility in System Settings sends no notification, and while
+    /// nothing moves no AX call fails, so the permission is polled while attached.
+    /// `AXIsProcessTrustedWithOptions` without the prompt is a cheap local check.
+    static let permissionPollInterval: TimeInterval = 2
+    private var permissionTimer: Timer?
+
+    private func startPermissionWatch() {
+        permissionTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.permissionPollInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                _ = self?.hasPermissionWhileEnabled()
+            }
+        }
+        timer.tolerance = 0.5
+        RunLoop.main.add(timer, forMode: .common)
+        permissionTimer = timer
+    }
+
+    /// Runs the permission check now (the poll's body).
+    func checkPermissionNow() {
+        _ = hasPermissionWhileEnabled()
     }
 
     /// Replaces the set of browsers (profiles or the default browser changed). A
@@ -132,6 +156,8 @@ final class WindowAttachmentService {
 
     func disable() {
         cancelWindowRetry()
+        permissionTimer?.invalidate()
+        permissionTimer = nil
         logger.notice("Disabled")
 
         isEnabled = false
@@ -191,9 +217,11 @@ final class WindowAttachmentService {
         windowRetryTimer = nil
     }
 
-    /// Hides the sidebar, logging why (the reason helps with flicker reports).
-    private func hide(_ reason: String) {
-        logger.debug("Hide: \(reason, privacy: .private)")
+    /// Hides the sidebar, logging why (the reason helps with flicker reports). The
+    /// reason is a fixed phrase (public); `app` names another app, which stays
+    /// private so the log isn't a timeline of the user's app usage.
+    private func hide(_ reason: String, app: String? = nil) {
+        logger.notice("Hide: \(reason, privacy: .public) \(app ?? "", privacy: .private)")
         delegate?.attachmentServiceShouldHideWindow(self)
     }
 
@@ -253,8 +281,15 @@ final class WindowAttachmentService {
         case hide
     }
 
-    nonisolated static func positionUpdateDecision(frontmostPid: pid_t?, ownPid: pid_t, hasBrowserWindow: Bool) -> PositionUpdateDecision {
-        if frontmostPid == ownPid { return .keepVisible }
+    /// SidebArc itself in front keeps the sidebar. `ownAppActive` (`NSApp.isActive`)
+    /// is checked as well as the frontmost pid: right after a click or a live resize
+    /// in the sidebar, `NSWorkspace.frontmostApplication` can still name the browser
+    /// while the browser no longer reports itself active, which looked like "no
+    /// browser window" and hid the sidebar until the browser was clicked again.
+    nonisolated static func positionUpdateDecision(
+        frontmostPid: pid_t?, ownPid: pid_t, ownAppActive: Bool, hasBrowserWindow: Bool
+    ) -> PositionUpdateDecision {
+        if ownAppActive || frontmostPid == ownPid { return .keepVisible }
         return hasBrowserWindow ? .update : .hide
     }
 
@@ -456,9 +491,11 @@ final class WindowAttachmentService {
         switch Self.positionUpdateDecision(
             frontmostPid: NSWorkspace.shared.frontmostApplication?.processIdentifier,
             ownPid: ProcessInfo.processInfo.processIdentifier,
+            ownAppActive: NSApp.isActive,
             hasBrowserWindow: windowElement != nil
         ) {
         case .keepVisible:
+            replaceBesideLastBrowserFrame()
             return
         case .hide:
             hide("position update: no frontmost browser window")
@@ -502,6 +539,18 @@ final class WindowAttachmentService {
         }
     }
 
+    /// While SidebArc is in front (the user just resized the sidebar), re-place it
+    /// flush with the browser frame last seen, at the current width. Never hides:
+    /// without a known frame or room, the next browser activation decides.
+    private func replaceBesideLastBrowserFrame() {
+        guard let browserFrame = lastBrowserFrame else { return }
+        let sidebarWidth = delegate?.attachmentServiceSidebarWidth(self) ?? ThemeConstants.Sizing.attachedSidebarDefaultWidth
+        guard let newFrame = calculateSidebarFrame(browserFrame: browserFrame, sidebarWidth: sidebarWidth),
+              newFrame != lastSidebarFrame else { return }
+        lastSidebarFrame = newFrame
+        delegate?.attachmentService(self, shouldPositionWindow: newFrame, animated: true)
+    }
+
     // MARK: - Browser Attachment
 
     /// Attaches to the frontmost app if it is a browser in the set, switching from
@@ -525,7 +574,7 @@ final class WindowAttachmentService {
         }
 
         guard isAttachable(frontmost.bundleIdentifier), let frontmostId = frontmost.bundleIdentifier?.lowercased() else {
-            hide("frontmost \(frontmost.bundleIdentifier ?? "?") (pid \(frontmost.processIdentifier)) is not a browser of the set")
+            hide("frontmost app is not a browser of the set", app: frontmost.bundleIdentifier)
             return
         }
 
@@ -551,7 +600,7 @@ final class WindowAttachmentService {
 
         // Find browser window
         guard let windowElement = findFrontmostBrowserWindow(activeApp: frontmost) else {
-            hide("no window found for \(frontmost.bundleIdentifier ?? "?") pid \(frontmost.processIdentifier) (active \(frontmost.isActive), launched \(frontmost.isFinishedLaunching))")
+            hide("no window found for the browser (active \(frontmost.isActive), launched \(frontmost.isFinishedLaunching))", app: frontmost.bundleIdentifier)
             waitForFirstWindow(of: frontmost)
             return
         }
@@ -720,7 +769,7 @@ final class WindowAttachmentService {
                         self.lastFrontmostBundleId = bundleId
                     }
                     self.cancelWindowRetry()
-                    self.hide("activated \(bundleId ?? "?") pid \(app.processIdentifier), not a browser of the set")
+                    self.hide("activated an app that is not a browser of the set", app: bundleId)
                 }
             }
         }
