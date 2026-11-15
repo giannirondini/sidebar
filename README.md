@@ -16,13 +16,13 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 
 **Browser-Attached Sidebar** - Float alongside any browser window (Chrome, Arc, Safari, Brave, etc.) for instant access to your bookmarks without switching apps.
 
-**Workspace Organization** - Organize bookmarks into multiple workspaces with custom window colors. Create nested folder hierarchies with drag-and-drop.
+**Spaces, like Arc** - Organize bookmarks into spaces, each with its own colour and icon, and switch between them from the space bar, the keyboard or a two-finger swipe. Create nested folder hierarchies with drag-and-drop.
 
 **Local-first** - All bookmarks stored in a single JSON file (`~/Library/Application Support/io.github.giannirondini.sidebarc/data.json`).
 
 ## Download
 
-**Latest Release**: [Download SidebArc](https://github.com/giannirondini/sidebarc/releases/latest)
+No release has been published yet: for now, [build it from source](#building-from-source). Releases will appear on the [Releases page](https://github.com/giannirondini/sidebarc/releases) as a DMG.
 
 ### System Requirements
 - macOS 13.0 or later
@@ -31,20 +31,25 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 ## Features
 
 ### Browser Integration
-- **Sidebar Attachment** - Automatically attaches to browser windows and follows them across spaces. If you prefer, you can still use SidebArc as a standalone bookmark manager window, not attaching it anywhere.
-- **Supported Browsers** - Chrome, Arc, Safari, Brave, etc.
+- **Sidebar Attachment** - Attaches to the window of whichever browser your profiles use (or your default browser) is in front, and follows it as you move or resize it; switch from Chrome to Safari and the sidebar follows. Resize the attached sidebar and it keeps that width. If you prefer, you can still use SidebArc as a standalone window, not attached anywhere.
+- **Supported Browsers** - Attachment works with any browser (Chrome, Arc, Safari, Brave, Firefox, etc.).
 - **Always-on-Top Mode** - Pin the SidebArc window to stay visible on top of all apps.
 - **Switch to Open Tabs** - Clicking a favorite switches to the tab where it's already open instead of opening a duplicate (Chrome, Brave, Safari); ⌥-click a list link to do the same. Firefox and other browsers always open a new tab.
 - **Profiles** - Group spaces into profiles (e.g. Personal, Work). Each profile can open links in its own browser and browser profile, and shares one Favorites grid across its spaces. Any link can be set to always open in a specific browser.
 - **Arc Import** - Import pinned tabs, folders and Favorites directly from Arc browser via settings; Arc profiles map to SidebArc profiles.
 - **Browser Import** - Import bookmarks exported as HTML from Chrome, Safari or Firefox.
+- **Export and Import** - Move everything (spaces, Favorites, profiles, notes, icons) to another Mac with **Settings** → **Import & Export** → **Export Data…** / **Import Data…**. Importing replaces your data after a confirmation, and the previous data is kept as an export you can import to undo.
 
 ### Organization
-- **Multiple Workspaces** - Separate bookmark collections with custom-colored workspaces.
+- **Spaces** - Separate bookmark collections. Switch with the space bar at the bottom, ⌘⌥← / ⌘⌥→, or a horizontal two-finger swipe (turn on **Swipe to switch spaces** in Settings).
+- **Colours and Icons** - 16 colours per space, or any colour with its opacity (Change Color → Custom Color…): below 100% the sidebar turns frosted. Give spaces, links and notes an emoji (searchable) or a symbol.
+- **Favorites** - A grid of tiles at the top, shared by the spaces of a profile.
 - **Nested Folders** - Create hierarchical folder structures for your links.
-- **Drag-and-Drop** - Reorder and move bookmarks between folders and workspaces
+- **Notes** - Markdown notes alongside your links.
+- **Scheduled Links** - Have a link open by itself at a set time.
+- **Drag-and-Drop** - Reorder and move bookmarks between folders and spaces
 - **Inline Editing** - Rename folders and links directly in the list
-- **Search & Filter** - Quickly find bookmarks in any workspace
+- **Search & Filter** - Quickly find bookmarks in any space
 
 <p align="center">
   <img src="./Resources/screenshots/settings.jpeg" alt="SidebArc settings" width="100%">
@@ -52,10 +57,19 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 
 ## Installation
 
+Once a release is published:
+
 1. Download the latest `.dmg` file from the [Releases](https://github.com/giannirondini/sidebarc/releases) page
 2. Open the downloaded DMG file
 3. Drag **SidebArc.app** to your **Applications** folder
-4. Launch SidebArc from your Applications folder
+4. SidebArc is signed but not notarized by Apple (that needs a paid developer account), so macOS blocks it the first time. Clear the download's quarantine flag once per new version:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/SidebArc.app
+   ```
+   (Or **System Settings** → **Privacy & Security** → **Open Anyway**.)
+5. Launch SidebArc from your Applications folder
+
+Permissions carry over between releases. Your data lives in `~/Library/Application Support/io.github.giannirondini.sidebarc/` and is kept when you update.
 
 ## Setup
 
@@ -67,7 +81,9 @@ For the sidebar attachment feature to work, grant SidebArc accessibility permiss
 2. Click the **+** button and add **SidebArc.app**
 3. Enable the checkbox next to SidebArc
 
-Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. The app will prompt to grant accessibility permission if the "Attach to window as sidebar" option is selected.
+Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. The app will prompt to grant accessibility permission if the **Attach to Window as Sidebar** option is selected.
+
+If you build SidebArc yourself and later change how it's signed (e.g. from ad-hoc to a certificate), macOS keeps the old grant but it no longer matches: run `tccutil reset Accessibility io.github.giannirondini.sidebarc` and grant it again.
 
 ### Automation Permission (Switch to Open Tabs)
 
@@ -85,9 +101,9 @@ If several profiles open the same browser with different browser profiles (e.g. 
 To import bookmarks from Arc browser:
 
 1. Open SidebArc settings (⌘,)
-2. Click **Import Bookmarks** and select your Arc export file
+2. Click **Import from Arc Browser**
 
-Arc stores your workspace locally in `~/Library/Application Support/Arc/StorableSidebar.json`. SidebArc parses this file to recreate exactly the same folder and spaces structure you've had previously.
+SidebArc reads Arc's sidebar file directly from `~/Library/Application Support/Arc/StorableSidebar.json` (no file to pick) and recreates your spaces with their pinned tabs and folders, plus each Arc profile's Favorites. Your existing spaces are kept.
 
 ## Agent Skill
 
@@ -142,6 +158,8 @@ cd sidebarc
 ./scripts/build.sh --dmg
 ```
 
+Builds are signed ad-hoc unless you set up a local signing certificate (`.signing-config`), which keeps privacy permissions stable across rebuilds: see [Code signing](docs/BUILD_AND_CODESIGN.md#code-signing).
+
 The app is built to `.build/bundler/SidebArc.app` and can be run directly:
 ```bash
 open .build/bundler/SidebArc.app
@@ -150,7 +168,7 @@ open .build/bundler/SidebArc.app
 ## Contributing
 For bug reports, please [open an issue](https://github.com/giannirondini/sidebarc/issues).
 
-For other changes, feel free to a open pull requests. See [CLAUDE.md](CLAUDE.md) and `docs/` for architecture details, development guidelines, and build instructions.
+For other changes, feel free to open a pull request. See [CLAUDE.md](CLAUDE.md) and `docs/` for architecture details, development guidelines, and build instructions.
 
 ## License
 
