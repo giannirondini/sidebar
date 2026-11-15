@@ -30,6 +30,7 @@ final class SettingsContentViewController: NSViewController {
     // Display section
     private let tooltipsToggle = CustomToggle(title: "Show full URL tooltip on hover")
     private let swipeToSwitchToggle = CustomToggle(title: "Swipe to switch spaces")
+    private let googleFaviconToggle = CustomToggle(title: "Google favicon fallback")
 
     // Keyboard Shortcuts section
     private let shortcutRecorder = ShortcutRecorderView()
@@ -250,6 +251,14 @@ final class SettingsContentViewController: NSViewController {
         swipeToSwitchToggle.action = #selector(swipeToSwitchChanged)
         swipeToSwitchToggle.translatesAutoresizingMaskIntoConstraints = false
 
+        googleFaviconToggle.target = self
+        googleFaviconToggle.action = #selector(googleFaviconChanged)
+        googleFaviconToggle.translatesAutoresizingMaskIntoConstraints = false
+        let googleFaviconNote = NSTextField(wrappingLabelWithString: "If a site has no icon, send its host to Google, including private hosts.")
+        googleFaviconNote.font = ThemeConstants.Fonts.bodyRegular
+        googleFaviconNote.textColor = .secondaryLabelColor
+        googleFaviconNote.translatesAutoresizingMaskIntoConstraints = false
+
         let separatorDisplay = createSeparator()
 
         // Workspace Management Section
@@ -355,6 +364,8 @@ final class SettingsContentViewController: NSViewController {
         contentView.addSubview(displayHeader)
         contentView.addSubview(tooltipsToggle)
         contentView.addSubview(swipeToSwitchToggle)
+        contentView.addSubview(googleFaviconToggle)
+        contentView.addSubview(googleFaviconNote)
         contentView.addSubview(separatorDisplay)
         contentView.addSubview(workspaceHeader)
         contentView.addSubview(workspaceCollectionView)
@@ -447,10 +458,19 @@ final class SettingsContentViewController: NSViewController {
             swipeToSwitchToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
             swipeToSwitchToggle.heightAnchor.constraint(equalToConstant: 28),
 
+            googleFaviconToggle.leadingAnchor.constraint(equalTo: displayHeader.leadingAnchor),
+            googleFaviconToggle.topAnchor.constraint(equalTo: swipeToSwitchToggle.bottomAnchor, constant: itemSpacing),
+            googleFaviconToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            googleFaviconToggle.heightAnchor.constraint(equalToConstant: 28),
+
+            googleFaviconNote.leadingAnchor.constraint(equalTo: displayHeader.leadingAnchor),
+            googleFaviconNote.topAnchor.constraint(equalTo: googleFaviconToggle.bottomAnchor, constant: controlLabelSpacing),
+            googleFaviconNote.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
             // Separator Display
             separatorDisplay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
             separatorDisplay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            separatorDisplay.topAnchor.constraint(equalTo: swipeToSwitchToggle.bottomAnchor, constant: sectionSpacing),
+            separatorDisplay.topAnchor.constraint(equalTo: googleFaviconNote.bottomAnchor, constant: sectionSpacing),
             separatorDisplay.heightAnchor.constraint(equalToConstant: 1),
 
             // Workspace Management Header
@@ -649,6 +669,7 @@ final class SettingsContentViewController: NSViewController {
         // Load swipe to switch state
         let swipeToSwitchEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.swipeToSwitchEnabled)
         swipeToSwitchToggle.isOn = swipeToSwitchEnabled
+        googleFaviconToggle.isOn = UserDefaults.standard.bool(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled)
 
         // Apply mutual exclusion and enable states
         updateControlStates()
@@ -837,6 +858,10 @@ final class SettingsContentViewController: NSViewController {
         let enabled = swipeToSwitchToggle.isOn
         UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.swipeToSwitchEnabled)
         NotificationCenter.default.post(name: .swipeToSwitchSettingChanged, object: nil)
+    }
+
+    @objc private func googleFaviconChanged() {
+        UserDefaults.standard.set(googleFaviconToggle.isOn, forKey: UserDefaultsKeys.googleFaviconFallbackEnabled)
     }
 
     private func shortcutChanged(_ shortcut: KeyboardShortcut?) {
@@ -1268,6 +1293,7 @@ final class SettingsContentViewController: NSViewController {
         contextWorkspaceId = workspaceId
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         // Rename option
         let renameItem = NSMenuItem(title: "Rename Space…", action: #selector(beginInlineRenameForContextWorkspace), keyEquivalent: "")

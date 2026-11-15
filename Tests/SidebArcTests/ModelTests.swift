@@ -9,6 +9,24 @@ import Testing
         return DataStore(baseDirectory: temp)
     }
 
+    @Test func chromeImportNotifiesOnlyAfterTheWholeSpaceIsSaved() throws {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        model.showSettings()
+        let profileId = model.currentProfile.id
+        let link = Link(id: UUID(), title: "Imported", url: "https://example.com", faviconPath: nil)
+        let workspace = ImportWorkspace(name: "Imported", colorId: .moss, nodes: [.link(link)])
+        var observedNodeCounts: [Int] = []
+        model.onChange = {
+            observedNodeCounts.append(AppModel(store: store).currentWorkspace.items.count)
+        }
+        model.applyChromeImport(workspace)
+        #expect(observedNodeCounts == [1])
+        #expect(model.currentWorkspace.profileId == profileId)
+        #expect(model.isSettingsShown)
+        #expect(AppModel(store: store).currentWorkspace.items.first?.id == link.id)
+    }
+
     @Test func invalidMoveDestinationsPreserveNodes() throws {
         let store = makeStore()
         let model = AppModel(store: store)

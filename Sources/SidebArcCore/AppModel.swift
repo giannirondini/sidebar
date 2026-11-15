@@ -220,8 +220,12 @@ final class AppModel {
     }
 
     func applyChromeImport(_ workspace: ImportWorkspace) {
-        let id = createWorkspace(name: workspace.name, colorId: workspace.colorId)
-        updateWorkspace(id: id) { $0.items = workspace.nodes }
+        let imported = Workspace(id: UUID(), name: workspace.name, colorId: workspace.colorId,
+                                 items: workspace.nodes, profileId: currentProfile.id)
+        state.workspaces.append(imported)
+        state.selectedWorkspaceId = imported.id
+        UserDefaults.standard.set(imported.id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+        persist()
     }
 
     // MARK: - Data export and import (Phase 3b.3)

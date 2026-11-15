@@ -518,10 +518,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             lastManualFrame = window.frame
         }
 
+        guard WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) else { return }
         isAttachmentMode = true
         updateWindowConstraints()
-
-        WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position)
     }
 
     /// Every profile's browser and the global default (3b.1 option B).
@@ -650,9 +649,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
                 lastManualFrame = window.frame
             }
 
+            guard WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) else { return }
             isAttachmentMode = true
             updateWindowConstraints()
-            WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position)
         } else {
             // Disable attachment
             WindowAttachmentService.shared.disable()
@@ -677,7 +676,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         // Re-enable with new position
         WindowAttachmentService.shared.disable()
-        WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position)
+        if !WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) {
+            attachmentServiceDidLosePermissions(WindowAttachmentService.shared)
+        }
     }
 
     @objc private func handleToggleSidebarShortcutChanged() {
@@ -701,6 +702,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     // MARK: - WindowAttachmentServiceDelegate
+
+    func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService) {
+        isAttachmentMode = false
+        updateWindowConstraints()
+        if !isUserHidden {
+            window?.orderFront(nil)
+        }
+    }
 
     func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool) {
         guard let window = window else { return }

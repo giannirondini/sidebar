@@ -135,6 +135,7 @@ final class NodeListViewController: NSViewController {
         collectionView.addSubview(dropIndicator)
 
         contextMenu.delegate = self
+        contextMenu.autoenablesItems = false
         collectionView.menu = contextMenu
     }
 
@@ -192,7 +193,8 @@ final class NodeListViewController: NSViewController {
     func reloadData(with nodes: [Node], forceExpand: Bool, animated: Bool = true) {
         let newRows = buildVisibleRows(nodes: nodes, depth: 0, forceExpand: forceExpand)
 
-        if !animated {
+        let preservesRename = inlineRenameNodeId != nil && visibleRows.map(\.id) == newRows.map(\.id)
+        if !animated && !preservesRename {
             visibleRows = newRows
             collectionView.reloadData()
             return
@@ -300,6 +302,17 @@ final class NodeListViewController: NSViewController {
     }
 
     private func applyVisibleRows(_ newRows: [NodeListRow]) {
+        if let renameId = inlineRenameNodeId,
+           visibleRows.map(\.id) == newRows.map(\.id) {
+            visibleRows = newRows
+            let otherRows = Set(newRows.enumerated().compactMap { index, row in
+                row.id == renameId ? nil : IndexPath(item: index, section: 0)
+            })
+            if !otherRows.isEmpty {
+                collectionView.reloadItems(at: otherRows)
+            }
+            return
+        }
         if isSearchActive || collectionView.window == nil {
             visibleRows = newRows
             collectionView.reloadData()
@@ -428,7 +441,7 @@ final class NodeListViewController: NSViewController {
         }
     }
 
-    private func beginInlineRename(nodeId: UUID, indexPath: IndexPath) {
+    func beginInlineRename(nodeId: UUID, indexPath: IndexPath) {
         cancelInlineRename()
         guard findNodeById?(nodeId) != nil,
               let item = collectionView.item(at: indexPath) as? NodeCollectionViewItem else {
@@ -461,12 +474,25 @@ final class NodeListViewController: NSViewController {
 
     private func handleInlineRenameCancelled() {
         suppressNextSelection = true
+        DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.suppressNextSelection = false
+            }
+        }
         clearInlineRenameState()
     }
 
     private func clearInlineRenameState() {
+        let previousId = inlineRenameNodeId
         inlineRenameItem = nil
         inlineRenameNodeId = nil
+        if let previousId {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.inlineRenameNodeId == nil,
+                      let index = self.visibleRows.firstIndex(where: { $0.id == previousId }) else { return }
+                self.collectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
+            }
+        }
     }
 
     private func toggleSelection(for nodeId: UUID) {

@@ -14,6 +14,7 @@ protocol WindowAttachmentServiceDelegate: AnyObject {
     func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool)
     func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService)
     func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService)
+    func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService)
     /// Width of the attached sidebar (the user's, kept within the window's limits).
     func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat
 }
@@ -23,6 +24,7 @@ final class WindowAttachmentService {
     static let shared = WindowAttachmentService()
     /// `/usr/bin/log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "attach"'`
     private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "attach")
+    private let permissionCheck: () -> Bool
 
     weak var delegate: WindowAttachmentServiceDelegate?
 
@@ -68,15 +70,20 @@ final class WindowAttachmentService {
     // Smooth animation using NSAnimationContext
     private var isAnimating: Bool = false
 
-    private init() {}
+    init(permissionCheck: @escaping () -> Bool = {
+        let optionKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        return AXIsProcessTrustedWithOptions([optionKey: false] as CFDictionary)
+    }) {
+        self.permissionCheck = permissionCheck
+    }
 
     // MARK: - Public Interface
 
-    func enable(browserBundleIds: [String], position: SidebarPosition) {
+    @discardableResult
+    func enable(browserBundleIds: [String], position: SidebarPosition) -> Bool {
         guard checkAccessibilityPermissions() else {
             logger.notice("Accessibility not granted")
-            requestAccessibilityPermissions()
-            return
+            return false
         }
 
         logger.notice("Enabled for \(browserBundleIds, privacy: .public), position \(position.rawValue, privacy: .public)")
@@ -88,6 +95,7 @@ final class WindowAttachmentService {
         setupWorkspaceObservers()
         setupScreenChangeObserver()
         attachToBrowser()
+        return true
     }
 
     /// Replaces the set of browsers (profiles or the default browser changed). A
@@ -107,8 +115,19 @@ final class WindowAttachmentService {
     }
 
     func forceUpdate() {
-        guard isEnabled else { return }
+        guard hasPermissionWhileEnabled() else { return }
         updateSidebarPosition(forceShow: true)
+    }
+
+    private func hasPermissionWhileEnabled() -> Bool {
+        guard isEnabled else { return false }
+        guard checkAccessibilityPermissions() else {
+            logger.notice("Accessibility permission lost; leaving attachment mode")
+            disable()
+            delegate?.attachmentServiceDidLosePermissions(self)
+            return false
+        }
+        return true
     }
 
     func disable() {
@@ -131,9 +150,7 @@ final class WindowAttachmentService {
     }
 
     func checkAccessibilityPermissions() -> Bool {
-        let optionKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        let options = [optionKey: false] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
+        permissionCheck()
     }
 
     func requestAccessibilityPermissions() {
@@ -152,7 +169,7 @@ final class WindowAttachmentService {
         let deadline = Date().addingTimeInterval(Self.windowRetryTimeout)
         let timer = Timer(timeInterval: Self.windowRetryInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.isEnabled,
+                guard let self, self.hasPermissionWhileEnabled(),
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                       Date() < deadline else {
                     self?.cancelWindowRetry()
@@ -273,12 +290,14 @@ final class WindowAttachmentService {
         guard app.isActive else { return nil }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(appElement, 0.25)
 
         // Try kAXFocusedWindowAttribute first - directly gets the focused window
         var focusedWindowRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
            let focusedWindow = focusedWindowRef {
             let windowElement = focusedWindow as! AXUIElement
+            AXUIElementSetMessagingTimeout(windowElement, 0.25)
 
             // Check if window is minimized
             var minimized: CFTypeRef?
@@ -298,6 +317,7 @@ final class WindowAttachmentService {
         guard let windows = windowList as? [AXUIElement], let firstWindow = windows.first else {
             return nil
         }
+        AXUIElementSetMessagingTimeout(firstWindow, 0.25)
 
         // Check if window is minimized
         var minimized: CFTypeRef?
@@ -430,7 +450,7 @@ final class WindowAttachmentService {
     }
 
     private func updateSidebarPosition(forceShow: Bool = false) {
-        guard isEnabled else { return }
+        guard hasPermissionWhileEnabled() else { return }
 
         let windowElement = findFrontmostBrowserWindow()
         switch Self.positionUpdateDecision(
@@ -579,8 +599,10 @@ final class WindowAttachmentService {
                 if notificationName == (kAXMovedNotification as String) || notificationName == (kAXResizedNotification as String) {
                     service.schedulePositionUpdate()
                 } else if notificationName == (kAXUIElementDestroyedNotification as String) {
+                    guard let current = service.browserWindowElement, CFEqual(element, current) else { return }
                     service.hide("browser window closed")
                     service.cleanupObservers()
+                    service.browserWindowElement = nil
                 }
             }
         }, &observer)
@@ -629,6 +651,7 @@ final class WindowAttachmentService {
         let added = AXObserverAddNotification(observer, appElement, kAXFocusedWindowChangedNotification as CFString, selfPtr)
         if added != .success {
             logger.notice("Window-focus observer for pid \(newPid) not added (AXError \(added.rawValue)); waiting for a window instead")
+            return
         }
         CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(observer), .defaultMode)
 
@@ -674,6 +697,7 @@ final class WindowAttachmentService {
 
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
+                guard self.hasPermissionWhileEnabled() else { return }
 
                 let bundleId = app.bundleIdentifier
                 let ownBundleId = Bundle.main.bundleIdentifier
@@ -747,11 +771,14 @@ final class WindowAttachmentService {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self else { return }
-
-            // Use longer debounce for screen changes
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.updateSidebarPosition()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.cachedScreen = nil
+                self.cachedScreenFrame = nil
+                // Use longer debounce for screen changes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.updateSidebarPosition()
+                }
             }
         }
     }

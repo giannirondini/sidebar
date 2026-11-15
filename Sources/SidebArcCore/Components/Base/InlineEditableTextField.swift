@@ -157,7 +157,7 @@ final class InlineEditableTextField: NSView {
         textField.isSelectable = true
 
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.isEditingTitle else { return }
             self.window?.makeFirstResponder(self.textField)
             if let editor = self.textField.currentEditor() {
                 let length = (self.textField.stringValue as NSString).length
@@ -215,6 +215,12 @@ final class InlineEditableTextField: NSView {
 // MARK: - NSTextFieldDelegate
 
 extension InlineEditableTextField: NSTextFieldDelegate {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard isEditingTitle, commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        cancelInlineRename()
+        return true
+    }
+
     /// Handles the end of text editing in the text field.
     ///
     /// This delegate method is called when editing ends (Enter key, Escape key, or focus loss).

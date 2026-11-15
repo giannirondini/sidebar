@@ -25,6 +25,7 @@ enum UserDefaultsKeys {
     static let toggleSidebarShortcut = "toggleSidebarShortcut"
     static let tooltipsEnabled = "tooltipsEnabled"
     static let swipeToSwitchEnabled = "swipeToSwitchEnabled"
+    static let googleFaviconFallbackEnabled = "googleFaviconFallbackEnabled"
     /// Bundle id of the browser whose Automation permission was missing when a click
     /// looked for an open tab; Settings › Permissions shows a hint until it's resolved.
     static let tabFocusPermissionHintBundleId = "tabFocusPermissionHintBundleId"

@@ -23,7 +23,7 @@ final class LinkTitleService {
             return
         }
         inFlight.insert(linkId)
-        logger.debug("Fetching title for \(url.absoluteString, privacy: .public)")
+        logger.debug("Fetching title for \(url.host ?? "unknown", privacy: .private)")
 
         Task {
             defer { inFlight.remove(linkId) }
@@ -34,7 +34,7 @@ final class LinkTitleService {
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                    logger.debug("Title fetch non-200 for \(url.absoluteString, privacy: .public)")
+                    logger.debug("Title fetch non-200 for \(url.host ?? "unknown", privacy: .private)")
                     completion(nil)
                     return
                 }
@@ -43,7 +43,7 @@ final class LinkTitleService {
                 let encoding = stringEncoding(from: response) ?? .utf8
                 let html = String(data: limitedData, encoding: encoding) ?? String(data: limitedData, encoding: .utf8)
                 guard let html, let title = extractTitle(from: html) else {
-                    logger.debug("Title parse failed for \(url.absoluteString, privacy: .public)")
+                    logger.debug("Title parse failed for \(url.host ?? "unknown", privacy: .private)")
                     completion(nil)
                     return
                 }
@@ -56,7 +56,7 @@ final class LinkTitleService {
 
                 completion(cleaned.isEmpty ? nil : cleaned)
             } catch {
-                logger.debug("Title fetch error for \(url.absoluteString, privacy: .public)")
+                logger.debug("Title fetch error for \(url.host ?? "unknown", privacy: .private)")
                 completion(nil)
             }
         }

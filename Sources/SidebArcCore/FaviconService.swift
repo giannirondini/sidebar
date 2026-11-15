@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import os
 
 @MainActor
@@ -28,11 +29,12 @@ final class FaviconService {
             return
         }
 
-        let key = host.lowercased()
-        if key == "localhost" || key == "127.0.0.1" {
+        let hostname = host.lowercased()
+        if hostname == "localhost" || hostname == "127.0.0.1" {
             completeAsync(completion, image: nil, path: nil)
             return
         }
+        let key = hostname + (url.port.map { ":\($0)" } ?? "")
 
         if let lastFailure = failureTimestamps[key], Date().timeIntervalSince(lastFailure) < failureCooldown {
             logger.debug("Skipping favicon fetch for \(key, privacy: .public) due to cooldown")
@@ -47,7 +49,7 @@ final class FaviconService {
         }
 
         let iconsDir = store.iconsDirectory()
-        let fileName = key.replacingOccurrences(of: ":", with: "_") + ".ico"
+        let fileName = Self.cacheFileName(for: key)
         let fileURL = iconsDir.appendingPathComponent(fileName)
 
         if let cachedPath, FileManager.default.fileExists(atPath: cachedPath),
@@ -75,9 +77,10 @@ final class FaviconService {
         logger.debug("Fetching favicon for \(key, privacy: .public)")
 
         Task {
-            let scheme = url.scheme ?? "https"
-            let primaryURL = URL(string: "\(scheme)://\(host)/favicon.ico")
-            let fallbackURL = URL(string: "https://www.google.com/s2/favicons?sz=64&domain_url=\(scheme)://\(host)")
+            let (primaryURL, fallbackURL) = Self.faviconURLs(
+                for: url,
+                googleFallbackEnabled: UserDefaults.standard.bool(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled)
+            )
 
             let data = await fetchFaviconData(primary: primaryURL, fallback: fallbackURL)
             defer {
@@ -123,13 +126,40 @@ final class FaviconService {
         }
     }
 
+    static func cacheFileName(for host: String) -> String {
+        SHA256.hash(data: Data(host.lowercased().utf8)).map { String(format: "%02x", $0) }.joined() + ".ico"
+    }
+
+    static func faviconURLs(for url: URL, googleFallbackEnabled: Bool) -> (URL?, URL?) {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              url.host != nil, var site = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return (nil, nil)
+        }
+        site.user = nil
+        site.password = nil
+        site.path = ""
+        site.query = nil
+        site.fragment = nil
+        guard let siteURL = site.url else { return (nil, nil) }
+        site.path = "/favicon.ico"
+
+        var fallback: URL?
+        if googleFallbackEnabled {
+            var components = URLComponents(string: "https://www.google.com/s2/favicons")
+            components?.queryItems = [URLQueryItem(name: "sz", value: "64"),
+                                      URLQueryItem(name: "domain_url", value: siteURL.absoluteString)]
+            fallback = components?.url
+        }
+        return (site.url, fallback)
+    }
+
     private func fetchFaviconData(primary: URL?, fallback: URL?) async -> Data? {
         if let primary {
             if let data = await fetchData(from: primary) {
                 return data
             }
         }
-        if let fallback {
+        if let fallback, UserDefaults.standard.bool(forKey: UserDefaultsKeys.googleFaviconFallbackEnabled) {
             return await fetchData(from: fallback)
         }
         return nil
@@ -142,7 +172,7 @@ final class FaviconService {
                 return data
             }
         } catch {
-            logger.debug("Favicon fetch error \(url.absoluteString, privacy: .public)")
+            logger.debug("Favicon fetch error for \(url.host ?? "unknown", privacy: .private)")
         }
         return nil
     }

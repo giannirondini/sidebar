@@ -408,7 +408,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         transition.favoritesHeightTimer = nil
         pinnedTabsView.heightOverride = nil
         // Cut short (a click, a new gesture): the pages jump to where they were going.
-        pageStage.setOffset(commits ? transition.side * swipeClipContainer.bounds.width : 0)
+        pageStage.setOffset(commits && !transition.reducesMotion ? transition.side * swipeClipContainer.bounds.width : 0)
         view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         // A drag landed mid-way (no settle) was left with a blended colour.
         CATransaction.begin()

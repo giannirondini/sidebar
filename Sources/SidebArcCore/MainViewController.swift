@@ -460,8 +460,8 @@ final class MainViewController: NSViewController {
             nodeListViewController.clearSelections()
             // A rename in progress belongs to the space we just left.
             spaceHeader.cancelInlineRename()
-            lastWorkspaceId = currentWorkspaceId
         }
+        lastWorkspaceId = currentWorkspaceId
 
         // Check if settings is selected
         if model.isSettingsShown {
@@ -660,11 +660,14 @@ final class MainViewController: NSViewController {
     /// Renames happen in the space header, so a space that isn't current is
     /// selected first and the rename starts after the reload.
     private func beginSpaceRename(_ workspaceId: UUID) {
+        if spaceTransition != nil {
+            finishSpaceTransitionNow()
+        }
         if workspaceId == model.currentWorkspace.id && !model.isSettingsShown {
             spaceHeader.beginInlineRename()
         } else {
             scheduleWorkspaceInlineRename(for: workspaceId)
-            model.selectWorkspace(id: workspaceId)
+            requestSpaceSwitch(to: workspaceId)
         }
     }
 

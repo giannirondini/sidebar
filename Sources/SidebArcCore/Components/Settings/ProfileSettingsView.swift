@@ -280,7 +280,6 @@ private final class ProfileRowView: NSView {
             guard row.resolvedBrowser != nil else { return [] }
             return [note("\(browserName) can’t report its open tabs, so links always open a new tab.")]
         }
-        // Set the state before the action, so it doesn't fire on build.
         tabFocusToggle.isOn = TabFocus.isEnabled(profile: row.profile, ambiguous: row.tabFocusAmbiguous)
         tabFocusToggle.target = self
         tabFocusToggle.action = #selector(tabFocusChanged)

@@ -16,7 +16,6 @@ final class CustomToggle: BaseControl {
         didSet {
             if oldValue != isOn {
                 updateAppearance(animated: true)
-                sendAction(action, to: target)
             }
         }
     }
@@ -105,6 +104,7 @@ final class CustomToggle: BaseControl {
 
     override func performAction() {
         isOn.toggle()
+        sendAction(action, to: target)
     }
 
     private func updateAppearance(animated: Bool) {

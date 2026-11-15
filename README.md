@@ -51,6 +51,8 @@ No release has been published yet: for now, [build it from source](#building-fro
 - **Inline Editing** - Rename folders and links directly in the list
 - **Search & Filter** - Quickly find bookmarks in any space
 
+SidebArc requests titles and favicons from bookmarked sites. The optional **Google favicon fallback** in Settings is off by default; when enabled, it sends a site's origin (scheme, host and port, including private hosts) to Google if the site's favicon request fails.
+
 <p align="center">
   <img src="./Resources/screenshots/settings.jpeg" alt="SidebArc settings" width="100%">
 </p>
@@ -81,7 +83,9 @@ For the sidebar attachment feature to work, grant SidebArc accessibility permiss
 2. Click the **+** button and add **SidebArc.app**
 3. Enable the checkbox next to SidebArc
 
-Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. The app will prompt to grant accessibility permission if the **Attach to Window as Sidebar** option is selected.
+Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. Enabling **Attach to Window as Sidebar** in Settings without permission shows a reminder.
+
+If permission is revoked, SidebArc returns to a movable standalone window without clearing the attachment preference. After granting access again, toggle attachment off and on in Settings (or restart the app) to reattach.
 
 If you build SidebArc yourself and later change how it's signed (e.g. from ad-hoc to a certificate), macOS keeps the old grant but it no longer matches: run `tccutil reset Accessibility io.github.giannirondini.sidebarc` and grant it again.
 

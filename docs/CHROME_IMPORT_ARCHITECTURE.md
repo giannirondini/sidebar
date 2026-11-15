@@ -219,9 +219,8 @@ This ensures the user doesn't see Chrome's internal folder structure in SidebArc
 
 `SettingsContentViewController.applyChromeImport`:
 
-1. **Create the space** "Imported Bookmarks" (`.ember`) with `AppModel.createWorkspace`, which puts it in the current space's profile and selects it.
-2. **Add the nodes** recursively (`addNodeToWorkspace`): `addFolder(name:parentId:isExpanded: false)` for folders and `addLink(urlString:title:parentId:)` for links, so each node is its own `AppModel` mutation (and save).
-3. **Stay on Settings**: it doesn't call `selectWorkspace` (that would close Settings). Leaving Settings shows the new space. Arc import, by contrast, leaves the selection unchanged.
+1. **Create the space and its complete node tree** with `AppModel.applyChromeImport`, in the current space's profile. The model selects it and saves and notifies once.
+2. **Stay on Settings**: it doesn't call `selectWorkspace` (that would close Settings). Leaving Settings shows the new space. Arc import, by contrast, leaves the selection unchanged.
 
 ## Data Mapping
 
@@ -326,7 +325,7 @@ Space: "Imported Bookmarks" (color: ember)
 | Top-level folders | N/A (Arc spaces become spaces) | Flattened into root |
 | Favorites | Per Arc profile (`topAppsContainerIDs`) | None |
 | File picker | No (reads from known path) | Yes (NSOpenPanel, .html filter) |
-| Post-import | Selection unchanged; one `AppModel` mutation | Selects the new space, stays on Settings; one mutation per node |
+| Post-import | Selection unchanged; one `AppModel` mutation | Selects the new space, stays on Settings; one `AppModel` mutation |
 | Color assignment | Cyclic (ember, ruby, coral, ...) | Always `.ember` |
 
 ## Edge Cases Handled
@@ -428,7 +427,7 @@ func createBookmarksHTML(body: String) -> String {
 - **ChromeImportTests.swift** — Unit tests
 - **Models.swift** — `Node`, `Folder`, `Link` data models
 - **ArcImportService.swift** — `ImportWorkspace` struct (shared between importers)
-- **AppModel.swift** — `createWorkspace`, `addFolder`, `addLink`
+- **AppModel.swift** — `applyChromeImport`
 
 ### External References
 - [Netscape Bookmark File Format (Microsoft)](https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa753582(v=vs.85))

@@ -11,6 +11,33 @@ import Testing
     private let firefox = "org.mozilla.firefox"
     private let own = AppIdentity.bundleIdentifier
 
+    private final class PermissionDelegate: WindowAttachmentServiceDelegate {
+        var lostPermissions = 0
+        func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService) { lostPermissions += 1 }
+        func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool) {}
+        func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService) {}
+        func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService) {}
+        func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat { 300 }
+    }
+
+    @Test func attachmentRequiresPermissionAndStopsWhenRevoked() {
+        var trusted = false
+        let service = WindowAttachmentService(permissionCheck: { trusted })
+        let delegate = PermissionDelegate()
+        service.delegate = delegate
+        defer { service.disable() }
+        #expect(!service.enable(browserBundleIds: [], position: .right))
+        service.forceUpdate()
+        #expect(delegate.lostPermissions == 0)
+        trusted = true
+        #expect(service.enable(browserBundleIds: [], position: .right))
+        trusted = false
+        service.forceUpdate()
+        #expect(delegate.lostPermissions == 1)
+        service.forceUpdate()
+        #expect(delegate.lostPermissions == 1)
+    }
+
     private func profile(_ browser: String?) -> Profile {
         var profile = Profile(name: browser ?? "Default")
         profile.browserBundleId = browser

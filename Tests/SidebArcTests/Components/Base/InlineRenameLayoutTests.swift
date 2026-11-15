@@ -56,4 +56,24 @@ import Testing
         #expect(field.frame.maxX < Self.rowWidth - Self.trailingInset)
         window.close()
     }
+
+    @Test func escapeKeyCancelsTheRealFieldEditor() throws {
+        let (row, field) = try makeRow(title: "Original")
+        place(row)
+        var cancelled = false
+        row.beginInlineRename(onCommit: { _ in }, onCancel: { cancelled = true })
+        window.makeFirstResponder(field.textField)
+        let editor = try #require(field.textField.currentEditor())
+        editor.string = "Changed"
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                                  timestamp: 0, windowNumber: window.windowNumber,
+                                                  context: nil, characters: "\u{1b}",
+                                                  charactersIgnoringModifiers: "\u{1b}",
+                                                  isARepeat: false, keyCode: 53))
+        editor.keyDown(with: event)
+        #expect(cancelled)
+        #expect(!field.isEditing)
+        #expect(field.text == "Original")
+        window.close()
+    }
 }
