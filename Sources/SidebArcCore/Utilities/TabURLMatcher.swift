@@ -6,11 +6,16 @@ import Foundation
 /// Both modes need the same scheme, host (case-insensitive) and port (an explicit
 /// default port is dropped). The fragment is always ignored.
 /// - **Prefix** (default): the tab's path is the link's path or below it, on a
-///   segment boundary (`/docs` matches `/docs/a`, not `/docs2`); a trailing `/` is
+///   segment boundary (`/docs` matches `/docs/a`, not `/docs2`); one trailing `/` is
 ///   ignored, so a link to the site root matches every page on that host. Every
 ///   query item of the link must be in the tab's query; the tab may have more
 ///   (`watch?v=abc` matches `watch?v=abc&t=10`, not `watch?v=xyz`).
 /// - **Exact** (`Link.exactTabMatch`): same path and the same query items, in any order.
+///
+/// Comparison is lossless apart from percent-encoding of the same character
+/// (`%7e` = `~`): an encoded slash (`/a%2Fb`) is not a separator, an internal
+/// empty segment (`/a//b`) counts, and a query item without a value (`?flag`) is
+/// not one with an empty value (`?flag=`).
 ///
 /// `www.` and http/https are **not** treated as equal: they can serve different
 /// pages, and a weaker match must never focus a tab. This is separate from
@@ -53,10 +58,12 @@ enum TabURLMatcher {
         let scheme: String
         let host: String
         let port: Int?
-        /// Path segments; empty segments (a trailing `/`) are dropped.
+        /// Path segments, each percent-decoded on its own (so `%2F` stays inside
+        /// its segment). Internal empty segments are kept; one trailing `/` is not.
         let segments: [String]
-        /// `name=value` per query item, sorted.
-        let query: [String]
+        /// Query items as a multiset (repeated items count); `value` nil (`?flag`)
+        /// differs from "" (`?flag=`).
+        let query: [URLQueryItem: Int]
 
         init?(_ string: String) {
             let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,21 +76,22 @@ enum TabURLMatcher {
             self.host = host
             let defaultPort = ["http": 80, "https": 443][scheme]
             self.port = components.port == defaultPort ? nil : components.port
-            self.segments = components.path.split(separator: "/").map(String.init)
-            self.query = (components.queryItems ?? [])
-                .map { "\($0.name)=\($0.value ?? "")" }
-                .sorted()
+            self.segments = Self.segments(ofPercentEncodedPath: components.percentEncodedPath)
+            self.query = (components.queryItems ?? []).reduce(into: [:]) { $0[$1, default: 0] += 1 }
+        }
+
+        /// Splits before decoding, so an encoded `/` can't become a separator.
+        /// The leading `/` and one trailing `/` yield no segment; `//` yields "".
+        private static func segments(ofPercentEncodedPath path: String) -> [String] {
+            var raw = path.split(separator: "/", omittingEmptySubsequences: false)
+            if raw.first?.isEmpty == true { raw.removeFirst() }
+            if raw.last?.isEmpty == true { raw.removeLast() }
+            return raw.map { String($0).removingPercentEncoding ?? String($0) }
         }
     }
 
-    /// Multiset inclusion of two sorted arrays (repeated query items count).
-    private static func isSubset(_ small: [String], of large: [String]) -> Bool {
-        var counts: [String: Int] = [:]
-        for item in large { counts[item, default: 0] += 1 }
-        for item in small {
-            guard let count = counts[item], count > 0 else { return false }
-            counts[item] = count - 1
-        }
-        return true
+    /// Multiset inclusion: each item of `small` occurs in `large` at least as often.
+    private static func isSubset(_ small: [URLQueryItem: Int], of large: [URLQueryItem: Int]) -> Bool {
+        small.allSatisfy { item, count in large[item, default: 0] >= count }
     }
 }

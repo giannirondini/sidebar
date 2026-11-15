@@ -35,6 +35,15 @@ import Testing
         // Trailing slash
         Case(item: "https://example.com/docs/", tab: "https://example.com/docs", prefix: true, exact: true, note: "trailing slash on item"),
         Case(item: "https://example.com/docs", tab: "https://example.com/docs/", prefix: true, exact: true, note: "trailing slash on tab"),
+        Case(item: "https://example.com/docs//", tab: "https://example.com/docs/", prefix: false, exact: false, note: "only one trailing slash is ignored"),
+        Case(item: "https://example.com/docs/", tab: "https://example.com/docs//", prefix: true, exact: false, note: "double trailing slash is below the path"),
+        // Path encoding and empty segments
+        Case(item: "https://example.com/a%2Fb", tab: "https://example.com/a/b", prefix: false, exact: false, note: "encoded slash is not a separator"),
+        Case(item: "https://example.com/a/b", tab: "https://example.com/a%2Fb", prefix: false, exact: false, note: "encoded slash is not a separator (reverse)"),
+        Case(item: "https://example.com/a//b", tab: "https://example.com/a/b", prefix: false, exact: false, note: "internal empty segment counts"),
+        Case(item: "https://example.com/a/b", tab: "https://example.com/a//b", prefix: false, exact: false, note: "internal empty segment counts (reverse)"),
+        Case(item: "https://example.com/a%7e", tab: "https://example.com/a~", prefix: true, exact: true, note: "encoded and literal character"),
+        Case(item: "https://example.com/a%7E", tab: "https://example.com/a%7e", prefix: true, exact: true, note: "percent-encoding hex case"),
         // Query
         Case(item: "https://youtube.com/watch?v=abc", tab: "https://youtube.com/watch?v=abc&t=10", prefix: true, exact: false, note: "tab has extra query"),
         Case(item: "https://youtube.com/watch?v=abc", tab: "https://youtube.com/watch?v=xyz", prefix: false, exact: false, note: "different query value"),
@@ -42,6 +51,12 @@ import Testing
         Case(item: "https://example.com/s?a=1&b=2", tab: "https://example.com/s?b=2&a=1", prefix: true, exact: true, note: "query order"),
         Case(item: "https://example.com/docs", tab: "https://example.com/docs?tab=t.0", prefix: true, exact: false, note: "item without query"),
         Case(item: "https://example.com/s?a=1&a=1", tab: "https://example.com/s?a=1", prefix: false, exact: false, note: "repeated query item"),
+        Case(item: "https://example.com/s?a=1", tab: "https://example.com/s?a=1&a=1", prefix: true, exact: false, note: "tab repeats the query item"),
+        Case(item: "https://example.com/s?flag", tab: "https://example.com/s?flag=", prefix: false, exact: false, note: "no value is not an empty value"),
+        Case(item: "https://example.com/s?flag=", tab: "https://example.com/s?flag", prefix: false, exact: false, note: "empty value is not no value"),
+        Case(item: "https://example.com/s?a%3Db=c", tab: "https://example.com/s?a=b%3Dc", prefix: false, exact: false, note: "encoded = in name vs value"),
+        Case(item: "https://example.com/s?a=b%3Dc", tab: "https://example.com/s?a%3Db=c", prefix: false, exact: false, note: "encoded = in value vs name"),
+        Case(item: "https://example.com/s?q=%7e", tab: "https://example.com/s?q=~", prefix: true, exact: true, note: "query percent-encoding"),
         // Fragment
         Case(item: "https://example.com/a#one", tab: "https://example.com/a#two", prefix: true, exact: true, note: "fragment ignored"),
         Case(item: "https://mail.google.com/mail/u/0/", tab: "https://mail.google.com/mail/u/0/#inbox", prefix: true, exact: true, note: "mail with fragment"),
