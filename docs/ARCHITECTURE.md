@@ -1,242 +1,68 @@
-# Arcmark Architecture
+# SidebArc Architecture
 
-**Last Updated:** 2026-02-10
-**Status:** Post-Refactoring (All 5 Phases Complete)
+SidebArc is a macOS bookmark sidebar built with Swift 6 and AppKit (macOS 13+), with no Swift package dependencies (the note editor vendors two JavaScript libraries, listed in `Sources/SidebArcCore/NoteEditor/README.md`). Links, folders and notes live in **spaces**; spaces belong to **profiles**, which share a browser setup and the **Favorites** grid. This page is the map; the details are linked from each section.
 
-## Overview
+| Topic | File |
+|---|---|
+| Rules most tasks need | [CLAUDE.md](../CLAUDE.md) |
+| Data flow, data model, schema versions, mutation pattern, node tree operations, list updates, search | [INTERNALS.md](INTERNALS.md) |
+| Profiles, Favorites, browser routing, Arc import mapping, agent API | [PROFILES_AND_BROWSERS.md](PROFILES_AND_BROWSERS.md) |
+| Switching to open tabs | [TAB_FOCUS.md](TAB_FOCUS.md) |
+| Space layout, space bar, header, Settings, transitions | [SPACES.md](SPACES.md) |
+| Base classes, `ThemeConstants`, component patterns | [COMPONENT_USAGE_GUIDE.md](COMPONENT_USAGE_GUIDE.md) |
+| Arc and Chrome import formats | [ARC_IMPORT_ARCHITECTURE.md](ARC_IMPORT_ARCHITECTURE.md), [CHROME_IMPORT_ARCHITECTURE.md](CHROME_IMPORT_ARCHITECTURE.md) |
+| Build, signing, release | [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md), [DISTRIBUTION.md](DISTRIBUTION.md) |
+| Refactoring of the upstream code (2026-02-10, historical) | [REFACTORING_PLAN.md](REFACTORING_PLAN.md) |
 
-Arcmark is a macOS bookmark management application built with Swift and AppKit. It uses a workspace-based organization system with hierarchical folders and links, featuring drag-and-drop, inline editing, and automatic favicon/title fetching.
-
-## Architecture Patterns
-
-### 1. Unidirectional Data Flow
-
-```
-User Action → MainViewController → AppModel → AppState → DataStore → Disk
-                     ↑                                        ↓
-                     └──────── onChange callback ─────────────┘
-```
-
-- **AppModel**: Single source of truth, owns AppState
-- **AppState**: Immutable data model (Codable)
-- **DataStore**: Persistence layer (JSON + favicon storage)
-- **MainViewController**: UI coordinator, observes AppModel via onChange callback
-
-### 2. Component Architecture (Post-Refactoring)
-
-**Base Classes** eliminate code duplication:
-- `BaseControl`: Interactive controls with hover + pressed states (~40 lines saved per subclass)
-- `BaseView`: Non-interactive views with hover state only (~40 lines saved per subclass)
-- `InlineEditableTextField`: Reusable inline editing component (~80 lines saved per usage)
-
-**Design System** ensures consistency:
-- `ThemeConstants`: Centralized colors, fonts, spacing, opacity, animations
-- Replaces 50+ hardcoded "magic numbers" throughout codebase
-
-## Project Structure
+## Data flow
 
 ```
-Sources/ArcmarkCore/
-├── Components/
-│   ├── Base/
-│   │   ├── BaseControl.swift          # Base for interactive controls
-│   │   ├── BaseView.swift             # Base for custom views
-│   │   └── InlineEditableTextField.swift
-│   ├── Buttons/
-│   │   ├── IconTitleButton.swift      # Extends BaseControl
-│   │   ├── CustomTextButton.swift     # Extends BaseControl
-│   │   └── CustomToggle.swift         # Extends BaseControl
-│   ├── Lists/
-│   │   ├── NodeRowView.swift          # Extends BaseView
-│   │   ├── WorkspaceRowView.swift     # Extends BaseView
-│   │   └── ... (collection view items, layout)
-│   ├── Inputs/
-│   │   └── SearchBarView.swift
-│   └── Navigation/
-│       └── WorkspaceSwitcherView.swift
-├── ViewControllers/
-│   ├── MainViewController.swift       # Main coordinator (596 lines, down from 1352)
-│   ├── NodeListViewController.swift   # Manages collection view (~800 lines)
-│   ├── SearchCoordinator.swift        # Handles search/filtering (~65 lines)
-│   └── ... (preferences, settings)
-├── Models/
-│   ├── Models.swift                   # AppState, Workspace, Node (Link/Folder)
-│   ├── WorkspaceColor.swift
-│   └── SidebarPosition.swift
-├── State/
-│   ├── AppModel.swift                 # Central state manager
-│   └── DataStore.swift                # Persistence layer
-├── Services/
-│   ├── FaviconService.swift           # Async favicon fetching
-│   ├── LinkTitleService.swift         # HTML title extraction
-│   ├── BrowserManager.swift           # Browser selection & URL opening
-│   └── ... (window attachment, Arc import)
-└── Utilities/
-    ├── NodeFiltering.swift            # Recursive filtering
-    └── Theme/
-        └── ThemeConstants.swift       # Design system constants
+User action → view / view controller → AppModel method → AppState → DataStore → data.json
+                     ↑                                                    │
+                     └──────────────── onChange callback ─────────────────┘
 ```
 
-## Core Data Model
+- **`AppModel`** owns `AppState` and is the single source of truth. Every mutation is an `AppModel` method, which persists through `DataStore` and calls `onChange`.
+- **`DataStore`** reads and writes `data.json` in the data directory, keeps rotating backups and the `Icons/` and `Notes/` folders.
+- **UI** observes `onChange` and never mutates state.
 
-```swift
-AppState                      // Root container
-├── workspaces: [Workspace]
-└── selectedWorkspaceId: UUID?
+The model (`AppState` → `Profile`, `Workspace` → `Node`) and schema migration are in [INTERNALS.md › Core Data Model](INTERNALS.md#core-data-model).
 
-Workspace                     // Named container
-├── id: UUID
-├── name: String
-├── emoji: String
-├── color: WorkspaceColorId
-└── items: [Node]             // Root-level items
+## Targets
 
-Node                          // Recursive tree structure
-├── .folder(Folder)
-│   ├── id: UUID
-│   ├── name: String
-│   ├── isExpanded: Bool
-│   └── children: [Node]      // Nested items
-└── .link(Link)
-    ├── id: UUID
-    ├── title: String
-    ├── url: URL
-    └── faviconPath: String?
-```
+| Target | Role |
+|---|---|
+| `SidebArcCore` | Library with all app logic and UI |
+| `SidebArcApp` | Executable entry point (`main.swift`); the bundle's product is `sidebarc` |
+| `SidebArcTests` | swift-testing suites |
 
-## Key Design Decisions
+## Project structure
 
-### State Management
-- **All mutations through AppModel methods** - no direct state access
-- **Automatic persistence** - DataStore saves after every mutation
-- **Observer pattern** - onChange callback for UI updates
-- **Recursive tree operations** - insertNode, updateNode, removeNode, findNodeLocation
+`Sources/SidebArcCore/`, grouped by role (the folders on disk are only partly grouped: many files sit at the top level).
 
-### UI Updates
-- **Collection view animations** - calculated diffs for smooth insertions/deletions
-- **Inline rename pattern** - scheduled via `pendingInlineRenameId`, executed after data reload
-- **Hover state management** - centralized in base classes, no duplicate tracking area code
-- **Design consistency** - all components use ThemeConstants for colors/fonts/spacing
+| Area | Files |
+|---|---|
+| App and state | `AppDelegate` (window, menus, hotkey, attachment wiring), `AppModel`, `DataStore`, `Models` (`AppState`, `Profile`, `Workspace`, `Node`, `Link`, `Folder`, `Note`, `CustomIcon`), `Persistence/SchemaMigration` (`SchemaVersionProbe`, `SchemaV1`, `v1ToV2`), `Persistence/DataTransfer` (export and import), `Constants` (`AppIdentity`), `WorkspaceColor`, `SidebarPosition`, `KeyboardShortcut` |
+| View controllers | `MainViewController` (~1000 lines: layout, model binding, menus) and `MainViewController+SpaceTransition` (~450), `ViewControllers/NodeListViewController` (~1300: list, drag and drop, context menus), `ViewControllers/SearchCoordinator`, `ViewControllers/SidebarBackdropViewController` (window root: behind-window blur under the main view), `SettingsContentViewController` (~1600) |
+| List | `NodeCollectionViewItem`, `NodeRowView`, `ListFlowLayout`, `NodeFiltering`, `ScheduledLinkFiltering`, `Components/ScheduledLinksAccordion/` |
+| Components | `Components/Base/` (`BaseControl`, `BaseView`, `InlineEditableTextField`, `DropIndicatorView`, `FlippedContentView`), `Components/Spaces/` (`SpaceBarView`, `SpaceHeaderView`, `SpaceIconView`, `SpacePageStage`, `SpaceColorPanel`), `Components/PinnedTabs/` (Favorites grid), `Components/Menus/` (`SpaceMenu`, `BrowserMenus`), `Components/Settings/` (`ProfileSettingsView`, `AutomationPermissionView`, `WorkspaceContextMenuCollectionView`), `Components/IconPicker/`, `Components/Buttons/`, `Components/Inputs/ShortcutRecorderView`, `Components/Tooltip/`; at the top level `IconTitleButton`, `CustomToggle`, `SearchBarView`, `SidebarPositionSelector`, `WorkspaceCollectionViewItem`, `WorkspaceRowView` |
+| Browsers and tabs | `BrowserManager` (`resolveTarget`, opening, profile detection), `Services/TabFocus`, `Services/TabFocusService`, `Services/TabLocator`, `Utilities/TabURLMatcher`, `Utilities/URLNormalization` |
+| Services | `FaviconService`, `LinkTitleService`, `WindowAttachmentService` (follows the frontmost profile browser's window over Accessibility), `GlobalHotkeyService`, `SwipeGestureService`, `Services/SchedulerService`, `Services/SchedulePresets`, `ArcImportService`, `ChromeImportService` |
+| Notes | `Notes/NoteStorage` (`Notes/*.md`), `Notes/NoteServer` (token-authenticated loopback HTTP server for the note editor and the agent API), `NoteEditor/` (the editor's HTML/JS, copied into the bundle's resources) |
+| Utilities | `Utilities/Theme/ThemeConstants`, `Utilities/ClosureMenuItem`, `Utilities/SpaceSwipe`, `Utilities/WindowPlacement` |
 
-### ViewController Decomposition (Phase 3)
-- **MainViewController** (596 lines) - Coordinator between search, list, and settings
-- **NodeListViewController** (~800 lines) - Collection view, drag-drop, context menus
-- **SearchCoordinator** (~65 lines) - Search/filtering logic
-- **WorkspaceManagementView** (~380 lines) - Settings workspace management
+## Key design decisions
 
-## Component Patterns
+- **State:** all mutations through `AppModel`; persistence is automatic (callers never call `save()`); `notify: false` suppresses `onChange`; tree edits are recursive (`insertNode`, `updateNode`, `removeNode`, `findNodeLocation`).
+- **Schema:** new fields on synthesized-Codable models are `Optional`; anything else gets a `SchemaVn` mirror and a migration. Migrations never drop links (`Profile.appendFavorites` + a leftovers folder).
+- **UI:** controls extend `BaseControl`, hover-only views `BaseView`; every colour, size and duration comes from `ThemeConstants`; list updates are diffed and animated; inline renames are scheduled with `pendingInlineRenameId` and run after the reload.
+- **Browsers:** where a link opens is decided in one place (`BrowserManager.resolveTarget`); browsers launch through LaunchServices, never as child processes; tab focus uses raw Apple Events by pid, never `NSAppleScript` or `osascript`.
+- **Spaces:** navigation goes through `requestSpaceSwitch(to:)`; views are never moved through their layer `transform`. A space's colours are read through `Workspace.color` / `Workspace.backgroundColor` and painted once, on `MainViewController`'s layer, over the backdrop blur.
 
-### Creating Interactive Controls
+## Testing
 
-```swift
-final class MyButton: BaseControl {
-    override func handleHoverStateChanged() {
-        layer?.backgroundColor = isHovered
-            ? ThemeConstants.Colors.darkGray
-                .withAlphaComponent(ThemeConstants.Opacity.minimal).cgColor
-            : NSColor.clear.cgColor
-    }
+All tests use swift-testing (`import Testing`; XCTest isn't available with Command Line Tools only). Model operations are tested through `AppModel` with a temporary `DataStore`, checking the mutation and the JSON round trip; pure logic (`TabURLMatcher`, `SpaceSwipe`, `SchemaMigration`, `WindowAttachmentService.cocoaFrame`) is tested directly; layout bugs get off-screen probe tests (`InlineRenameLayoutTests`, `PinnedTabsLayoutTests`). Opt-in acceptance tests run against copies of real files (`SIDEBARC_V1_FIXTURE`, `SIDEBARC_ARC_FIXTURE`, `SIDEBARC_TAB_PROBE`). Commands and rules: [CLAUDE.md › Testing](../CLAUDE.md#testing).
 
-    override func handlePressedStateChanged() {
-        // Update appearance based on isPressed
-    }
-}
-```
+## Build
 
-### Creating Custom Views
-
-```swift
-final class MyRowView: BaseView {
-    override func handleHoverStateChanged() {
-        // Update appearance based on isHovered
-    }
-}
-```
-
-### Using ThemeConstants
-
-```swift
-// Colors
-layer?.backgroundColor = ThemeConstants.Colors.darkGray.cgColor
-
-// With opacity
-let hoverColor = ThemeConstants.Colors.darkGray
-    .withAlphaComponent(ThemeConstants.Opacity.minimal)
-
-// Fonts
-label.font = ThemeConstants.Fonts.bodyRegular
-
-// Spacing
-stackView.spacing = ThemeConstants.Spacing.regular
-
-// Animation
-CATransaction.setAnimationDuration(ThemeConstants.Animation.durationFast)
-```
-
-## Testing Strategy
-
-- **Model tests** - JSON round-trip, move operations, filtering
-- **ThemeConstants tests** - Validates all design values (16 tests)
-- **Base class tests** - Currently skipped (Swift 6 concurrency + XCTest issues)
-- **Total: 20 tests** - All passing, zero failures
-
-## Refactoring Impact (2026-02-10)
-
-**Code Reduction:**
-- Eliminated 1,145 lines of duplicate code (14.1% reduction)
-- MainViewController: 1352 → 596 lines (56% reduction)
-
-**Improvements:**
-- Zero functional regressions
-- Centralized design system (ThemeConstants)
-- Eliminated 6+ instances of duplicate hover state logic
-- Eliminated 3+ instances of duplicate inline editing logic
-- Consistent component patterns across all UI
-
-**Documentation:**
-- 900+ lines of comprehensive inline documentation
-- Component usage guide (400+ lines)
-- Architecture and refactoring history documented
-
-## Dependencies
-
-- **Swift 6** with strict concurrency
-- **AppKit** for macOS UI
-- **Swift Bundler** for app bundle creation
-- No external dependencies for core functionality
-
-## Build System
-
-```bash
-# Build app bundle
-./scripts/build.sh
-
-# Build and run
-./scripts/run.sh
-
-# Run tests
-swift test
-```
-
-See [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md) for details on build process and code signing.
-
-## Future Considerations
-
-**Optional Enhancements:**
-- Folder structure reorganization (move files into categorized subdirectories)
-- Visual regression testing suite
-- Async XCTest infrastructure for base class tests
-- Performance benchmarking and profiling
-- Memory leak testing with Instruments
-
-**Architecture is Stable:**
-- All 5 refactoring phases complete
-- Production-ready with comprehensive documentation
-- Ready for new feature development
-
-## Resources
-
-- [CLAUDE.md](../CLAUDE.md) - Detailed development guide
-- [REFACTORING_PLAN.md](REFACTORING_PLAN.md) - Complete refactoring history
-- [COMPONENT_USAGE_GUIDE.md](COMPONENT_USAGE_GUIDE.md) - Component usage patterns
-- [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md) - Build system details
+swift-bundler (pinned in `Mintfile`, run through Mint) builds the app bundle from `Bundler.toml`; the scripts in `scripts/` add signing, Info.plist patches and the DMG. See [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md).

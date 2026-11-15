@@ -2,153 +2,179 @@
   <img src="./Resources/AppIcon.png" width="96" style="filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));">
 </picture>
 
-# Arcmark
+# SidebArc
 
 <p align="center">
-  <img src="./Resources/screenshots/screenshot-1-app.png" alt="Arcmark main window" width="100%">
+  <img src="./Resources/screenshots/application.jpeg" alt="SidebArc main window" width="100%">
 </p>
 
-Arcmark is a native macOS bookmark manager built with Swift and AppKit that attaches to any browser window as a sidebar. 
-Inspired fully by how the tabs organization works in Arc browser's sidebar, so that the author could finally stop using this browser and try something else.
+SidebArc is a native macOS bookmark manager built with Swift and AppKit that attaches to any browser window as a sidebar, organized the way Arc browser's sidebar organizes tabs.
 
-## Demo
+SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: separate bundle id, data and settings.
 
-https://github.com/user-attachments/assets/acc90f08-66c8-42de-9453-8699c2c2f47a
-
-## Why Arcmark?
+## Why SidebArc?
 
 **Browser-Attached Sidebar** - Float alongside any browser window (Chrome, Arc, Safari, Brave, etc.) for instant access to your bookmarks without switching apps.
 
-**Workspace Organization** - Organize bookmarks into multiple workspaces with custom window colors. Create nested folder hierarchies with drag-and-drop.
+**Spaces, like Arc** - Organize bookmarks into spaces, each with its own colour and icon, and switch between them from the space bar, the keyboard or a two-finger swipe. Create nested folder hierarchies with drag-and-drop.
 
-**Local-first** - All bookmarks stored in a single JSON file (`~/Library/Application Support/Arcmark/data.json`).
+**Local-first** - All bookmarks stored in a single JSON file (`~/Library/Application Support/io.github.giannirondini.sidebarc/data.json`).
 
 ## Download
 
-**Latest Release**: [Download Arcmark v0.1.0](https://github.com/Geek-1001/arcmark/releases/latest)
+No release has been published yet: for now, [build it from source](#building-from-source). Releases will appear on the [Releases page](https://github.com/giannirondini/sidebarc/releases) as a DMG.
 
 ### System Requirements
-- macOS 13.0 or later
+- macOS 13.0 or later on a Mac with Apple silicon (the DMG is arm64 only; Intel Macs aren't supported)
 - Accessibility permissions (required for browser window attachment); Not needed if you intend to use it as a standalone window.
 
 ## Features
 
 ### Browser Integration
-- **Sidebar Attachment** - Automatically attaches to browser windows and follows them across spaces. If you prefer, you can still use Arcmark as a standalone bookmark manager window, not attaching it anywhere.
-- **Supported Browsers** - Chrome, Arc, Safari, Brave, etc.
-- **Always-on-Top Mode** - Pin Arcmark window to stay visible on top of all apps.
-- **Arc Import** - Import links (aka pinned tabs) directly from Arc browser via settings.
+- **Sidebar Attachment** - Attaches to the window of whichever browser your profiles use (or your default browser) is in front, and follows it as you move or resize it; switch from Chrome to Safari and the sidebar follows. Resize the attached sidebar and it keeps that width. While none of those browsers is in front (or none is running), SidebArc stays a normal window you can move and resize. If you prefer, you can still use SidebArc as a standalone window, not attached anywhere.
+- **Supported Browsers** - Attachment works with any browser (Chrome, Arc, Safari, Brave, Firefox, etc.).
+- **Always-on-Top Mode** - Pin the SidebArc window to stay visible on top of all apps.
+- **Switch to Open Tabs** - Clicking a favorite switches to the tab where it's already open instead of opening a duplicate (Chrome, Brave, Safari); ⌥-click a list link to do the same. Firefox and other browsers always open a new tab.
+- **Profiles** - Group spaces into profiles (e.g. Personal, Work). Each profile can open links in its own browser and browser profile, and shares one Favorites grid across its spaces. Any link can be set to always open in a specific browser.
+- **Arc Import** - Import pinned tabs, folders and Favorites directly from Arc browser via settings; Arc profiles map to SidebArc profiles.
+- **Browser Import** - Import bookmarks exported as HTML from Chrome, Safari or Firefox.
+- **Export and Import** - Move everything (spaces, Favorites, profiles, notes, icons) to another Mac with **Settings** → **Import & Export** → **Export Data…** / **Import Data…**. Importing replaces your data after a confirmation and backs up the previous data; a readable backup can be imported to undo.
 
 ### Organization
-- **Multiple Workspaces** - Separate bookmark collections with custom-colored workspaces.
+- **Spaces** - Separate bookmark collections. Switch with the space bar at the bottom, ⌘⌥← / ⌘⌥→, or a horizontal two-finger swipe (turn on **Swipe to switch spaces** in Settings).
+- **Colours and Icons** - 16 colours per space, or any colour with its opacity (Change Color → Custom Color…): below 100% the sidebar turns frosted. Give spaces, links and notes an emoji (searchable) or a symbol.
+- **Favorites** - A grid of tiles at the top, shared by the spaces of a profile.
 - **Nested Folders** - Create hierarchical folder structures for your links.
-- **Drag-and-Drop** - Reorder and move bookmarks between folders and workspaces
+- **Notes** - Markdown notes alongside your links.
+- **Scheduled Links** - Have a link open by itself at a set time.
+- **Drag-and-Drop** - Reorder and move bookmarks between folders and spaces
+- **Any Kind of Link** - Web pages, files and app links (`mailto:`, `obsidian://`, `slack://`, …): paste a URL, or right-click the list and choose **New Link…** (in a folder: **New Link in Folder…**). Typing `example.com` is enough. App links open in their app; a link to an app or script is shown in Finder instead of run.
 - **Inline Editing** - Rename folders and links directly in the list
-- **Search & Filter** - Quickly find bookmarks in any workspace
+- **Search & Filter** - Quickly find bookmarks in any space
+
+SidebArc requests titles and favicons from bookmarked sites. When a public site's own favicon can't be fetched, it asks Google's favicon service, sending only the site's origin (scheme, host and port). Local and private hosts (`.local`, `.internal`, single-word names, IP addresses, …) are never sent; turn the fallback off entirely with **Ask Google for missing favicons** in Settings.
 
 <p align="center">
-  <img src="./Resources/screenshots/screenshot-2-settings.png" alt="Arcmark settings" width="100%">
+  <img src="./Resources/screenshots/settings.jpeg" alt="SidebArc settings" width="100%">
 </p>
 
 ## Installation
 
-1. Download the latest `.dmg` file from the [Releases](https://github.com/Geek-1001/arcmark/releases) page
+Once a release is published:
+
+1. Download the latest `.dmg` file from the [Releases](https://github.com/giannirondini/sidebarc/releases) page
 2. Open the downloaded DMG file
-3. Drag **Arcmark.app** to your **Applications** folder
+3. Drag **SidebArc.app** to your **Applications** folder
+4. SidebArc is signed but not notarized by Apple (that needs a paid developer account), so macOS blocks it the first time. Clear the download's quarantine flag once per new version:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/SidebArc.app
+   ```
+   (Or **System Settings** → **Privacy & Security** → **Open Anyway**.)
+5. Launch SidebArc from your Applications folder
 
-![Installation](./Resources/screenshots/screenshot-3-dmg.png)
-
-4. Launch Arcmark from your Applications folder
+Permissions carry over between releases. Your data lives in `~/Library/Application Support/io.github.giannirondini.sidebarc/` and is kept when you update.
 
 ## Setup
 
 ### Accessibility Permissions
 
-For the sidebar attachment feature to work, grant Arcmark accessibility permissions:
+For the sidebar attachment feature to work, grant SidebArc accessibility permissions:
 
 1. Open **System Settings** → **Privacy & Security** → **Accessibility**
-2. Click the **+** button and add **Arcmark.app**
-3. Enable the checkbox next to Arcmark
+2. Click the **+** button and add **SidebArc.app**
+3. Enable the checkbox next to SidebArc
 
-Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. The app will prompt to grant accessibility permission if the "Attach to window as sidebar" option is selected.
+Without this permission, the app will function as a standalone bookmark manager but won't attach to browser windows. Enabling **Attach to Window as Sidebar** in Settings without permission shows a reminder.
+
+If permission is revoked, SidebArc returns to a movable standalone window without clearing the attachment preference. After granting access again, toggle attachment off and on in Settings (or restart the app) to reattach.
+
+If you build SidebArc yourself and later change how it's signed (e.g. from ad-hoc to a certificate), macOS keeps the old grant but it no longer matches: run `tccutil reset Accessibility io.github.giannirondini.sidebarc` and grant it again.
+
+### Automation Permission (Switch to Open Tabs)
+
+To find a tab that's already open, SidebArc asks Chrome, Brave or Safari for their tab URLs over Apple Events. It never reads browser data folders.
+
+1. Open SidebArc **Settings** → **Permissions**, with the browser running
+2. Click **Allow Browser Access…** and allow SidebArc to control the browser
+
+Clicks never trigger the prompt. Without the permission, links open in a new tab as usual. To change it later: **System Settings** → **Privacy & Security** → **Automation** → **SidebArc**.
+
+If several profiles open the same browser with different browser profiles (e.g. Chrome "Default" and "Profile 1"), switching is off for them by default: macOS can't tell which browser profile a tab belongs to, so it might switch to the wrong account. Turn it on per profile in **Settings** → **Profiles**.
 
 ### Importing from Arc
 
 To import bookmarks from Arc browser:
 
-1. Open Arcmark settings (⌘,)
-2. Click **Import Bookmarks** and select your Arc export file
+1. Open SidebArc settings (⌘,)
+2. Click **Import from Arc Browser**
 
-Arc stores your workspace locally in `~/Library/Application Support/Arc/StorableSidebar.json`. Arcmark parses this file to recreate exactly the same folder and spaces structure you've had previously.
+SidebArc reads Arc's sidebar file directly from `~/Library/Application Support/Arc/StorableSidebar.json` (no file to pick) and recreates your spaces with their pinned tabs and folders, plus each Arc profile's Favorites. Your existing spaces are kept.
 
 ## Agent Skill
 
-Arcmark ships an agent skill in `skills/arcmark/` that lets Claude Code (and
+SidebArc ships an agent skill in `skills/sidebarc/` that lets Claude Code (and
 other skill-aware agents) organize bookmarks, folders, and notes on your
 behalf while the app is running. Two ways to install it:
 
 **Option 1 — `npx skills`** (installs into every supported agent at once):
 
 ```bash
-npx skills add Geek-1001/arcmark
+npx skills add giannirondini/sidebarc
 ```
 
-**Option 2 — copy the folder directly.** Grab `skills/arcmark/` from this
+**Option 2 — copy the folder directly.** Grab `skills/sidebarc/` from this
 repo and drop it into the skills directory of whichever agent you use,
 for example:
 
 ```bash
 # Claude Code (project-local)
-cp -R skills/arcmark .claude/skills/
+cp -R skills/sidebarc .claude/skills/
 
 # Claude Code (user-wide)
-cp -R skills/arcmark ~/.claude/skills/
+cp -R skills/sidebarc ~/.claude/skills/
 ```
 
-Arcmark must be running for the skill to work — it talks to a local HTTP
+SidebArc must be running for the skill to work — it talks to a local HTTP
 server inside the app.
 
 ## Building from Source
 
 ### Prerequisites
 
-- macOS 13.0 or later
-- Swift 6.2 or later
-- [swift-bundler](https://github.com/stackotter/swift-bundler)
+- macOS 13.0 or later on Apple silicon (the scripts build an arm64 app)
+- Swift 6.2 or later (Xcode Command Line Tools are enough)
+- [Mint](https://github.com/yonaskolb/Mint): `brew install mint`
 
-### Install swift-bundler
-
-```bash
-mint install stackotter/swift-bundler@main
-```
-
-Or follow instructions at [swiftbundler.dev](https://swiftbundler.dev).
+[swift-bundler](https://github.com/stackotter/swift-bundler) runs through Mint at the revision pinned in `Mintfile`; the first build installs it. See [docs/BUILD_AND_CODESIGN.md](docs/BUILD_AND_CODESIGN.md).
 
 ### Build and Run
 
 ```bash
-git clone https://github.com/yourusername/arcmark.git
-cd arcmark
+git clone https://github.com/giannirondini/sidebarc.git
+cd sidebarc
 
 # Build and run
 ./scripts/run.sh
 
-# Build only (creates .build/bundler/Arcmark.app)
+# Build only (creates .build/bundler/SidebArc.app)
 ./scripts/build.sh
 
-# Create DMG installer
-./scripts/build.sh --dmg
+# Create a DMG (brew install create-dmg; see scripts/README.md). Without the
+# release certificate this is a local test DMG in .build/release/<version>-adhoc/
+./scripts/create-dmg.sh --allow-adhoc
 ```
 
-The app is built to `.build/bundler/Arcmark.app` and can be run directly:
+Builds are signed ad-hoc unless you set up a local signing certificate (`.signing-config`), which keeps privacy permissions stable across rebuilds: see [Code signing](docs/BUILD_AND_CODESIGN.md#code-signing).
+
+The app is built to `.build/bundler/SidebArc.app` and can be run directly:
 ```bash
-open .build/bundler/Arcmark.app
+open .build/bundler/SidebArc.app
 ```
 
 ## Contributing
-For bug reports, please [open an issue](#).
+For bug reports, please [open an issue](https://github.com/giannirondini/sidebarc/issues).
 
-For other changes, feel free to a open pull requests. See [CLAUDE.md](CLAUDE.md) and `docs/` for architecture details, development guidelines, and build instructions.
+For other changes, feel free to open a pull request. See [CLAUDE.md](CLAUDE.md) and `docs/` for architecture details, development guidelines, and build instructions.
 
 ## License
 

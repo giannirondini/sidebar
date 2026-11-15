@@ -1,16 +1,21 @@
 format_version = 2
 
-[apps.Arcmark]
-identifier = 'com.arcmark.app'
-product = 'Arcmark'
-version = '0.1.14'
-description = 'A workspace-based bookmark manager for macOS'
+# The `[apps.<name>]` key is the app name: it names `<name>.app` and the executable
+# inside it. Scripts read it (and `identifier`) via scripts/lib/app-config.sh;
+# Swift mirrors both in `AppIdentity` (Constants.swift), checked by AppIdentityTests.
+[apps.SidebArc]
+identifier = 'io.github.giannirondini.sidebarc'
+product = 'sidebarc'
+version = '1.0.0'
+description = 'A bookmark sidebar for macOS, organised in Spaces'
 license = 'MIT'
 category = 'public.app-category.productivity'
 icon = 'Resources/AppIcon.png'
-minimum_macos_version = '13.0'
+# Minimum macOS comes from `platforms` in Package.swift (swift-bundler v3 has no
+# `minimum_macos_version` key and rejects it).
 
-[apps.Arcmark.plist]
-CFBundleIdentifier = 'com.arcmark.app'
-SUFeedURL = 'https://geek-1001.github.io/arcmark/appcast.xml'
-SUPublicEDKey = 'q6dyx5qi+I6jBIYOGjtrKxXWkBsoY6xW7cKsqiIQPto='
+# Keys merged into Info.plist. swift-bundler doesn't always merge them, so the
+# scripts also set them (`patch_info_plist` in scripts/lib/app-config.sh).
+[apps.SidebArc.plist]
+# Without it macOS denies Apple Events silently, without a prompt (tab focus).
+NSAppleEventsUsageDescription = 'SidebArc looks for a browser tab you already have open, so clicking a favorite focuses it instead of opening a duplicate.'

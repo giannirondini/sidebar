@@ -1,0 +1,7 @@
+# Build tools run through Mint (`brew install mint`). `mint run swift-bundler …`
+# installs this exact revision on first use. Bump deliberately, then rebuild.
+#
+# Pinned to d49cb27 (2025-07-29, reports v3.0.0): the last commit before
+# swift-bundler added ErrorKit, whose .xcstrings resource needs `xcstringstool`,
+# which only ships with Xcode. Later revisions fail to build on Command Line Tools.
+stackotter/swift-bundler@d49cb27f55123b9ba274d291c7508b9cdc630b5c

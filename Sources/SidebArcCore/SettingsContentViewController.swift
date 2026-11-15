@@ -1,0 +1,1649 @@
+//
+//  SettingsContentViewController.swift
+//  SidebArc
+//
+
+import AppKit
+
+final class SettingsContentViewController: NSViewController {
+    // Layout constants
+    private let horizontalPadding: CGFloat = 8
+    private let sectionSpacing: CGFloat = 12        // Distance between sections
+    private let sectionHeaderSpacing: CGFloat = 8   // Distance between section name and content
+    private let itemSpacing: CGFloat = 8           // Distance between items within a section
+    private let controlLabelSpacing: CGFloat = 4    // Distance between label and control
+
+    // Color constants
+    private let sectionHeaderColor = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 0.5)
+    private let regularTextColor = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 1.0)
+
+    // Browser section
+    private let browserPopupContainer = NSView()
+    private let browserPopup = NSPopUpButton()
+    private var browsers: [BrowserInfo] = []
+
+    // Window settings section - custom components
+    private let alwaysOnTopToggle = CustomToggle(title: "Always on Top")
+    private let attachSidebarToggle = CustomToggle(title: "Attach to Window as Sidebar")
+    private let sidebarPositionSelector = SidebarPositionSelector()
+
+    // Display section
+    private let tooltipsToggle = CustomToggle(title: "Show full URL tooltip on hover")
+    private let swipeToSwitchToggle = CustomToggle(title: "Swipe to switch spaces")
+    private let googleFaviconToggle = CustomToggle(title: "Ask Google for missing favicons")
+
+    // Keyboard Shortcuts section
+    private let shortcutRecorder = ShortcutRecorderView()
+
+    // Workspace management section
+    private let workspaceCollectionView = WorkspaceContextMenuCollectionView()
+    private var workspaceCollectionViewHeightConstraint: NSLayoutConstraint?
+    private var contextWorkspaceId: UUID?
+    private var inlineRenameWorkspaceId: UUID?
+    private let workspaceDropIndicator = DropIndicatorView()
+
+    // Permissions section
+    private let permissionStatusLabel = NSTextField(labelWithString: "")
+    private let openSettingsButton = SettingsActionButton(title: "Open System Settings")
+    private let refreshStatusButton = SettingsActionButton(title: "Refresh Status")
+    private let automationPermissionView = AutomationPermissionView()
+
+    // Import & Export section
+    private let importButton = SettingsActionButton(title: "Import from Arc Browser")
+    private let chromeImportButton = SettingsActionButton(title: "Import from Chrome, Safari, Firefox")
+    private let exportDataButton = SettingsActionButton(title: "Export Data…")
+    private let importDataButton = SettingsActionButton(title: "Import Data…")
+    private let importStatusLabel = NSTextField(labelWithString: "")
+
+    // App Version section
+    private let versionLabel = NSTextField(labelWithString: "")
+    private let checkForUpdatesButton = SettingsActionButton(title: "Check for Updates")
+
+    // Profiles Section
+    private let profileSettingsView = ProfileSettingsView()
+
+    // Reference to AppModel (will be set from MainViewController)
+    weak var appModel: AppModel? {
+        didSet {
+            reloadWorkspaces()
+        }
+    }
+
+    // Called by MainViewController when workspaces change
+    func notifyWorkspacesChanged() {
+        reloadWorkspaces()
+    }
+
+    // Scroll view
+    private let scrollView = NSScrollView()
+    private let contentView = FlippedContentView()
+
+    // Dynamic constraints
+    private var separator1ToSelectorConstraint: NSLayoutConstraint?
+    private var separator1ToToggleConstraint: NSLayoutConstraint?
+    private var separator4ToOpenSettingsConstraint: NSLayoutConstraint?
+    private var separator4ToRefreshButtonConstraint: NSLayoutConstraint?
+    private var separator5ToImportDataButtonConstraint: NSLayoutConstraint?
+    private var separator5ToImportStatusConstraint: NSLayoutConstraint?
+
+    override func loadView() {
+        let view = NSView()
+        view.wantsLayer = true
+        self.view = view
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupScrollView()
+        setupWorkspaceCollectionView()
+        setupProfileSettingsView()
+        setupUI()
+        loadPreferences()
+        loadBrowsers()
+        updatePermissionStatus()
+        reloadWorkspaces()
+
+        // Observe app activation to refresh permission status
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        // Observe scroll bounds changes to refresh hover states
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWorkspaceScrollBoundsChanged),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        // Re-check permissions when view appears
+        updatePermissionStatus()
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        // Re-check permissions when app becomes active (user may have granted in System Settings)
+        updatePermissionStatus()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    private func setupScrollView() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = contentView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    private func createSectionHeader(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title.uppercased())
+        label.font = NSFont.systemFont(ofSize: 11, weight: .bold)
+        label.textColor = sectionHeaderColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        // Set letter spacing
+        if let attrString = label.attributedStringValue.mutableCopy() as? NSMutableAttributedString {
+            attrString.addAttribute(.kern, value: 0.5, range: NSRange(location: 0, length: attrString.length))
+            label.attributedStringValue = attrString
+        }
+
+        return label
+    }
+
+    private func createSeparator() -> NSBox {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        return separator
+    }
+
+    private func setupWorkspaceCollectionView() {
+        let layout = ListFlowLayout(metrics: ListMetrics())
+        workspaceCollectionView.collectionViewLayout = layout
+        workspaceCollectionView.translatesAutoresizingMaskIntoConstraints = false
+        workspaceCollectionView.dataSource = self
+        workspaceCollectionView.delegate = self
+        workspaceCollectionView.isSelectable = true  // Changed to true to enable drag and drop
+        workspaceCollectionView.allowsMultipleSelection = false
+        workspaceCollectionView.backgroundColors = [.clear]
+        workspaceCollectionView.workspacesProvider = { [weak self] in
+            self?.appModel?.workspaces ?? []
+        }
+
+        // Set up context menu handler
+        workspaceCollectionView.onRightClick = { [weak self] workspaceId, event in
+            self?.showWorkspaceContextMenu(for: workspaceId, at: event)
+        }
+
+        // Register the workspace item
+        workspaceCollectionView.register(
+            WorkspaceCollectionViewItem.self,
+            forItemWithIdentifier: NSUserInterfaceItemIdentifier("WorkspaceItem")
+        )
+
+        // Register for drag types
+        workspaceCollectionView.registerForDraggedTypes([workspacePasteboardType])
+        workspaceCollectionView.setDraggingSourceOperationMask(.move, forLocal: true)
+
+        // Setup drop indicator
+        workspaceDropIndicator.translatesAutoresizingMaskIntoConstraints = false
+        workspaceCollectionView.addSubview(workspaceDropIndicator)
+    }
+
+    private func setupUI() {
+        // Window Settings Section
+        let windowSettingsHeader = createSectionHeader("Window Settings")
+
+        alwaysOnTopToggle.target = self
+        alwaysOnTopToggle.action = #selector(alwaysOnTopChanged)
+        alwaysOnTopToggle.translatesAutoresizingMaskIntoConstraints = false
+
+        attachSidebarToggle.target = self
+        attachSidebarToggle.action = #selector(attachSidebarChanged)
+        attachSidebarToggle.translatesAutoresizingMaskIntoConstraints = false
+
+        // Setup position selector
+        sidebarPositionSelector.translatesAutoresizingMaskIntoConstraints = false
+        sidebarPositionSelector.onPositionChanged = { [weak self] _ in
+            self?.sidebarPositionChanged()
+        }
+
+        let separator1 = createSeparator()
+
+        // Keyboard Shortcuts Section
+        let shortcutsHeader = createSectionHeader("Keyboard Shortcuts")
+
+        shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
+        shortcutRecorder.onShortcutChanged = { [weak self] shortcut in
+            self?.shortcutChanged(shortcut)
+        }
+
+        let separatorKS = createSeparator()
+
+        // Display Section
+        let displayHeader = createSectionHeader("Display")
+
+        tooltipsToggle.target = self
+        tooltipsToggle.action = #selector(tooltipsChanged)
+        tooltipsToggle.translatesAutoresizingMaskIntoConstraints = false
+
+        swipeToSwitchToggle.target = self
+        swipeToSwitchToggle.action = #selector(swipeToSwitchChanged)
+        swipeToSwitchToggle.translatesAutoresizingMaskIntoConstraints = false
+
+        googleFaviconToggle.target = self
+        googleFaviconToggle.action = #selector(googleFaviconChanged)
+        googleFaviconToggle.translatesAutoresizingMaskIntoConstraints = false
+        let googleFaviconNote = NSTextField(wrappingLabelWithString: "When a public site\u{2019}s own icon can\u{2019}t be fetched, send its address (no path) to Google. Local and private hosts are never sent.")
+        googleFaviconNote.font = ThemeConstants.Fonts.bodyRegular
+        googleFaviconNote.textColor = .secondaryLabelColor
+        googleFaviconNote.translatesAutoresizingMaskIntoConstraints = false
+
+        let separatorDisplay = createSeparator()
+
+        // Workspace Management Section
+        let workspaceHeader = createSectionHeader("Manage Spaces")
+
+        let separator2 = createSeparator()
+
+        // Browser Section
+        let browserHeader = createSectionHeader("Default Browser")
+
+        // Browser popup container with styled background
+        browserPopupContainer.translatesAutoresizingMaskIntoConstraints = false
+        browserPopupContainer.wantsLayer = true
+        browserPopupContainer.layer?.backgroundColor = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 0.08).cgColor
+        browserPopupContainer.layer?.cornerRadius = 8
+
+        browserPopup.translatesAutoresizingMaskIntoConstraints = false
+        browserPopup.target = self
+        browserPopup.action = #selector(browserChanged)
+        browserPopup.font = NSFont.systemFont(ofSize: 13)
+        browserPopup.isBordered = false
+        browserPopup.focusRingType = .none
+
+        // Set content tint color for the chevron arrow
+        if #available(macOS 14.0, *) {
+            browserPopup.contentTintColor = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 0.80)
+        }
+
+        // Profiles Section
+        let separatorProfiles = createSeparator()
+        let profilesHeader = createSectionHeader("Profiles")
+        profileSettingsView.translatesAutoresizingMaskIntoConstraints = false
+
+        let separator3 = createSeparator()
+
+        // Permissions Section
+        let permissionsHeader = createSectionHeader("Permissions")
+
+        permissionStatusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        permissionStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        openSettingsButton.target = self
+        openSettingsButton.action = #selector(openAccessibilitySettings)
+        openSettingsButton.translatesAutoresizingMaskIntoConstraints = false
+
+        refreshStatusButton.target = self
+        refreshStatusButton.action = #selector(refreshPermissionStatus)
+        refreshStatusButton.translatesAutoresizingMaskIntoConstraints = false
+
+        automationPermissionView.translatesAutoresizingMaskIntoConstraints = false
+        automationPermissionView.onAllow = { [weak self] in self?.allowAutomation() }
+
+        let separator4 = createSeparator()
+
+        // Import & Export Section
+        let importHeader = createSectionHeader("Import & Export")
+
+        importButton.target = self
+        importButton.action = #selector(importFromArc)
+        importButton.translatesAutoresizingMaskIntoConstraints = false
+
+        chromeImportButton.target = self
+        chromeImportButton.action = #selector(importFromChrome)
+        chromeImportButton.translatesAutoresizingMaskIntoConstraints = false
+
+        exportDataButton.target = self
+        exportDataButton.action = #selector(exportData)
+        exportDataButton.translatesAutoresizingMaskIntoConstraints = false
+
+        importDataButton.target = self
+        importDataButton.action = #selector(importData)
+        importDataButton.translatesAutoresizingMaskIntoConstraints = false
+
+        importStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        importStatusLabel.textColor = NSColor.secondaryLabelColor
+        importStatusLabel.maximumNumberOfLines = 0
+        importStatusLabel.lineBreakMode = .byWordWrapping
+        importStatusLabel.alignment = .center
+        importStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        importStatusLabel.isHidden = true
+        importStatusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        // App Version Section
+        let versionString = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        versionLabel.stringValue = "Version \(versionString)"
+        versionLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        versionLabel.textColor = regularTextColor
+        versionLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        checkForUpdatesButton.target = self
+        checkForUpdatesButton.action = #selector(checkForUpdates)
+        checkForUpdatesButton.translatesAutoresizingMaskIntoConstraints = false
+
+        // Add all subviews to contentView
+        contentView.addSubview(windowSettingsHeader)
+        contentView.addSubview(alwaysOnTopToggle)
+        contentView.addSubview(attachSidebarToggle)
+        contentView.addSubview(sidebarPositionSelector)
+        contentView.addSubview(separator1)
+        contentView.addSubview(shortcutsHeader)
+        contentView.addSubview(shortcutRecorder)
+        contentView.addSubview(separatorKS)
+        contentView.addSubview(displayHeader)
+        contentView.addSubview(tooltipsToggle)
+        contentView.addSubview(swipeToSwitchToggle)
+        contentView.addSubview(googleFaviconToggle)
+        contentView.addSubview(googleFaviconNote)
+        contentView.addSubview(separatorDisplay)
+        contentView.addSubview(workspaceHeader)
+        contentView.addSubview(workspaceCollectionView)
+        contentView.addSubview(separator2)
+        contentView.addSubview(browserHeader)
+        contentView.addSubview(browserPopupContainer)
+        browserPopupContainer.addSubview(browserPopup)
+        contentView.addSubview(separatorProfiles)
+        contentView.addSubview(profilesHeader)
+        contentView.addSubview(profileSettingsView)
+        contentView.addSubview(separator3)
+        contentView.addSubview(permissionsHeader)
+        contentView.addSubview(permissionStatusLabel)
+        contentView.addSubview(openSettingsButton)
+        contentView.addSubview(refreshStatusButton)
+        contentView.addSubview(automationPermissionView)
+        contentView.addSubview(separator4)
+        contentView.addSubview(importHeader)
+        contentView.addSubview(importButton)
+        contentView.addSubview(chromeImportButton)
+        contentView.addSubview(exportDataButton)
+        contentView.addSubview(importDataButton)
+        contentView.addSubview(importStatusLabel)
+
+        let separator5 = createSeparator()
+        let versionHeader = createSectionHeader("App Version")
+        contentView.addSubview(separator5)
+        contentView.addSubview(versionHeader)
+        contentView.addSubview(versionLabel)
+        contentView.addSubview(checkForUpdatesButton)
+
+        // Layout constraints
+        NSLayoutConstraint.activate([
+            // Content view width should match scroll view width
+            contentView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+
+            // Window Settings Header
+            windowSettingsHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            windowSettingsHeader.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+
+            // Always on Top Toggle
+            alwaysOnTopToggle.leadingAnchor.constraint(equalTo: windowSettingsHeader.leadingAnchor),
+            alwaysOnTopToggle.topAnchor.constraint(equalTo: windowSettingsHeader.bottomAnchor, constant: sectionHeaderSpacing),
+            alwaysOnTopToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            alwaysOnTopToggle.heightAnchor.constraint(equalToConstant: 28),
+
+            // Attach Sidebar Toggle
+            attachSidebarToggle.leadingAnchor.constraint(equalTo: alwaysOnTopToggle.leadingAnchor),
+            attachSidebarToggle.topAnchor.constraint(equalTo: alwaysOnTopToggle.bottomAnchor, constant: itemSpacing),
+            attachSidebarToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            attachSidebarToggle.heightAnchor.constraint(equalToConstant: 28),
+
+            // Position selector buttons (directly below toggle)
+            sidebarPositionSelector.leadingAnchor.constraint(equalTo: attachSidebarToggle.leadingAnchor),
+            sidebarPositionSelector.topAnchor.constraint(equalTo: attachSidebarToggle.bottomAnchor, constant: itemSpacing),
+            sidebarPositionSelector.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
+            // Separator 1
+            separator1.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separator1.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separator1.heightAnchor.constraint(equalToConstant: 1),
+
+            // Keyboard Shortcuts Header
+            shortcutsHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            shortcutsHeader.topAnchor.constraint(equalTo: separator1.bottomAnchor, constant: sectionSpacing),
+
+            // Shortcut Recorder
+            shortcutRecorder.leadingAnchor.constraint(equalTo: shortcutsHeader.leadingAnchor),
+            shortcutRecorder.topAnchor.constraint(equalTo: shortcutsHeader.bottomAnchor, constant: sectionHeaderSpacing),
+            shortcutRecorder.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
+            // Separator KS
+            separatorKS.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separatorKS.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separatorKS.topAnchor.constraint(equalTo: shortcutRecorder.bottomAnchor, constant: sectionSpacing),
+            separatorKS.heightAnchor.constraint(equalToConstant: 1),
+
+            // Display Header
+            displayHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            displayHeader.topAnchor.constraint(equalTo: separatorKS.bottomAnchor, constant: sectionSpacing),
+
+            // Tooltips Toggle
+            tooltipsToggle.leadingAnchor.constraint(equalTo: displayHeader.leadingAnchor),
+            tooltipsToggle.topAnchor.constraint(equalTo: displayHeader.bottomAnchor, constant: sectionHeaderSpacing),
+            tooltipsToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            tooltipsToggle.heightAnchor.constraint(equalToConstant: 28),
+
+            swipeToSwitchToggle.leadingAnchor.constraint(equalTo: displayHeader.leadingAnchor),
+            swipeToSwitchToggle.topAnchor.constraint(equalTo: tooltipsToggle.bottomAnchor, constant: 8),
+            swipeToSwitchToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            swipeToSwitchToggle.heightAnchor.constraint(equalToConstant: 28),
+
+            googleFaviconToggle.leadingAnchor.constraint(equalTo: displayHeader.leadingAnchor),
+            googleFaviconToggle.topAnchor.constraint(equalTo: swipeToSwitchToggle.bottomAnchor, constant: itemSpacing),
+            googleFaviconToggle.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            googleFaviconToggle.heightAnchor.constraint(equalToConstant: 28),
+
+            googleFaviconNote.leadingAnchor.constraint(equalTo: displayHeader.leadingAnchor),
+            googleFaviconNote.topAnchor.constraint(equalTo: googleFaviconToggle.bottomAnchor, constant: controlLabelSpacing),
+            googleFaviconNote.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
+            // Separator Display
+            separatorDisplay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separatorDisplay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separatorDisplay.topAnchor.constraint(equalTo: googleFaviconNote.bottomAnchor, constant: sectionSpacing),
+            separatorDisplay.heightAnchor.constraint(equalToConstant: 1),
+
+            // Workspace Management Header
+            workspaceHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            workspaceHeader.topAnchor.constraint(equalTo: separatorDisplay.bottomAnchor, constant: sectionSpacing),
+
+                // Workspace Collection View - full width without horizontal padding
+            workspaceCollectionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            workspaceCollectionView.topAnchor.constraint(equalTo: workspaceHeader.bottomAnchor, constant: sectionHeaderSpacing),
+            workspaceCollectionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+
+            // Separator 2
+            separator2.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separator2.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separator2.topAnchor.constraint(equalTo: workspaceCollectionView.bottomAnchor, constant: sectionSpacing),
+            separator2.heightAnchor.constraint(equalToConstant: 1),
+
+            // Browser Header
+            browserHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            browserHeader.topAnchor.constraint(equalTo: separator2.bottomAnchor, constant: sectionSpacing),
+
+            // Browser Popup Container (directly below header)
+            browserPopupContainer.leadingAnchor.constraint(equalTo: browserHeader.leadingAnchor),
+            browserPopupContainer.topAnchor.constraint(equalTo: browserHeader.bottomAnchor, constant: sectionHeaderSpacing),
+            browserPopupContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            browserPopupContainer.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Browser Popup inside container
+            browserPopup.leadingAnchor.constraint(equalTo: browserPopupContainer.leadingAnchor, constant: 12),
+            browserPopup.trailingAnchor.constraint(equalTo: browserPopupContainer.trailingAnchor, constant: -12),
+            browserPopup.centerYAnchor.constraint(equalTo: browserPopupContainer.centerYAnchor),
+
+            // Separator Profiles
+            separatorProfiles.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separatorProfiles.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separatorProfiles.topAnchor.constraint(equalTo: browserPopupContainer.bottomAnchor, constant: sectionSpacing),
+            separatorProfiles.heightAnchor.constraint(equalToConstant: 1),
+
+            // Profiles Header
+            profilesHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            profilesHeader.topAnchor.constraint(equalTo: separatorProfiles.bottomAnchor, constant: sectionSpacing),
+
+            // Profile list
+            profileSettingsView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            profileSettingsView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            profileSettingsView.topAnchor.constraint(equalTo: profilesHeader.bottomAnchor, constant: sectionHeaderSpacing),
+
+            // Separator 3
+            separator3.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separator3.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separator3.topAnchor.constraint(equalTo: profileSettingsView.bottomAnchor, constant: sectionSpacing),
+            separator3.heightAnchor.constraint(equalToConstant: 1),
+
+            // Permissions Header
+            permissionsHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            permissionsHeader.topAnchor.constraint(equalTo: separator3.bottomAnchor, constant: sectionSpacing),
+
+            // Permission Status Label
+            permissionStatusLabel.leadingAnchor.constraint(equalTo: permissionsHeader.leadingAnchor),
+            permissionStatusLabel.topAnchor.constraint(equalTo: permissionsHeader.bottomAnchor, constant: sectionHeaderSpacing),
+
+            // Refresh Status Button (below status label)
+            refreshStatusButton.leadingAnchor.constraint(equalTo: permissionStatusLabel.leadingAnchor),
+            refreshStatusButton.topAnchor.constraint(equalTo: permissionStatusLabel.bottomAnchor, constant: itemSpacing),
+            refreshStatusButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            refreshStatusButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Open Settings Button (below refresh button)
+            openSettingsButton.leadingAnchor.constraint(equalTo: refreshStatusButton.leadingAnchor),
+            openSettingsButton.topAnchor.constraint(equalTo: refreshStatusButton.bottomAnchor, constant: itemSpacing),
+            openSettingsButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            openSettingsButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Automation (tab focus), below the Accessibility buttons
+            automationPermissionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            automationPermissionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
+            // Separator 4
+            separator4.topAnchor.constraint(equalTo: automationPermissionView.bottomAnchor, constant: sectionSpacing),
+            separator4.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separator4.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separator4.heightAnchor.constraint(equalToConstant: 1),
+
+            // Import & Export Header
+            importHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            importHeader.topAnchor.constraint(equalTo: separator4.bottomAnchor, constant: sectionSpacing),
+
+            // Import Button (below header)
+            importButton.leadingAnchor.constraint(equalTo: importHeader.leadingAnchor),
+            importButton.topAnchor.constraint(equalTo: importHeader.bottomAnchor, constant: sectionHeaderSpacing),
+            importButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            importButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Chrome Import Button (below Arc import button)
+            chromeImportButton.leadingAnchor.constraint(equalTo: importButton.leadingAnchor),
+            chromeImportButton.topAnchor.constraint(equalTo: importButton.bottomAnchor, constant: itemSpacing),
+            chromeImportButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            chromeImportButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Export / Import Data (moving everything to another Mac)
+            exportDataButton.leadingAnchor.constraint(equalTo: chromeImportButton.leadingAnchor),
+            exportDataButton.topAnchor.constraint(equalTo: chromeImportButton.bottomAnchor, constant: itemSpacing),
+            exportDataButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            exportDataButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            importDataButton.leadingAnchor.constraint(equalTo: exportDataButton.leadingAnchor),
+            importDataButton.topAnchor.constraint(equalTo: exportDataButton.bottomAnchor, constant: itemSpacing),
+            importDataButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            importDataButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Import Status Label (below Import Data)
+            importStatusLabel.leadingAnchor.constraint(equalTo: importDataButton.leadingAnchor),
+            importStatusLabel.topAnchor.constraint(equalTo: importDataButton.bottomAnchor, constant: itemSpacing),
+            importStatusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+
+            // Separator 5
+            separator5.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            separator5.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            separator5.heightAnchor.constraint(equalToConstant: 1),
+
+            // App Version Header
+            versionHeader.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
+            versionHeader.topAnchor.constraint(equalTo: separator5.bottomAnchor, constant: sectionSpacing),
+
+            // Version Label
+            versionLabel.leadingAnchor.constraint(equalTo: versionHeader.leadingAnchor),
+            versionLabel.topAnchor.constraint(equalTo: versionHeader.bottomAnchor, constant: sectionHeaderSpacing),
+
+            // Check for Updates Button
+            checkForUpdatesButton.leadingAnchor.constraint(equalTo: versionLabel.leadingAnchor),
+            checkForUpdatesButton.topAnchor.constraint(equalTo: versionLabel.bottomAnchor, constant: itemSpacing),
+            checkForUpdatesButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            checkForUpdatesButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Bottom constraint to define content height - use greaterThanOrEqualTo to allow content to be anchored at top
+            contentView.bottomAnchor.constraint(greaterThanOrEqualTo: checkForUpdatesButton.bottomAnchor, constant: 24),
+        ])
+
+        // Setup dynamic constraints for separator1
+        separator1ToSelectorConstraint = separator1.topAnchor.constraint(equalTo: sidebarPositionSelector.bottomAnchor, constant: sectionSpacing)
+        separator1ToToggleConstraint = separator1.topAnchor.constraint(equalTo: attachSidebarToggle.bottomAnchor, constant: sectionSpacing)
+
+        // Activate the appropriate constraint based on initial state
+        separator1ToSelectorConstraint?.isActive = true
+
+        // Setup dynamic constraints below the Accessibility buttons (permissions section)
+        // openSettingsButton is shown/hidden based on accessibility permission status;
+        // the Automation view (then separator4) follows whichever button is last.
+        separator4ToOpenSettingsConstraint = automationPermissionView.topAnchor.constraint(equalTo: openSettingsButton.bottomAnchor, constant: sectionSpacing)
+        separator4ToRefreshButtonConstraint = automationPermissionView.topAnchor.constraint(equalTo: refreshStatusButton.bottomAnchor, constant: sectionSpacing)
+        // Default: openSettingsButton is visible
+        separator4ToOpenSettingsConstraint?.isActive = true
+
+        // Setup dynamic constraints for separator5 (import section)
+        // importStatusLabel is hidden by default, shown temporarily after import
+        separator5ToImportDataButtonConstraint = separator5.topAnchor.constraint(equalTo: importDataButton.bottomAnchor, constant: sectionSpacing)
+        separator5ToImportStatusConstraint = separator5.topAnchor.constraint(equalTo: importStatusLabel.bottomAnchor, constant: sectionSpacing)
+        // Default: importStatusLabel is hidden, anchor to importDataButton
+        separator5ToImportDataButtonConstraint?.isActive = true
+
+        // Setup workspace collection view height constraint (will be updated dynamically)
+        workspaceCollectionViewHeightConstraint = workspaceCollectionView.heightAnchor.constraint(equalToConstant: 0)
+        workspaceCollectionViewHeightConstraint?.isActive = true
+    }
+
+    private func loadPreferences() {
+        // Load Always on Top state
+        let alwaysOnTopEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+        alwaysOnTopToggle.isOn = alwaysOnTopEnabled
+
+        // Load Attach to Sidebar state
+        let attachmentEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.sidebarAttachmentEnabled)
+        attachSidebarToggle.isOn = attachmentEnabled
+
+        // Load sidebar position
+        let positionString = UserDefaults.standard.string(forKey: UserDefaultsKeys.sidebarPosition) ?? "right"
+        sidebarPositionSelector.selectedPosition = positionString
+
+        // Load keyboard shortcut
+        if let data = UserDefaults.standard.data(forKey: UserDefaultsKeys.toggleSidebarShortcut) {
+            if let shortcut = try? JSONDecoder().decode(KeyboardShortcut.self, from: data) {
+                shortcutRecorder.configure(shortcut: shortcut)
+            } else {
+                // Empty data = explicitly cleared by user
+                shortcutRecorder.configure(shortcut: nil)
+            }
+        } else {
+            // No data = first launch, use default
+            shortcutRecorder.configure(shortcut: .defaultToggleSidebar)
+        }
+
+        // Load tooltips state
+        let tooltipsEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.tooltipsEnabled)
+        tooltipsToggle.isOn = tooltipsEnabled
+
+        // Load swipe to switch state
+        let swipeToSwitchEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.swipeToSwitchEnabled)
+        swipeToSwitchToggle.isOn = swipeToSwitchEnabled
+        googleFaviconToggle.isOn = FaviconService.googleFallbackEnabled
+
+        // Apply mutual exclusion and enable states
+        updateControlStates()
+    }
+
+    private func loadBrowsers() {
+        browsers = BrowserManager.installedBrowsers()
+        browserPopup.removeAllItems()
+        if browserPopup.menu == nil {
+            browserPopup.menu = NSMenu()
+        }
+
+        for browser in browsers {
+            let item = NSMenuItem(title: browser.name, action: nil, keyEquivalent: "")
+            item.representedObject = browser.bundleId
+            if let icon = browser.icon {
+                icon.size = NSSize(width: 16, height: 16)
+                item.image = icon
+            }
+            browserPopup.menu?.addItem(item)
+        }
+
+        let defaultId = BrowserManager.resolveDefaultBrowserBundleId()
+        if let defaultId, let index = browsers.firstIndex(where: { $0.bundleId == defaultId }) {
+            browserPopup.selectItem(at: index)
+        } else if !browsers.isEmpty {
+            browserPopup.selectItem(at: 0)
+            UserDefaults.standard.set(browsers[0].bundleId, forKey: UserDefaultsKeys.defaultBrowserBundleId)
+        }
+
+        // Update the title color after selection
+        updateBrowserPopupAppearance()
+    }
+
+    private func updateBrowserPopupAppearance() {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: regularTextColor,
+            .font: NSFont.systemFont(ofSize: 13)
+        ]
+
+        if let title = browserPopup.titleOfSelectedItem {
+            browserPopup.attributedTitle = NSAttributedString(string: title, attributes: attributes)
+        }
+    }
+
+    private func updatePermissionStatus() {
+        updateAutomationStatus()
+        let hasPermission = WindowAttachmentService.shared.checkAccessibilityPermissions()
+
+        if hasPermission {
+            permissionStatusLabel.stringValue = "Accessibility Access: ✓ Granted"
+            // Use a darker green for better readability
+            permissionStatusLabel.textColor = NSColor(calibratedRed: 0.13, green: 0.67, blue: 0.29, alpha: 1.0)
+            openSettingsButton.isHidden = true
+            // Anchor separator4 to refreshStatusButton when openSettingsButton is hidden
+            separator4ToOpenSettingsConstraint?.isActive = false
+            separator4ToRefreshButtonConstraint?.isActive = true
+        } else {
+            permissionStatusLabel.stringValue = "Accessibility Access: ✗ Not Granted"
+            // Use a darker red for better readability
+            permissionStatusLabel.textColor = NSColor(calibratedRed: 0.85, green: 0.23, blue: 0.23, alpha: 1.0)
+            openSettingsButton.isHidden = false
+            // Anchor separator4 to openSettingsButton when it's visible
+            separator4ToRefreshButtonConstraint?.isActive = false
+            separator4ToOpenSettingsConstraint?.isActive = true
+        }
+    }
+
+    private func updateControlStates() {
+        let alwaysOnTopEnabled = alwaysOnTopToggle.isOn
+        let attachmentEnabled = attachSidebarToggle.isOn
+
+        // Determine if sidebar position should be visible
+        let shouldShowSidebarPosition = !alwaysOnTopEnabled && attachmentEnabled
+
+        // Mutual exclusion
+        if alwaysOnTopEnabled {
+            attachSidebarToggle.isEnabled = false
+        } else {
+            attachSidebarToggle.isEnabled = true
+        }
+
+        if attachmentEnabled {
+            alwaysOnTopToggle.isEnabled = false
+        } else {
+            alwaysOnTopToggle.isEnabled = true
+        }
+
+        // Update visibility and layout constraints
+        sidebarPositionSelector.isHidden = !shouldShowSidebarPosition
+
+        // Switch constraints based on visibility
+        if shouldShowSidebarPosition {
+            separator1ToToggleConstraint?.isActive = false
+            separator1ToSelectorConstraint?.isActive = true
+        } else {
+            separator1ToSelectorConstraint?.isActive = false
+            separator1ToToggleConstraint?.isActive = true
+        }
+    }
+
+    // MARK: - Actions
+
+    @objc private func alwaysOnTopChanged() {
+        let enabled = alwaysOnTopToggle.isOn
+
+        // If enabling, disable attachment first
+        if enabled && attachSidebarToggle.isOn {
+            attachSidebarToggle.isOn = false
+            UserDefaults.standard.set(false, forKey: UserDefaultsKeys.sidebarAttachmentEnabled)
+
+            // Notify to disable attachment
+            NotificationCenter.default.post(name: .attachmentSettingChanged, object: nil, userInfo: ["enabled": false])
+        }
+
+        UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+
+        // Notify to apply always on top
+        NotificationCenter.default.post(name: .alwaysOnTopSettingChanged, object: nil, userInfo: ["enabled": enabled])
+
+        updateControlStates()
+    }
+
+    @objc private func attachSidebarChanged() {
+        let enabled = attachSidebarToggle.isOn
+
+        // Check permissions
+        if enabled && !WindowAttachmentService.shared.checkAccessibilityPermissions() {
+            let alert = NSAlert()
+            alert.messageText = "Accessibility Permissions Required"
+            alert.informativeText = "\(AppIdentity.displayName) needs Accessibility permissions to attach to windows. Please grant access in System Settings."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+
+            attachSidebarToggle.isOn = false
+            return
+        }
+
+        // If enabling, disable always on top first
+        if enabled && alwaysOnTopToggle.isOn {
+            alwaysOnTopToggle.isOn = false
+            UserDefaults.standard.set(false, forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+
+            // Notify to disable always on top
+            NotificationCenter.default.post(name: .alwaysOnTopSettingChanged, object: nil, userInfo: ["enabled": false])
+        }
+
+        UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.sidebarAttachmentEnabled)
+
+        // Get current position
+        let position = sidebarPositionSelector.selectedPosition ?? "right"
+
+        // Notify to enable/disable attachment
+        NotificationCenter.default.post(
+            name: .attachmentSettingChanged,
+            object: nil,
+            userInfo: ["enabled": enabled, "position": position]
+        )
+
+        updateControlStates()
+    }
+
+    @objc private func sidebarPositionChanged() {
+        guard let position = sidebarPositionSelector.selectedPosition else { return }
+
+        UserDefaults.standard.set(position, forKey: UserDefaultsKeys.sidebarPosition)
+
+        // If attachment is currently enabled, notify to update position
+        if attachSidebarToggle.isOn {
+            NotificationCenter.default.post(
+                name: .sidebarPositionChanged,
+                object: nil,
+                userInfo: ["position": position]
+            )
+        }
+    }
+
+    @objc private func tooltipsChanged() {
+        let enabled = tooltipsToggle.isOn
+        UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.tooltipsEnabled)
+    }
+
+    @objc private func swipeToSwitchChanged() {
+        let enabled = swipeToSwitchToggle.isOn
+        UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.swipeToSwitchEnabled)
+        NotificationCenter.default.post(name: .swipeToSwitchSettingChanged, object: nil)
+    }
+
+    @objc private func googleFaviconChanged() {
+        UserDefaults.standard.set(googleFaviconToggle.isOn, forKey: UserDefaultsKeys.googleFaviconFallbackEnabled)
+    }
+
+    private func shortcutChanged(_ shortcut: KeyboardShortcut?) {
+        if let shortcut = shortcut {
+            if let data = try? JSONEncoder().encode(shortcut) {
+                UserDefaults.standard.set(data, forKey: UserDefaultsKeys.toggleSidebarShortcut)
+            }
+        } else {
+            // Store empty data to distinguish "explicitly cleared" from "never configured"
+            UserDefaults.standard.set(Data(), forKey: UserDefaultsKeys.toggleSidebarShortcut)
+        }
+        NotificationCenter.default.post(name: .toggleSidebarShortcutChanged, object: nil)
+    }
+
+    @objc private func browserChanged() {
+        if let bundleId = browserPopup.selectedItem?.representedObject as? String {
+            UserDefaults.standard.set(bundleId, forKey: UserDefaultsKeys.defaultBrowserBundleId)
+
+            // Update appearance after change
+            updateBrowserPopupAppearance()
+
+            // Refresh workspace list so profile icons reflect the new browser
+            reloadWorkspaces()
+
+            // Notify about browser change
+            NotificationCenter.default.post(
+                name: .defaultBrowserChanged,
+                object: nil,
+                userInfo: ["bundleId": bundleId]
+            )
+        }
+    }
+
+    @objc private func openAccessibilitySettings() {
+        WindowAttachmentService.shared.requestAccessibilityPermissions()
+
+        let alert = NSAlert()
+        alert.messageText = "Grant Accessibility Access"
+        alert.informativeText = "Please grant \(AppIdentity.displayName) access in System Settings > Privacy & Security > Accessibility, then return to this window."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    @objc private func refreshPermissionStatus() {
+        updatePermissionStatus()
+    }
+
+    // MARK: - Automation (switch to open tabs)
+
+    /// Browsers the profiles open that can report their tabs, plus the one a click
+    /// found without permission. Unique, compared case-insensitively.
+    private func tabFocusBrowsers() -> [String] {
+        guard let appModel else { return [] }
+        var ids = appModel.profiles.compactMap { BrowserManager.resolveTarget(link: nil, profile: $0).bundleId }
+        if let hint = UserDefaults.standard.string(forKey: UserDefaultsKeys.tabFocusPermissionHintBundleId) {
+            ids.append(hint)
+        }
+        var seen = Set<String>()
+        return ids.filter { TabLocators.isSupported(bundleId: $0) && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// Checks without asking (off the main actor: the check blocks) and renders.
+    private func updateAutomationStatus() {
+        let browsers = tabFocusBrowsers()
+        let pids = browsers.map { TabFocusService.runningApplication(bundleId: $0)?.processIdentifier }
+        Task { [weak self] in
+            let permissions = await Self.checkAutomation(pids: pids, ask: false)
+            self?.showAutomationStatus(browsers: browsers, permissions: permissions)
+        }
+    }
+
+    private func showAutomationStatus(browsers: [String], permissions: [AutomationPermission]) {
+        let hintKey = UserDefaultsKeys.tabFocusPermissionHintBundleId
+        var hint = UserDefaults.standard.string(forKey: hintKey)
+        if let current = hint,
+           let index = browsers.firstIndex(where: { $0.caseInsensitiveCompare(current) == .orderedSame }),
+           permissions[index] == .granted {
+            UserDefaults.standard.removeObject(forKey: hintKey)
+            hint = nil
+        }
+        let entries = zip(browsers, permissions).map {
+            AutomationPermissionView.Entry(name: BrowserManager.appName(bundleId: $0) ?? $0, permission: $1)
+        }
+        automationPermissionView.update(entries: entries, hintBrowserName: hint.map { BrowserManager.appName(bundleId: $0) ?? $0 })
+    }
+
+    /// Asks macOS for every running browser that was never asked (one prompt at a
+    /// time), then opens System Settings › Automation if one was denied.
+    private func allowAutomation() {
+        let browsers = tabFocusBrowsers()
+        let pids = browsers.map { TabFocusService.runningApplication(bundleId: $0)?.processIdentifier }
+        Task { [weak self] in
+            let before = await Self.checkAutomation(pids: pids, ask: false)
+            let toAsk = zip(pids, before).map { $1 == .notDetermined ? $0 : nil }
+            let after = await Self.checkAutomation(pids: toAsk, ask: true)
+            let permissions = zip(before, after).map { $0 == .notDetermined ? $1 : $0 }
+            if permissions.contains(.denied),
+               let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                NSWorkspace.shared.open(url)
+            }
+            self?.showAutomationStatus(browsers: browsers, permissions: permissions)
+        }
+    }
+
+    /// `nil` pids (not running, or skipped) report `.notRunning`.
+    private nonisolated static func checkAutomation(pids: [pid_t?], ask: Bool) async -> [AutomationPermission] {
+        await Task.detached(priority: .userInitiated) {
+            pids.map { pid in pid.map { AutomationPermission.check(pid: $0, ask: ask) } ?? .notRunning }
+        }.value
+    }
+
+    @objc private func checkForUpdates() {
+        NSWorkspace.shared.open(AppIdentity.releasesURL)
+    }
+
+    @objc private func importFromArc() {
+        // Guard against concurrent imports
+        if isImportRunning {
+            return
+        }
+
+        // Construct default Arc path
+        let arcPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Arc/StorableSidebar.json")
+
+        // Check if file exists
+        guard FileManager.default.fileExists(atPath: arcPath.path) else {
+            showImportStatus("Arc browser not found or no bookmarks available. Please ensure Arc is installed and has bookmarks.", isError: true)
+            return
+        }
+
+        // Import directly
+        Task { @MainActor [weak self] in
+            await self?.handleArcImport(fileURL: arcPath)
+        }
+    }
+
+    @objc private func importFromChrome() {
+        // Guard against concurrent imports
+        if isImportRunning {
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.html]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Select your exported bookmarks HTML file"
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let fileURL = panel.url else { return }
+            Task { @MainActor [weak self] in
+                await self?.handleChromeImport(fileURL: fileURL)
+            }
+        }
+    }
+
+    private func handleChromeImport(fileURL: URL) async {
+        // Show loading state
+        chromeImportButton.setLoading(true)
+        showImportStatus("Importing bookmarks...", isError: false)
+
+        // Perform import
+        let result = await ChromeImportService.shared.importFromChrome(fileURL: fileURL)
+
+        // Hide loading state
+        chromeImportButton.setLoading(false)
+
+        switch result {
+        case .success(let importResult):
+            // Apply to AppModel
+            applyChromeImport(importResult)
+
+            // Show success message
+            let message = """
+            Successfully imported:
+            • \(importResult.linksImported) links
+            • \(importResult.foldersImported) folders
+            """
+            showImportStatus(message, isError: false)
+
+            // Hide message after 5 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.importStatusDuration) { [weak self] in
+                self?.hideImportStatus()
+            }
+
+        case .failure(let error):
+            showImportStatus(error.localizedDescription, isError: true)
+        }
+    }
+
+    private func applyChromeImport(_ result: ChromeImportResult) {
+        guard let appModel = appModel else { return }
+
+        appModel.applyChromeImport(result.workspace)
+
+        // Don't call selectWorkspace — it closes Settings and navigates away.
+        // The new workspace is already selected; when the user leaves settings they'll see it.
+
+        // Reload the workspace list
+        reloadWorkspaces()
+    }
+
+    private func handleArcImport(fileURL: URL) async {
+        // Show loading state
+        importButton.setLoading(true)
+        showImportStatus("Importing from Arc...", isError: false)
+
+        // Perform import
+        let result = await ArcImportService.shared.importFromArc(fileURL: fileURL)
+
+        // Hide loading state
+        importButton.setLoading(false)
+
+        switch result {
+        case .success(let importResult):
+            // Apply to AppModel
+            applyImport(importResult)
+
+            // Show success message
+            let message = """
+            Successfully imported:
+            • \(importResult.workspacesCreated) spaces
+            • \(importResult.linksImported) links
+            • \(importResult.foldersImported) folders
+            • \(importResult.profiles.reduce(0) { $0 + $1.favorites.count }) favorites
+            """
+            showImportStatus(message, isError: false)
+
+            // Hide message after 5 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.importStatusDuration) { [weak self] in
+                self?.hideImportStatus()
+            }
+
+        case .failure(let error):
+            showImportStatus(error.localizedDescription, isError: true)
+        }
+    }
+
+    private func applyImport(_ result: ArcImportResult) {
+        appModel?.applyArcImport(result)
+        reloadWorkspaces()
+    }
+
+    // MARK: - Export / Import Data
+
+    /// How long a successful import or export message stays.
+    private static let importStatusDuration: TimeInterval = 5
+
+    private var isImportRunning: Bool {
+        importButton.getIsLoading() || chromeImportButton.getIsLoading()
+    }
+
+    @objc private func exportData() {
+        guard !isImportRunning, let appModel else { return }
+        // A standalone panel, like Chrome import: as a sheet it would be wider than the sidebar.
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Export Here"
+        panel.message = "Choose where to create the \(AppIdentity.displayName) export folder"
+        panel.begin { [weak self] response in
+            guard response == .OK, let parent = panel.url else { return }
+            self?.runExport(to: parent, appModel: appModel)
+        }
+    }
+
+    private func runExport(to parent: URL, appModel: AppModel) {
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        do {
+            let folder = try appModel.exportData(to: parent, appVersion: appVersion)
+            showImportStatus("Exported to “\(folder.lastPathComponent)”.", isError: false)
+            NSWorkspace.shared.activateFileViewerSelecting([folder])
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.importStatusDuration) { [weak self] in
+                self?.hideImportStatus()
+            }
+        } catch {
+            showImportStatus(error.localizedDescription, isError: true)
+        }
+    }
+
+    @objc private func importData() {
+        guard !isImportRunning, appModel != nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import"
+        panel.message = "Choose a folder created with Export Data…"
+        panel.begin { [weak self] response in
+            guard response == .OK, let folder = panel.url else { return }
+            // Let the panel close before the confirmation sheet opens.
+            DispatchQueue.main.async { self?.confirmImport(from: folder) }
+        }
+    }
+
+    /// Validates the export, then asks before replacing anything.
+    private func confirmImport(from folder: URL) {
+        guard let appModel, let window = view.window else { return }
+        let package: DataTransfer.Package
+        do {
+            package = try DataTransfer.readPackage(at: folder)
+        } catch {
+            showImportStatus(error.localizedDescription, isError: true)
+            return
+        }
+
+        let summary = package.summary
+        let exported = DateFormatter.localizedString(from: package.manifest.exportedAt, dateStyle: .medium, timeStyle: .short)
+        let contents = [
+            Self.counted(summary.spaces, "space", "spaces"),
+            Self.counted(summary.links, "link", "links"),
+            Self.counted(summary.favorites, "favorite", "favorites"),
+            Self.counted(summary.notes, "note", "notes"),
+        ].joined(separator: ", ")
+
+        let alert = NSAlert()
+        alert.messageText = "Replace all \(AppIdentity.displayName) data?"
+        alert.informativeText = "The export from \(exported) has \(contents) in \(Self.counted(summary.profiles, "profile", "profiles")). It replaces the spaces, favorites, profiles and notes on this Mac. Your current data is backed up first, to Backups in the data folder."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Replace")
+        alert.buttons.last?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            self?.runImport(package, appModel: appModel)
+        }
+    }
+
+    private func runImport(_ package: DataTransfer.Package, appModel: AppModel) {
+        do {
+            let backup = try appModel.applyDataImport(package)
+            reloadWorkspaces()
+            showImportStatus("Imported. The previous data is in Backups/\(backup.lastPathComponent).", isError: false)
+        } catch {
+            showImportStatus("Import failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private static func counted(_ count: Int, _ singular: String, _ plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
+    }
+
+    private func showImportStatus(_ message: String, isError: Bool) {
+        importStatusLabel.stringValue = message
+        importStatusLabel.textColor = isError ? NSColor.systemRed : regularTextColor
+        importStatusLabel.isHidden = false
+        // Anchor separator5 to importStatusLabel when it's visible
+        separator5ToImportDataButtonConstraint?.isActive = false
+        separator5ToImportStatusConstraint?.isActive = true
+    }
+
+    private func hideImportStatus() {
+        importStatusLabel.isHidden = true
+        // Anchor separator5 to importDataButton when importStatusLabel is hidden
+        separator5ToImportStatusConstraint?.isActive = false
+        separator5ToImportDataButtonConstraint?.isActive = true
+    }
+
+    // MARK: - Workspace Management
+
+    private func reloadWorkspaces() {
+        guard let appModel = appModel else { return }
+
+        // Update collection view height based on workspace count
+        let metrics = ListMetrics()
+        let rowCount = appModel.workspaces.count
+        let totalHeight = CGFloat(rowCount) * metrics.rowHeight + CGFloat(rowCount - 1) * metrics.verticalGap
+        workspaceCollectionViewHeightConstraint?.constant = totalHeight
+
+        // Invalidate layout before reloading to ensure proper sizing
+        workspaceCollectionView.collectionViewLayout?.invalidateLayout()
+
+        workspaceCollectionView.reloadData()
+
+        // Profile rows read browser profile files; only rebuild them while Settings is shown.
+        if appModel.isSettingsShown {
+            reloadProfiles()
+        }
+    }
+
+    private func handleWorkspaceDelete(id: UUID) {
+        guard let appModel = appModel else { return }
+
+        // Check if only one workspace
+        if appModel.workspaces.count <= 1 {
+            return
+        }
+
+        // Show confirmation alert
+        let alert = NSAlert()
+        alert.messageText = "Delete Space?"
+        alert.informativeText = "Are you sure you want to delete this space? All links and folders will be permanently removed."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete")
+
+        // Make Delete button destructive
+        if let deleteButton = alert.buttons.last {
+            deleteButton.hasDestructiveAction = true
+        }
+
+        alert.beginSheetModal(for: view.window!) { response in
+            if response == .alertSecondButtonReturn {
+                appModel.deleteWorkspace(id: id)
+                self.reloadWorkspaces()
+            }
+        }
+    }
+
+    private func handleWorkspaceRename(id: UUID, newName: String) {
+        guard let appModel = appModel else { return }
+        appModel.renameWorkspace(id: id, newName: newName)
+        reloadWorkspaces()
+    }
+
+    @objc private func handleWorkspaceRightClick(_ sender: NSMenuItem) {
+        guard let workspaceId = sender.representedObject as? UUID else { return }
+        contextWorkspaceId = workspaceId
+    }
+
+    private func showWorkspaceContextMenu(for workspaceId: UUID, at event: NSEvent) {
+        guard let appModel = appModel else { return }
+        guard let workspace = appModel.workspaces.first(where: { $0.id == workspaceId }) else { return }
+
+        contextWorkspaceId = workspaceId
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        // Rename option
+        let renameItem = NSMenuItem(title: "Rename Space…", action: #selector(beginInlineRenameForContextWorkspace), keyEquivalent: "")
+        renameItem.target = self
+        menu.addItem(renameItem)
+
+        // Change Color submenu (shared with the space menu)
+        menu.addItem(SpaceMenu.colorItem(
+            for: workspace,
+            setColor: { [weak self] colorId in
+                self?.appModel?.updateWorkspaceColor(id: workspaceId, colorId: colorId)
+                self?.reloadWorkspaces()
+            },
+            customColor: { [weak self] in
+                SpaceColorPanel.shared.edit(workspace) { [weak self] id, color in
+                    self?.appModel?.setWorkspaceCustomColor(id: id, color: color)
+                    self?.reloadWorkspaces()
+                }
+            }
+        ))
+
+        menu.addItem(profileMenuItem(for: workspace))
+
+        // Delete option
+        menu.addItem(.separator())
+        let deleteItem = NSMenuItem(title: "Delete Space…", action: #selector(deleteContextWorkspace), keyEquivalent: "")
+        deleteItem.target = self
+        deleteItem.isEnabled = appModel.workspaces.count > 1
+        menu.addItem(deleteItem)
+
+        NSMenu.popUpContextMenu(menu, with: event, for: workspaceCollectionView)
+    }
+
+    @objc private func beginInlineRenameForContextWorkspace() {
+        guard let workspaceId = contextWorkspaceId else { return }
+        guard let appModel = appModel else { return }
+        guard let index = appModel.workspaces.firstIndex(where: { $0.id == workspaceId }) else { return }
+
+        inlineRenameWorkspaceId = workspaceId
+
+        DispatchQueue.main.async {
+            let indexPath = IndexPath(item: index, section: 0)
+            if let item = self.workspaceCollectionView.item(at: indexPath) as? WorkspaceCollectionViewItem {
+                item.beginInlineRename()
+            }
+        }
+    }
+
+    @objc private func deleteContextWorkspace() {
+        guard let workspaceId = contextWorkspaceId else { return }
+        handleWorkspaceDelete(id: workspaceId)
+    }
+
+    /// The profile button on a space row: pops up the same "Profile" choices.
+    private func handleWorkspaceProfile(id: UUID) {
+        guard let appModel, let workspace = appModel.workspaces.first(where: { $0.id == id }),
+              let submenu = profileMenuItem(for: workspace).submenu,
+              let window = view.window else { return }
+        let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        submenu.popUp(positioning: nil, at: point, in: view)
+    }
+
+    private func profileMenuItem(for workspace: Workspace) -> NSMenuItem {
+        BrowserMenus.profileItem(
+            profiles: appModel?.profiles ?? [],
+            currentProfileId: workspace.profileId,
+            assign: { [weak self] profileId in
+                self?.appModel?.assignWorkspace(workspace.id, toProfile: profileId)
+                self?.reloadWorkspaces()
+            },
+            newProfile: { [weak self] in
+                guard let self, let appModel = self.appModel,
+                      let name = TextPrompt.run(
+                        message: "New Profile",
+                        informative: "“\(workspace.name)” will move to the new profile.",
+                        initial: "Profile \(appModel.profiles.count + 1)",
+                        confirmTitle: "Create"
+                      ) else { return }
+                let profileId = appModel.createProfile(name: name)
+                appModel.assignWorkspace(workspace.id, toProfile: profileId)
+                self.reloadWorkspaces()
+            }
+        )
+    }
+
+    // MARK: - Profiles
+
+    private func setupProfileSettingsView() {
+        profileSettingsView.onAdd = { [weak self] in
+            guard let self, let appModel = self.appModel,
+                  let name = TextPrompt.run(
+                    message: "New Profile",
+                    informative: "Assign spaces to it from their right-click menu, under Profile.",
+                    initial: "Profile \(appModel.profiles.count + 1)",
+                    confirmTitle: "Create"
+                  ) else { return }
+            appModel.createProfile(name: name)
+            self.reloadWorkspaces()
+        }
+        profileSettingsView.onRename = { [weak self] profileId in
+            guard let self, let appModel = self.appModel, let profile = appModel.profile(id: profileId),
+                  let name = TextPrompt.run(message: "Rename Profile", initial: profile.name, confirmTitle: "Rename") else { return }
+            appModel.renameProfile(id: profileId, newName: name)
+            self.reloadWorkspaces()
+        }
+        profileSettingsView.onDelete = { [weak self] profileId in
+            self?.confirmDeleteProfile(id: profileId)
+        }
+        profileSettingsView.onSetBrowser = { [weak self] profileId, bundleId in
+            self?.appModel?.setProfileBrowser(id: profileId, bundleId: bundleId)
+            self?.reloadWorkspaces()
+        }
+        profileSettingsView.onSetBrowserProfile = { [weak self] profileId, bundleId, dir in
+            self?.appModel?.updateBrowserProfile(profileId: profileId, bundleId: bundleId, profile: dir)
+            self?.reloadWorkspaces()
+        }
+        profileSettingsView.onEnterBrowserProfile = { [weak self] profileId, bundleId in
+            guard let self, let appModel = self.appModel else { return }
+            let current = appModel.profile(id: profileId)?.browserProfiles[bundleId] ?? ""
+            if let dir = TextPrompt.run(
+                message: "Browser Profile",
+                informative: BrowserManager.manualProfileHint(bundleId: bundleId),
+                initial: current,
+                placeholder: nil,
+                confirmTitle: "Save"
+            ) {
+                appModel.updateBrowserProfile(profileId: profileId, bundleId: bundleId, profile: dir)
+            }
+            // Rebuild either way so a cancelled "Enter Profile…" doesn't stay selected.
+            self.reloadWorkspaces()
+        }
+        profileSettingsView.onSetFocusesOpenTabs = { [weak self] profileId, isOn in
+            self?.appModel?.setProfileFocusesOpenTabs(id: profileId, enabled: isOn)
+            self?.reloadWorkspaces()
+        }
+    }
+
+    private func reloadProfiles() {
+        guard let appModel else { return }
+        let profileTargets = appModel.profiles.map { BrowserManager.resolveTarget(link: nil, profile: $0) }
+        let rows = appModel.profiles.map { profile -> ProfileSettingsView.Row in
+            let target = BrowserManager.resolveTarget(link: nil, profile: profile)
+            let resolved = target.bundleId
+            let supports = resolved.map { BrowserManager.supportsProfiles(bundleId: $0) } ?? false
+            let detection: BrowserManager.ProfileDetection = supports
+                ? resolved.map { BrowserManager.detectProfileList(bundleId: $0) } ?? .unavailable
+                : .unavailable
+            return ProfileSettingsView.Row(
+                profile: profile,
+                spaceCount: appModel.workspaces(inProfile: profile.id).count,
+                resolvedBrowser: resolved,
+                supportsBrowserProfiles: supports,
+                detectedBrowserProfiles: detection.profiles,
+                browserProfilesDenied: detection == .accessDenied,
+                resolvedBrowserName: resolved.flatMap { BrowserManager.appName(bundleId: $0) },
+                browserIsMissing: profile.browserBundleId.map { !BrowserManager.isBrowser(bundleId: $0) } ?? false,
+                tabFocusSupported: resolved.map { TabLocators.isSupported(bundleId: $0) } ?? false,
+                tabFocusAmbiguous: TabFocus.isAmbiguous(target: target, profileTargets: profileTargets)
+            )
+        }
+        let globalName = BrowserManager.resolveDefaultBrowserBundleId().flatMap { BrowserManager.appName(bundleId: $0) }
+        profileSettingsView.update(rows: rows, browsers: browsers, globalDefaultName: globalName, canDelete: appModel.profiles.count > 1)
+    }
+
+    private func confirmDeleteProfile(id: UUID) {
+        guard let appModel, let profile = appModel.profile(id: id),
+              let target = appModel.profileDeletionTarget(for: id),
+              let window = view.window else { return }
+        let spaceCount = appModel.workspaces(inProfile: id).count
+        let moved: String
+        switch spaceCount {
+        case 0: moved = "Its favorites move"
+        case 1: moved = "Its space and favorites move"
+        default: moved = "Its \(spaceCount) spaces and favorites move"
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(profile.name)”?"
+        alert.informativeText = "\(moved) to “\(target.name)”. Favorites that don’t fit there go into a folder, so no links are lost."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete")
+        alert.buttons.last?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            appModel.deleteProfile(id: id)
+            self?.reloadWorkspaces()
+        }
+    }
+
+    @objc private func handleWorkspaceScrollBoundsChanged() {
+        for item in workspaceCollectionView.visibleItems() {
+            (item as? WorkspaceCollectionViewItem)?.refreshHoverState()
+        }
+    }
+}
+
+// MARK: - NSCollectionViewDataSource
+
+extension SettingsContentViewController: NSCollectionViewDataSource {
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+        return appModel?.workspaces.count ?? 0
+    }
+
+    /// Tooltip for a space's profile name: where its links open.
+    static func profileDetail(_ profile: Profile) -> String {
+        let target = BrowserManager.resolveTarget(link: nil, profile: profile)
+        let browser = target.bundleId.flatMap(BrowserManager.appName(bundleId:)) ?? "the default browser"
+        let opens = profile.browserBundleId == nil ? "the default browser (\(browser))" : browser
+        guard let dir = target.profileDir, !dir.isEmpty else { return "Profile \(profile.name): opens in \(opens)" }
+        return "Profile \(profile.name): opens in \(opens), browser profile \(dir)"
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        guard let appModel = appModel else {
+            return NSCollectionViewItem()
+        }
+
+        let item = collectionView.makeItem(
+            withIdentifier: NSUserInterfaceItemIdentifier("WorkspaceItem"),
+            for: indexPath
+        ) as! WorkspaceCollectionViewItem
+
+        let workspace = appModel.workspaces[indexPath.item]
+        let canDelete = appModel.workspaces.count > 1
+        // Every space belongs to a profile; the name only tells spaces apart when there are several.
+        let profile = appModel.profile(for: workspace)
+        let showsProfile = appModel.profiles.count > 1
+
+        item.configure(
+            workspace: workspace,
+            canDelete: canDelete,
+            profileName: showsProfile ? profile.name : nil,
+            profileDetail: showsProfile ? Self.profileDetail(profile) : nil,
+            onDelete: { [weak self] id in
+                self?.handleWorkspaceDelete(id: id)
+            },
+            onRenameCommit: { [weak self] id, newName in
+                self?.handleWorkspaceRename(id: id, newName: newName)
+            },
+            onProfile: { [weak self] id in
+                self?.handleWorkspaceProfile(id: id)
+            }
+        )
+
+        return item
+    }
+}
+
+
+// MARK: - NSCollectionViewDelegate
+
+extension SettingsContentViewController: NSCollectionViewDelegate, NSCollectionViewDelegateFlowLayout {
+    func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>, with event: NSEvent) -> Bool {
+        return true
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
+        guard let appModel = appModel else {
+            return nil
+        }
+        let workspace = appModel.workspaces[indexPath.item]
+
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(workspace.id.uuidString, forType: workspacePasteboardType)
+        return pasteboardItem
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+        // Only allow drop before items (for reordering)
+        proposedDropOperation.pointee = .before
+
+        // Show drop indicator
+        let indexPath = proposedDropIndexPath.pointee as IndexPath
+        let metrics = ListMetrics()
+
+        if indexPath.item == 0 {
+            // Drop at the beginning
+            let indicatorFrame = CGRect(
+                x: 0,
+                y: 0,
+                width: collectionView.bounds.width,
+                height: 2
+            )
+            workspaceDropIndicator.showLine(in: indicatorFrame)
+        } else if indexPath.item < (appModel?.workspaces.count ?? 0) {
+            // Drop between items
+            let y = CGFloat(indexPath.item) * (metrics.rowHeight + metrics.verticalGap) - metrics.verticalGap / 2
+            let indicatorFrame = CGRect(
+                x: 0,
+                y: y,
+                width: collectionView.bounds.width,
+                height: 2
+            )
+            workspaceDropIndicator.showLine(in: indicatorFrame)
+        } else {
+            // Drop at the end
+            let count = appModel?.workspaces.count ?? 0
+            let y = CGFloat(count) * (metrics.rowHeight + metrics.verticalGap) - metrics.verticalGap / 2
+            let indicatorFrame = CGRect(
+                x: 0,
+                y: y,
+                width: collectionView.bounds.width,
+                height: 2
+            )
+            workspaceDropIndicator.showLine(in: indicatorFrame)
+        }
+
+        return .move
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
+        // Hide drop indicator
+        workspaceDropIndicator.hide()
+
+        guard let appModel = appModel else {
+            return false
+        }
+        guard let pasteboardItem = draggingInfo.draggingPasteboard.pasteboardItems?.first else {
+            return false
+        }
+        guard let uuidString = pasteboardItem.string(forType: workspacePasteboardType) else {
+            return false
+        }
+        guard let workspaceId = UUID(uuidString: uuidString) else {
+            return false
+        }
+        guard let currentIndex = appModel.workspaces.firstIndex(where: { $0.id == workspaceId }) else {
+            return false
+        }
+
+        var targetIndex = indexPath.item
+
+        // Adjust target index if dragging within the same list
+        if currentIndex < targetIndex {
+            targetIndex -= 1
+        }
+
+        // Perform the reorder
+        appModel.reorderWorkspace(id: workspaceId, toIndex: targetIndex)
+        reloadWorkspaces()
+
+        return true
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
+        // Hide drop indicator when drag ends
+        workspaceDropIndicator.hide()
+    }
+}
+
+
+
+

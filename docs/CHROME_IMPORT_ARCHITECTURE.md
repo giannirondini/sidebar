@@ -1,10 +1,10 @@
 # Chrome Bookmarks HTML Import Architecture
 
-This document describes how Chrome exports bookmarks, the Netscape Bookmark HTML format, and how Arcmark parses and imports them.
+This document describes how Chrome exports bookmarks, the Netscape Bookmark HTML format, and how SidebArc parses and imports them.
 
 ## Overview
 
-Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file via the Bookmark Manager. Unlike Arc, which stores bookmarks in a JSON file at a known path, Chrome has no stable file-system path that can be read directly — the user must manually export. Arcmark provides a file picker for the user to select the exported HTML file, then parses it into an Arcmark workspace.
+Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file via the Bookmark Manager. Unlike Arc, which stores bookmarks in a JSON file at a known path, Chrome has no stable file-system path that can be read directly — the user must manually export. Settings › **Import from Chrome** opens a file picker (`.html` only); the file is parsed off the main thread and added as one new **space**, "Imported Bookmarks", in the current space's profile. Favorites are not touched.
 
 ## The Netscape Bookmark File Format
 
@@ -12,7 +12,7 @@ Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file vi
 
 The Netscape Bookmark File format dates back to the 1990s Netscape Navigator browser. It became the de facto standard for bookmark interchange between browsers. Chrome, Firefox, Safari, Edge, Brave, and virtually all browsers support exporting and importing this format.
 
-The format is **not valid XML or XHTML**. It uses a loose, non-standard HTML dialect with unclosed tags and non-standard elements. This is why the parser uses line-by-line regex scanning rather than an XML/HTML parser.
+The format is **not valid XML or XHTML**. It uses a loose, non-standard HTML dialect with unclosed tags and non-standard elements. This is why the parser scans for a few tags with a regex rather than using an XML/HTML parser.
 
 ### Specification Reference
 
@@ -81,7 +81,7 @@ Chrome always exports with these top-level folders:
 | `Other bookmarks` | "Other Bookmarks" section | not set |
 | `Mobile bookmarks` | Synced mobile bookmarks | not set |
 
-These are structural containers, not user-created folders. The importer **flattens** them — their children are merged into the root level of the Arcmark workspace.
+These are structural containers, not user-created folders. The importer **flattens** them — their children are merged into the root level of the new space.
 
 ## How to Export from Chrome
 
@@ -94,73 +94,71 @@ This produces a file typically named `bookmarks_MM_DD_YY.html`.
 
 ## Import Algorithm
 
-### Phase 1: Validation
+### Step 1: Validation
 
 1. Check the file exists on disk
 2. Read as UTF-8 string
 3. Validate the content contains `NETSCAPE-Bookmark-file-1`, `<DL>`, or `<dl>` to confirm it's a bookmark file
 4. If validation fails, return `.invalidHTML` error
 
-### Phase 2: Line-by-Line Parsing
+### Step 2: Tokenizing
 
-The parser uses four regex patterns matched against each line:
-
-```
-Folder:  <DT><H3[^>]*>(.*?)</H3>         → captures folder name
-Link:    <DT><A\s+HREF="([^"]*)"[^>]*>(.*?)</A>  → captures URL and title
-Open:    <DL>                              → begins folder contents
-Close:   </DL>                             → ends folder contents
-```
-
-All patterns use `.caseInsensitive` matching to handle variations.
-
-### Phase 3: Stack-Based Nesting
-
-The parser maintains two parallel stacks:
+The parser scans the whole file once, in document order, for four tokens (one regex, `.caseInsensitive` and `.dotMatchesLineSeparators`):
 
 ```
-stack: [[Node]]        — each level is the array of nodes being built
-folderNameStack: [String]  — folder names awaiting their closing </DL>
+Folder:  <H3 …>Name</H3>    → folder name
+Link:    <A …>Title         → attributes and title (text up to the next tag)
+Open:    <DL …>             → begins a list
+Close:   </DL>              → ends the innermost list
 ```
 
-And a boolean flag:
+Line breaks don't matter: a minified one-line file parses like Chrome's one-element-per-line output, and a link's attributes may span lines. `<DT>` and `<p>` are ignored.
+
+`HREF` is found **anywhere** among the link's attributes, in any case, double-quoted, single-quoted or unquoted. The attribute pattern is quote-aware, so a `>` inside a quoted value (`TAGS="a>b"`) doesn't end the tag. The title is the text after `<A …>` up to the next `<`, so a missing `</A>` can't swallow the next link. `HREF` values are used as written (no entity decoding).
+
+### Step 3: Nesting
+
+The parser keeps a stack of levels, the root first and one per open folder, and a stack of open lists:
 
 ```
-pendingFolder: Bool    — true when a <H3> was just seen (next <DL> belongs to it)
+levels: [Level]        — Level = (folderName, nodes being built); levels[0] is the root
+openLists: [Bool]      — one per open <DL>: whether it opened a folder level
+pendingFolderName      — set by <H3>, consumed by the next <DL>
 ```
 
 #### State Machine
 
 ```
-Initial state:
-  stack = [[]]              (one empty root level)
-  folderNameStack = []
-  pendingFolder = false
+On <H3>Name</H3>:
+  Flush a pending folder (see below)
+  pendingFolderName = Name (entities decoded)
 
-On <DT><H3>Name</H3>:
-  Push "Name" onto folderNameStack
-  Set pendingFolder = true
+On <A … HREF=url …>Title:
+  Flush a pending folder
+  Skip if the URL is empty, javascript:, chrome:// or malformed
+  Append a Link (title entity-decoded, "Untitled" if empty) to the innermost level
 
-On <DT><A HREF="url">Title</A>:
-  Validate URL (skip if empty, javascript:, chrome://, or malformed)
-  Decode HTML entities in title
-  Append Link node to stack.last
+On <DL>:
+  If a folder name is pending: push a level for it, openLists.push(true)
+  Else (the root list):        openLists.push(false)
 
-On <DL> (when pendingFolder == true):
-  Push new empty [] onto stack      (start collecting folder's children)
-  Set pendingFolder = false
+On </DL>:
+  Flush a pending folder
+  Pop openLists (a stray </DL> with nothing open is ignored)
+  If that <DL> opened a folder level: close the level
 
-On <DL> (when pendingFolder == false):
-  Ignore                            (structural/root <DL>)
+Close a level:
+  Pop it; if it's a top-level Chrome folder directly under the root, append its
+  nodes to the root (flatten), else wrap them in a Folder in the parent level
 
-On </DL> (when stack.count > 1):
-  Pop children from stack
-  Pop folderName from folderNameStack
-  If this is a top-level Chrome folder (stack.count == 1 after pop):
-    Flatten: append children directly to stack.last
-  Else:
-    Create Folder node with children, append to stack.last
+Flush a pending folder:
+  An <H3> not followed by its <DL> becomes an empty folder in the current level
+
+At the end of the file:
+  Flush a pending folder, then close every level still open into its parent
 ```
+
+**No link is dropped by a malformed file**: a missing `</DL>` leaves levels open, and they are closed into their parents at the end of the file, so their links land in the folder they were written in.
 
 #### Visual Example
 
@@ -180,30 +178,28 @@ Given this HTML:
 
 Parser trace:
 ```
-Line: <DL>                    → structural, ignore (pendingFolder=false)
-Line: <H3>Bookmarks bar</H3> → folderNameStack=["Bookmarks bar"], pendingFolder=true
-Line: <DL>                    → pendingFolder=true, push [], stack=[[], []]
-Line: <A HREF=a.com>A</A>    → append Link(A) to stack[1]
-Line: <H3>Dev</H3>           → folderNameStack=["Bookmarks bar","Dev"], pendingFolder=true
-Line: <DL>                    → push [], stack=[[], [Link(A)], []]
-Line: <A HREF=b.com>B</A>    → append Link(B) to stack[2]
-Line: </DL>                   → pop children=[Link(B)], name="Dev"
-                                stack.count=2 (not top-level) → create Folder("Dev")
-                                stack=[[], [Link(A), Folder(Dev)]]
-Line: </DL>                   → pop children=[Link(A), Folder(Dev)], name="Bookmarks bar"
-                                stack.count=1 (top-level!) → FLATTEN
-                                stack=[[Link(A), Folder(Dev)]]
-Line: </DL>                   → stack.count=1, no folderNameStack items → skip
+<DL>                    → no pending folder: openLists=[false]
+<H3>Bookmarks bar</H3>  → pending "Bookmarks bar"
+<DL>                    → push level "Bookmarks bar", openLists=[false, true]
+<A HREF=a.com>A         → Link(A) into "Bookmarks bar"
+<H3>Dev</H3>            → pending "Dev"
+<DL>                    → push level "Dev", openLists=[false, true, true]
+<A HREF=b.com>B         → Link(B) into "Dev"
+</DL>                   → close "Dev": Folder(Dev, [B]) into "Bookmarks bar"
+</DL>                   → close "Bookmarks bar": top-level under the root → FLATTEN
+</DL>                   → the root list: nothing to close
 
 Result: [Link(A), Folder(Dev, [Link(B)])]
 ```
 
-### Phase 4: Top-Level Folder Flattening
+Without the last two `</DL>`s the result is the same: both levels are closed at the end of the file.
+
+### Step 4: Top-Level Folder Flattening
 
 The following folder names are recognized as Chrome's structural containers and flattened:
 
 ```swift
-let topLevelFolderNames: Set<String> = [
+static let topLevelFolderNames: Set<String> = [
     "Bookmarks bar",
     "Other bookmarks",
     "Mobile bookmarks",
@@ -211,31 +207,22 @@ let topLevelFolderNames: Set<String> = [
 ]
 ```
 
-Flattening means: when a `</DL>` closes one of these folders and the stack depth would return to the root level (`stack.count == 1` after pop), the folder's children are appended directly to the root rather than being wrapped in a Folder node.
+Flattening means: when one of these folders is closed directly under the root (by its `</DL>` or at the end of the file), its children are appended to the root rather than wrapped in a Folder node.
 
-This ensures the user doesn't see Chrome's internal folder structure in Arcmark. A user with bookmarks in both "Bookmarks bar" and "Other bookmarks" gets all of them at the root level.
+This ensures the user doesn't see Chrome's internal folder structure in SidebArc. A user with bookmarks in both "Bookmarks bar" and "Other bookmarks" gets all of them at the root level.
 
-### Phase 5: Apply to Arcmark
+### Step 5: Apply to SidebArc
 
-1. **Create workspace** named "Imported Bookmarks" with `.ember` color:
-   ```swift
-   _ = appModel.createWorkspace(name: "Imported Bookmarks", colorId: .ember)
-   ```
+`SettingsContentViewController.applyChromeImport`:
 
-2. **Add nodes recursively** using the same `addNodeToWorkspace` helper used by Arc import:
-   ```swift
-   for node in result.workspace.nodes {
-       addNodeToWorkspace(node, parentId: nil, appModel: appModel)
-   }
-   ```
-
-3. **Stay on Settings**: Unlike Arc import (which restores the previously selected workspace), Chrome import does not call `selectWorkspace`. The new workspace is internally selected by `createWorkspace`; when the user navigates away from Settings, they see the imported workspace.
+1. **Create the space and its complete node tree** with `AppModel.applyChromeImport`, in the current space's profile. The model selects it and saves and notifies once.
+2. **Stay on Settings**: it doesn't call `selectWorkspace` (that would close Settings). Leaving Settings shows the new space. Arc import, by contrast, leaves the selection unchanged.
 
 ## Data Mapping
 
-| Chrome HTML Element | Arcmark Concept | Notes |
+| Chrome HTML Element | SidebArc Concept | Notes |
 |---------------------|-----------------|-------|
-| `<H3>` folder header | Folder node | Name extracted from inner text |
+| `<H3>` folder header | Folder node | Name extracted from inner text; imported collapsed |
 | `<A HREF>` link | Link node | URL from HREF attribute, title from inner text |
 | `<DL>...</DL>` block | Folder children | Nesting depth preserved |
 | Bookmarks bar folder | (flattened) | Children merged into root |
@@ -247,19 +234,13 @@ This ensures the user doesn't see Chrome's internal folder structure in Arcmark.
 
 ## HTML Entity Decoding
 
-Bookmark titles and folder names may contain HTML entities. The parser decodes these five common entities:
+Titles, folder names **and `HREF` values** are decoded with `HTMLEntities.decode` (`Utilities/HTMLEntities.swift`, shared with the page-title fetch), in one pass: decimal and hex references (`&#39;`, `&#x27;`) and the named ones these files use (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`, dashes, quotes, `&hellip;`, …). Unknown or malformed references stay as written, and nothing is decoded twice (`&amp;lt;` → `&lt;`).
 
-| Entity | Character | Example |
-|--------|-----------|---------|
-| `&amp;` | `&` | `Tom &amp; Jerry` → `Tom & Jerry` |
-| `&lt;` | `<` | `a &lt; b` → `a < b` |
-| `&gt;` | `>` | `a &gt; b` → `a > b` |
-| `&quot;` | `"` | `&quot;hello&quot;` → `"hello"` |
-| `&#39;` | `'` | `it&#39;s` → `it's` |
-
-Chrome typically only uses `&amp;` and `&#39;` in practice, but the others are included for completeness since they're part of the HTML standard mandatory character references.
+Chrome writes `HREF` raw (only `"` becomes `&quot;`); Firefox-style files escape it, so `…?a=1&amp;b=2` is imported as `…?a=1&b=2`.
 
 ## URL Validation
+
+The decoded `HREF` goes through `ImportedURL.normalized` (`Utilities/ImportedURL.swift`, shared with the Arc import): it's trimmed, and characters a strict parser rejects (spaces, `"`, `<`, `|`, non-ASCII text, …) are percent-encoded after the scheme and host; existing `%XX` escapes and the host are left alone. `URL(string:)` is strict on macOS 13 and lenient from macOS 14, so without this a link with a space would be skipped on one and kept on the other. The encoded string is what's stored.
 
 Links are skipped if any of these conditions are true:
 
@@ -268,7 +249,9 @@ Links are skipped if any of these conditions are true:
 | URL string is empty | No valid URL |
 | Starts with `javascript:` | Bookmarklets, not navigable URLs |
 | Starts with `chrome://` | Chrome-internal pages, not accessible from other browsers |
-| `URL(string:)` returns `nil` | Malformed URL that Foundation can't parse |
+| `URL(string:)` returns `nil` after encoding | Malformed URL that Foundation can't parse |
+
+A relative string is kept (imports never drop links) but `BrowserManager.validatedLinkURL` never opens it.
 
 ## Why Not XMLParser or HTML Parsing Libraries?
 
@@ -277,10 +260,10 @@ The Netscape Bookmark format has several properties that make XML/HTML parsers a
 1. **Not valid XML**: The `<p>` tags are unclosed, `<DT>` tags are unclosed, and there's no proper root element
 2. **Not valid HTML5**: The DOCTYPE is non-standard (`NETSCAPE-Bookmark-file-1`)
 3. **No need for DOM**: We only need four token types (folder, link, DL open, DL close) — a full DOM is unnecessary overhead
-4. **Predictable line structure**: Chrome always outputs one element per line with consistent formatting
+4. **Few, simple tokens**: four tag types carry all the structure, wherever the line breaks fall
 5. **Zero dependencies**: Regex scanning uses Foundation's `NSRegularExpression`, no third-party libraries needed
 
-The line-by-line regex approach is simple, fast, and robust for this specific format.
+The single-pass regex scan is simple, fast, and tolerant of minified or slightly malformed files.
 
 ## Example: Complete Flow
 
@@ -307,9 +290,9 @@ The line-by-line regex approach is simple, fast, and robust for this specific fo
 </DL><p>
 ```
 
-### Output: Arcmark Structure
+### Output: SidebArc Structure
 ```
-Workspace: "Imported Bookmarks" (color: ember)
+Space: "Imported Bookmarks" (color: ember)
 ├── Link: "GitHub" (https://github.com)
 ├── Folder: "Development"
 │   └── Link: "Stack Overflow" (https://stackoverflow.com)
@@ -329,11 +312,12 @@ Workspace: "Imported Bookmarks" (color: ember)
 |--------|-----------|---------------|
 | Source | Fixed path (`~/Library/.../StorableSidebar.json`) | User-selected HTML file |
 | Format | JSON | Netscape Bookmark HTML |
-| Parser | JSONDecoder + Codable models | Line-by-line regex scanner |
-| Workspaces | Multiple (one per Arc space) | Single ("Imported Bookmarks") |
-| Top-level folders | N/A (Arc spaces are workspaces) | Flattened into root |
+| Parser | JSONDecoder + Codable models | Single-pass regex tokenizer |
+| Spaces | Multiple (one per Arc space, in the Arc profile's profile) | Single ("Imported Bookmarks", current profile) |
+| Top-level folders | N/A (Arc spaces become spaces) | Flattened into root |
+| Favorites | Per Arc profile (`topAppsContainerIDs`) | None |
 | File picker | No (reads from known path) | Yes (NSOpenPanel, .html filter) |
-| Post-import | Restores previous workspace | Selects new workspace, stays on Settings |
+| Post-import | Selection unchanged; one `AppModel` mutation | Selects the new space, stays on Settings; one `AppModel` mutation |
 | Color assignment | Cyclic (ember, ruby, coral, ...) | Always `.ember` |
 
 ## Edge Cases Handled
@@ -354,7 +338,7 @@ Folder nesting of arbitrary depth is fully preserved. The stack-based parser nat
 Folders and links at the same level are preserved in file order. A sequence of link-folder-link produces exactly that order in the output.
 
 ### 6. Non-Chrome Browsers
-Since all Chromium browsers (Brave, Edge, Vivaldi, Opera) and Firefox export the same Netscape format, the importer works for any of them. The "Chrome" branding in the UI is for clarity, but the parser is format-agnostic.
+All Chromium browsers (Brave, Edge, Vivaldi, Opera), Firefox and Safari export the same Netscape format, so the parser reads their files too. Only the four folder names above are flattened (exact, case-sensitive match); other browsers' top-level folders (Firefox's "Bookmarks Toolbar", for example) are imported as ordinary folders.
 
 ### 7. Case Variations
 All regex patterns use `.caseInsensitive` to handle `<DL>` vs `<dl>`, `<DT>` vs `<dt>`, etc. Some browsers output lowercase HTML.
@@ -364,9 +348,9 @@ All regex patterns use `.caseInsensitive` to handle `<DL>` vs `<dl>`, `<DT>` vs 
 Favicons are NOT extracted from the HTML file's `ICON` or `ICON_URI` attributes. Instead:
 
 1. Links are created with `faviconPath: nil`
-2. When displayed in the UI, `NodeCollectionViewItem` automatically requests favicons from `FaviconService`
+2. When shown, the list (`NodeListViewController`) requests favicons from `FaviconService`
 3. `FaviconService` fetches fresh favicons asynchronously from each site
-4. Favicons are cached in `~/Library/Application Support/Arcmark/Icons/`
+4. Favicons are cached in `~/Library/Application Support/io.github.giannirondini.sidebarc/Icons/`
 
 Rationale: Chrome's exported `ICON` attributes contain base64-encoded data URIs that would need to be decoded and saved to disk. Fetching fresh favicons is simpler, produces consistent results with the rest of the app, and avoids storing potentially stale icons.
 
@@ -407,7 +391,7 @@ func createBookmarksHTML(body: String) -> String {
 }
 ```
 
-### Test Cases (14 total)
+### Test Cases (`ChromeImportTests`)
 
 | Test | What It Verifies |
 |------|-----------------|
@@ -420,11 +404,17 @@ func createBookmarksHTML(body: String) -> String {
 | HTML entities decoded | `&amp;`, `&#39;`, etc. in titles |
 | Order preserved | Links appear in file order |
 | Empty title | Falls back to "Untitled" |
-| Workspace properties | Name is "Imported Bookmarks", colorId is `.ember` |
+| Space properties | Name is "Imported Bookmarks", colorId is `.ember` |
 | File not found | Returns `.fileNotFound` |
 | Invalid URLs skipped | `javascript:`, `chrome://`, empty URLs |
 | HTML entities in folder names | Entity decoding applies to `<H3>` content too |
+| Entities not double-decoded | `&amp;lt;` stays `&lt;` (one pass) |
 | Mixed content | Folders and links at same level, correct order |
+| Missing `</DL>` | Folders left open at the end of the file keep their links, in place |
+| Minified one-line file | Every link and folder imported regardless of line breaks |
+| `HREF` in any position | After other attributes, lower case, single-quoted, unquoted, with a quoted `>` in another attribute |
+| Heading without list, stray `</DL>` | Empty folder kept; a stray close doesn't break the structure |
+| `HREF` entities and spaces | `&amp;` and `&#38;` decoded, `&quot;` and spaces percent-encoded, in any quoting; bookmarklets still skipped |
 
 ## References
 
@@ -434,6 +424,7 @@ func createBookmarksHTML(body: String) -> String {
 - **ChromeImportTests.swift** — Unit tests
 - **Models.swift** — `Node`, `Folder`, `Link` data models
 - **ArcImportService.swift** — `ImportWorkspace` struct (shared between importers)
+- **AppModel.swift** — `applyChromeImport`
 
 ### External References
 - [Netscape Bookmark File Format (Microsoft)](https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa753582(v=vs.85))
@@ -446,7 +437,7 @@ The Netscape Bookmark HTML format is exported by all major browsers. The parser 
 
 | Browser | Export Location | Tested |
 |---------|----------------|--------|
-| Google Chrome | Bookmark Manager → Export | Yes |
+| Google Chrome | Bookmark Manager → Export | Yes (upstream) |
 | Brave | Bookmark Manager → Export | Expected (same Chromium base) |
 | Microsoft Edge | Favorites → Export | Expected (same Chromium base) |
 | Vivaldi | Bookmarks → Export | Expected (same Chromium base) |

@@ -1,346 +1,90 @@
 # Distribution Guide
 
-This document describes how to build and distribute Arcmark for beta testing and release.
+How to version, package and publish SidebArc.
 
 **See also:**
-- [ASSETS.md](ASSETS.md) - App icon and DMG background specifications
-- [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md) - Build system and code signing details
-- [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md) - Production code signing and notarization setup
-- [appcast.xml](appcast.xml) - Sparkle update feed (hosted via GitHub Pages)
+- [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md): toolchain, build scripts, code signing, verification
+- [ASSETS.md](ASSETS.md): app icon and DMG background
 
-## Version Management
+## Updates
 
-### VERSION File
+SidebArc has **no in-app updater**. "Check for Updates…" (app menu and Settings → App Version) opens the [GitHub Releases page](https://github.com/giannirondini/sidebarc/releases) (`AppIdentity.releasesURL`). Users update by downloading the new DMG and replacing the app.
 
-The project uses a centralized `VERSION` file in the project root to manage the app version. This file contains a single version string following [Semantic Versioning](https://semver.org/):
+## Version management
 
-```
-0.1.0
-```
-
-**Version Format**: `MAJOR.MINOR.PATCH`
-- **MAJOR**: Incompatible API changes or major feature overhauls
-- **MINOR**: New features added in a backwards-compatible manner
-- **PATCH**: Backwards-compatible bug fixes
-
-### Updating the Version
-
-To update the app version:
-
-1. Edit the `VERSION` file with the new version number:
-   ```bash
-   echo "0.2.0" > VERSION
-   ```
-
-2. The build script will automatically:
-   - Read the version from the `VERSION` file
-   - Update `Bundler.toml` if the version has changed
-   - Apply the version to `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist
-
-### Version Configuration
-
-The version is configured in three places (automatically synchronized):
-
-1. **VERSION file** - Source of truth
-2. **Bundler.toml** - Swift Bundler configuration
-3. **Info.plist** - Patched post-build by `build.sh` using PlistBuddy
-
-## Building for Distribution
-
-### Development Builds (Ad-hoc Signing)
-
-For local testing and early development:
+`VERSION` in the repo root is the source of truth ([Semantic Versioning](https://semver.org/)):
 
 ```bash
-# Build app only
-./scripts/build.sh
-
-# Build app and create DMG
-./scripts/build.sh --dmg
+echo "1.1.0" > VERSION
 ```
 
-**Note**: These builds use ad-hoc signing. Users will see security warnings when launching.
+`./scripts/build.sh <version>` writes it (`./scripts/build.sh` alone uses it as it is), syncs it into `Bundler.toml` and sets `CFBundleShortVersionString` and `CFBundleVersion` in Info.plist.
 
-### Production Builds (Developer ID + Notarization)
+## Releasing
 
-For distribution to beta testers and public release:
+Quick start: [scripts/README.md](../scripts/README.md). Two steps you run yourself, then the publishing commands they print:
 
-**First-time setup** (one-time):
-1. Follow the guide in [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md)
-2. Create your `.notarization-config` file with credentials
-
-**Build commands**:
 ```bash
-# Build with Developer ID signing (no DMG)
-./scripts/build.sh --production
-
-# Build and create fully notarized DMG (recommended)
-./scripts/build.sh --production --dmg
+./scripts/build.sh 1.1.0        # build and sign .build/bundler/SidebArc.app
+./scripts/create-dmg.sh 1.1.0   # .build/release/1.1.0/: DMG, notes, checksums, upload instructions
 ```
 
-**What happens with `--production --dmg`**:
-1. App is built and signed with your Developer ID certificate
-2. Sparkle.framework is embedded and Info.plist is patched with update feed URL
-3. Hardened runtime is enabled for notarization
-4. DMG is created with the signed app
-5. DMG is signed with Sparkle's EdDSA key and `docs/appcast.xml` is auto-updated
-6. DMG is submitted to Apple for notarization (~2-5 minutes)
-7. Notarization ticket is stapled to the DMG
-8. Result: DMG launches without security warnings and supports auto-updates
+`create-dmg.sh` (Homebrew's `create-dmg`, `brew install create-dmg`):
 
-### Build Comparison
+1. Checks the built app is that version, is a release build (`SidebArcBuildConfiguration` = `release` in Info.plist; `run.sh` writes a debug build to the same path), passes `verify-build.sh`, and is signed with the release certificate: the leaf certificate's SHA-256 must equal `scripts/release-signing-cert.sha256`. The name isn't compared: a recreated certificate with the same name would still reset the users' grants, and an ad-hoc release would let any app with the bundle id claim them. `--allow-adhoc` accepts anything else but only writes `.build/release/<version>-adhoc/SidebArc-<version>-adhoc.dmg` (no notes, no upload instructions); a later run without it deletes that folder.
+2. Builds the DMG in a temporary folder (`.build/release/.dmg-build.*`, removed on exit along with any disk image create-dmg left attached): 600 × 400 window, `SidebArc.app` and an Applications link side by side, background `Resources/dmg-background.png`, volume icon from the app; then `hdiutil verify`. If the Finder-styling AppleScript fails (create-dmg exits 64 without a DMG), it retries once with `--skip-jenkins` and warns.
+3. Writes `checksums.txt` (SHA-256), `RELEASE_NOTES.md` (What's New from the commit subjects since the previous tag, "First release." without one; install steps with `xattr`; permissions; requirements; checksum) and `UPLOAD_INSTRUCTIONS.md` (commit `VERSION`, tag `v<version>`, push, `gh release create … --notes-file RELEASE_NOTES.md`, or the web form), then moves them into `.build/release/<version>/`. A rerun keeps an existing `RELEASE_NOTES.md` (the fresh notes become `RELEASE_NOTES.new.md`, with a warning if the kept notes lack the new checksum) and moves the previous DMG and `checksums.txt` to `previous-<timestamp>/`.
 
-| Build Type | Command | Code Signing | Notarization | User Experience |
-|------------|---------|--------------|--------------|-----------------|
-| Development | `./scripts/build.sh` | Ad-hoc | No | Security warnings |
-| Development DMG | `./scripts/build.sh --dmg` | Ad-hoc | No | Security warnings |
-| Production | `./scripts/build.sh --production` | Developer ID | No | Click-through warning |
-| Production DMG | `./scripts/build.sh --production --dmg` | Developer ID | Yes | No warnings! ✨ |
+Nothing is committed, tagged, pushed or published by the scripts. Nothing is notarized either: that needs a paid Apple Developer ID, which this open-source project doesn't have ([BUILD_AND_CODESIGN.md › No Developer ID](BUILD_AND_CODESIGN.md#no-developer-id)).
 
-## DMG Installer Features
+| Build | Command | Signing | User experience |
+|---|---|---|---|
+| App | `./scripts/build.sh [version]` | Self-signed (`.signing-config`), else ad-hoc | Runs locally; a downloaded copy is blocked until `xattr` |
+| Release DMG | `./scripts/create-dmg.sh [version]` | Release certificate (required, compared by SHA-256) | Blocked until `xattr` |
 
-The generated DMG includes:
+## Installing (for users)
 
-- **Drag-and-Drop Installation**: Users drag Arcmark.app to the Applications folder symlink
-- **Professional Layout**: Custom Finder window with icon arrangement
-- **Version in Filename**: DMG named `Arcmark-X.Y.Z.dmg` based on VERSION file
-- **Compressed Format**: Uses UDZO (zlib compression) for smaller file size
-- **Verified Code Signing**: Includes ad-hoc code signature for local development
+Requires macOS 13 or later on Apple silicon: the DMG is arm64 only.
 
-### DMG Structure
-
-```
-Arcmark X.Y.Z/
-├── Arcmark.app          # The application bundle
-└── Applications/        # Symlink to /Applications
-```
-
-When mounted, users see:
-- The Arcmark app on the left
-- Applications folder shortcut on the right
-- Instructions to drag-and-drop
-
-## Distribution Workflow
-
-### For Beta Testing
-
-1. **Update Version** (if needed):
+1. Download `SidebArc-<version>.dmg` from GitHub Releases.
+2. Open it and drag **SidebArc** onto **Applications**.
+3. Eject the disk image and launch SidebArc.
+4. SidebArc isn't notarized, so macOS blocks the downloaded app until its quarantine flag is cleared, once per new version:
    ```bash
-   echo "0.2.0-beta.1" > VERSION
+   xattr -dr com.apple.quarantine /Applications/SidebArc.app
    ```
+   (Or System Settings → Privacy & Security → Open Anyway.) Accessibility and Automation grants carry over between releases signed with the same identity.
 
-2. **Build DMG**:
-   ```bash
-   ./scripts/build.sh --dmg
-   ```
+To update, quit SidebArc and repeat with the new DMG. Data lives in `~/Library/Application Support/io.github.giannirondini.sidebarc/` and is kept across updates.
 
-3. **Test the DMG**:
-   ```bash
-   open .build/dmg/Arcmark-0.2.0-beta.1.dmg
-   ```
-
-4. **Distribute**:
-   - Upload DMG to file sharing service
-   - Share download link with beta testers
-   - Include installation instructions (see below)
-
-### For Release
-
-1. **Update Version** (remove pre-release suffix):
-   ```bash
-   echo "1.0.0" > VERSION
-   ```
-
-2. **Build Release DMG**:
-   ```bash
-   ./scripts/build.sh --production --dmg
-   ```
-   The build script automatically:
-   - Embeds Sparkle.framework and patches Info.plist with the update feed URL
-   - Signs the DMG with EdDSA and adds a new entry to `docs/appcast.xml`
-
-3. **Test Installation**:
-   - Mount the DMG
-   - Drag to Applications
-   - Verify app launches correctly
-   - Verify "Check for Updates" works (App Menu and Settings)
-
-4. **Publish the update feed**:
-   ```bash
-   git add docs/appcast.xml
-   git commit -m "Update appcast for v1.0.0"
-   git push origin main
-   ```
-   GitHub Pages serves the appcast at `https://geek-1001.github.io/arcmark/appcast.xml`.
-
-5. **Create Git Tag and GitHub Release**:
-   ```bash
-   git tag -a v1.0.0 -m "Release version 1.0.0"
-   git push origin v1.0.0
-   ```
-   Upload the DMG (`.build/dmg/Arcmark-1.0.0.dmg`) to the GitHub Release.
-   The appcast entry points to this DMG URL, so existing users will receive the update automatically.
-
-## Installation Instructions for Users
-
-Share these instructions with beta testers:
-
-### Installing Arcmark
-
-1. **Download** the DMG file (e.g., `Arcmark-0.2.0.dmg`)
-
-2. **Open** the downloaded DMG file by double-clicking it
-
-3. **Drag** the Arcmark icon to the Applications folder icon
-
-4. **Eject** the Arcmark disk image from Finder
-
-5. **Launch** Arcmark from your Applications folder or Spotlight
-
-6. **First Launch**: macOS may show a security prompt since the app isn't notarized yet. Click "Open" to proceed.
-
-### Updating Arcmark
-
-Arcmark includes automatic update support via Sparkle. When a new version is available:
-
-1. The app checks for updates automatically in the background
-2. A dialog appears when an update is available
-3. Click "Install Update" to download and install automatically
-
-You can also check manually via:
-- **App Menu** > "Check for Updates..."
-- **Settings** > scroll to "App Version" > click "Check for Updates"
-
-**Manual update** (if auto-update is unavailable):
-1. **Quit** Arcmark if it's running
-2. **Download** the new DMG file
-3. **Follow** the same installation steps above (this will replace the old version)
-
-## Code Signing
-
-### Development Signing (Default)
-
-By default, builds use ad-hoc signing for local development:
-- No Apple Developer account required
-- Fast builds
-- ⚠️ Users see security warnings
-
-### Production Signing (Recommended for Distribution)
-
-For production distribution with no security warnings:
-
-**Requirements**:
-- Apple Developer Program membership ($99/year)
-- Developer ID Application certificate
-- App-specific password for notarization
-
-**Setup**: Follow the step-by-step guide in [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md)
-
-**Build**: Use `./scripts/build.sh --production --dmg`
-
-**Benefits**:
-- ✅ No security warnings for users
-- ✅ Professional appearance
-- ✅ Required for public distribution
-- ✅ Builds trust with users
-
-See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md) for complete setup instructions.
-
-## Build Artifacts
-
-### Directory Structure
+## Build artifacts
 
 ```
 .build/
 ├── bundler/
-│   └── Arcmark.app              # Built application bundle
-└── dmg/
-    ├── Arcmark-X.Y.Z.dmg        # Distributable DMG
-    └── dmg-staging/             # Temporary (cleaned up automatically)
+│   └── SidebArc.app
+└── release/
+    └── <version>/
+        ├── SidebArc-<version>.dmg
+        ├── RELEASE_NOTES.md
+        ├── checksums.txt
+        ├── UPLOAD_INSTRUCTIONS.md
+        ├── RELEASE_NOTES.new.md      (rerun with edited notes only)
+        └── previous-<timestamp>/     (rerun only: the replaced DMG and checksums)
 ```
 
-### Cleaning Build Artifacts
+A test DMG (`--allow-adhoc`) goes to `.build/release/<version>-adhoc/` instead.
 
-To remove all build artifacts:
-
-```bash
-./scripts/clean.sh
-```
-
-This removes the entire `.build/` directory.
+`./scripts/clean.sh` removes `.build/` entirely.
 
 ## Troubleshooting
 
-### DMG Creation Fails
-
-**Issue**: "Error: App bundle not found"
-**Solution**: Run `./scripts/build.sh` first to build the app
-
-**Issue**: Finder window customization doesn't work
-**Solution**: The DMG will still be created and functional, just without custom layout
-
-### Version Not Updating
-
-**Issue**: Info.plist shows old version
-**Solution**: Clean build and rebuild:
-```bash
-./scripts/clean.sh
-./scripts/build.sh
-```
-
-### Code Signing Errors
-
-**Issue**: "resource fork, Finder information, or similar detritus not allowed"
-**Solution**: The build script handles this automatically with `--force --deep` flags
-
-## Auto-Update System (Sparkle)
-
-Arcmark uses [Sparkle 2](https://sparkle-project.org/) for automatic updates.
-
-### How It Works
-
-1. **Appcast feed**: `docs/appcast.xml` is hosted via GitHub Pages at `https://geek-1001.github.io/arcmark/appcast.xml`
-2. **Update checking**: Sparkle checks the appcast feed periodically for new versions
-3. **EdDSA signing**: Each DMG is signed with an EdDSA key for secure update verification
-4. **User experience**: Standard macOS update dialog with download, install, and relaunch
-
-### First-Time Setup (One-Time)
-
-1. **Generate EdDSA keys** using Sparkle's `generate_keys` tool:
-   ```bash
-   # Find the tool in build artifacts after running swift build
-   find .build -name "generate_keys" -type f
-   # Run it to generate a key pair
-   .build/.../generate_keys
-   ```
-2. **Set the public key** in `Bundler.toml` (`SUPublicEDKey` field)
-3. **Enable GitHub Pages** on the repo to serve from `docs/` folder on `main` branch
-
-### Release Workflow with Auto-Updates
-
-Use the release script to handle the full workflow in one command:
-
-```bash
-# Full release: build, sign, commit, tag, push, create GitHub release
-./scripts/release.sh 0.2.0
-
-# Dry run: build and sign only, skip git/GitHub operations
-./scripts/release.sh 0.2.0 --dry-run
-```
-
-The script handles all steps: updating VERSION, building a production DMG, signing with EdDSA, updating the appcast, committing, tagging, pushing, and creating the GitHub release.
-
-Existing users will receive the update automatically via Sparkle.
-
-### Where Users Can Check for Updates
-
-- **App Menu**: Arcmark > "Check for Updates..."
-- **Settings**: Scroll to the "App Version" section > "Check for Updates" button
-
-## Future Improvements
-
-- [ ] Automated notarization for production releases
-- [ ] Custom DMG background image
-- [x] Sparkle framework integration for auto-updates
-- [ ] CI/CD pipeline for automated builds
-- [ ] TestFlight-style beta distribution portal
+| Problem | Fix |
+|---|---|
+| "App bundle not found" / "The built app is version X" from `create-dmg.sh` | `./scripts/build.sh <version>` first |
+| "isn't signed with the release certificate" | Set up `.signing-config` with the release certificate and rebuild (or `--allow-adhoc` for a test DMG) |
+| "isn't a release build" | `./scripts/build.sh <version>` |
+| `create-dmg` not found | `brew install create-dmg` |
+| "The Finder styling failed" / layout or background not applied | Allow the terminal to control Finder (Privacy & Security › Automation) and rerun; `create-dmg.sh` already retried without the styling, so the DMG works with the default layout |
+| Info.plist shows an old version | `./scripts/clean.sh && ./scripts/build.sh` |
+| "SidebArc can't be opened" / "Apple could not verify…" after a download | Clear the quarantine flag (Installing, step 4) |

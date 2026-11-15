@@ -1,5 +1,5 @@
 #!/bin/bash
-# Clean build artifacts for Arcmark
+# Clean build artifacts
 
 set -e  # Exit on error
 

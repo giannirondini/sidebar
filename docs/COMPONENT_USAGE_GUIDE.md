@@ -1,13 +1,65 @@
 # Component Usage Guide
 
-This guide provides practical examples for using Arcmark's base classes and design system components.
+This guide provides practical examples for using SidebArc's base classes and design system components.
 
 ## Table of Contents
-1. [ThemeConstants](#themeconstants)
-2. [BaseControl](#basecontrol)
-3. [BaseView](#baseview)
-4. [InlineEditableTextField](#inlineeditabletextfield)
-5. [Common Patterns](#common-patterns)
+1. [Overview](#overview)
+2. [ThemeConstants](#themeconstants)
+3. [BaseControl](#basecontrol)
+4. [BaseView](#baseview)
+5. [InlineEditableTextField](#inlineeditabletextfield)
+6. [Space Components](#space-components)
+7. [Menu Builders](#menu-builders)
+8. [Common Patterns](#common-patterns)
+
+---
+
+## Overview
+
+_Moved from CLAUDE.md › "UI Component Architecture (Post-Refactoring)" on 2026-11-15._
+
+**Base Classes** (located in `Components/Base/`):
+- **BaseControl** - Base class for all interactive controls with hover and pressed state management
+  - Owns the tracking area and mouse events; refreshes the hover state on layout and window changes
+  - Provides `handleHoverStateChanged()` and `handlePressedStateChanged()` override points
+  - Used by: `IconTitleButton`, `CustomToggle`, `SpaceBarButton`, `PinnedTabTileView`, `IconPickerItemView`, `ScheduledLinkRowView`, the scheduled-links `HeaderButton`
+- **BaseView** - Base class for custom views with hover state management (no pressed state)
+  - Simpler than BaseControl, designed for non-interactive views like rows
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`, the shortcut recorder's `RecorderBoxView`
+- **InlineEditableTextField** - Reusable component for inline text editing
+  - Encapsulates commit/cancel logic, focus management, and callbacks
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
+
+**Design System** (located in `Utilities/Theme/`):
+- **ThemeConstants** - Centralized design system constants
+  - Colors: Brand colors and semantic values (darkGray, white, settingsBackground)
+  - Opacity: Standard opacity levels (full, high, medium, low, subtle, extraSubtle, minimal)
+  - Fonts: Typography styles (bodyRegular, bodySemibold, bodyMedium, bodyBold)
+  - Spacing: Layout spacing values (tiny=4, small=6, medium=8, regular=10, large=14, extraLarge=16, huge=20)
+  - CornerRadius: Rounding values (small=6, medium=8, large=12)
+  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, iconExtraLarge=26, buttonHeight=32; list rows use `ListMetrics.rowHeight`), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
+  - Animation: Timing values (durationFast=0.15s, durationNormal=0.2s, durationSlow=0.3s)
+  - SpaceTransition: space-switch tuning (commit fraction, flick velocity, velocity window, rubber band, spring response and damping ratio)
+
+**Component Patterns**:
+All interactive controls extend BaseControl or BaseView and use ThemeConstants for consistency:
+
+```swift
+// Example: Custom button extending BaseControl
+final class MyButton: BaseControl {
+    override func handleHoverStateChanged() {
+        layer?.backgroundColor = isHovered
+            ? ThemeConstants.Colors.darkGray.withAlphaComponent(ThemeConstants.Opacity.minimal).cgColor
+            : NSColor.clear.cgColor
+    }
+
+    override func handlePressedStateChanged() {
+        layer?.backgroundColor = isPressed
+            ? ThemeConstants.Colors.darkGray.withAlphaComponent(ThemeConstants.Opacity.subtle).cgColor
+            : NSColor.clear.cgColor
+    }
+}
+```
 
 ---
 
@@ -407,6 +459,118 @@ final class EditableRowView: BaseView {
 
 ---
 
+## Space Components
+
+The space UI lives in `Components/Spaces/`. All three take data, never the
+`AppModel`; `MainViewController` wires their callbacks to model calls.
+
+### SpaceIconView
+
+A space's emoji or SF Symbol (`Workspace.icon`), or a dot in its colour when it has none.
+Use it anywhere a space is shown, so icons look the same everywhere.
+
+```swift
+let iconView = SpaceIconView()
+iconView.iconSize = ThemeConstants.Sizing.iconMedium   // emoji/symbol size
+iconView.dotSize = ThemeConstants.Sizing.iconSmall     // colour dot diameter
+iconView.configure(icon: workspace.icon, color: workspace.color)   // never colorId.color: a custom colour wins
+
+// Just the image (e.g. for an NSImageView in an existing row):
+let image = SpaceIconView.image(for: .emoji("🚀"), size: ThemeConstants.Sizing.iconMedium)
+```
+
+### SpaceBarView
+
+The bottom bar: gear, one button per space, `+`. Feed it the whole list on every reload;
+it rebuilds buttons only when the items change, and keeps the selected one scrolled into view.
+
+```swift
+spaceBar.update(
+    items: model.workspaces.map { SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color) },
+    selectedId: model.currentWorkspace.id,
+    isSettingsShown: model.isSettingsShown
+)
+spaceBar.onSpaceSelected = { id in /* requestSpaceSwitch(to: id) */ }
+spaceBar.onSpaceContextMenu = { id, event in /* SpaceMenu, anchored to spaceBar.buttonView(for: id) */ }
+spaceBar.onAddSpace = { /* create a space */ }
+spaceBar.onSettings = { /* toggle Settings */ }
+```
+
+- Register it with `SwipeGestureService.shared.addExcludedView(spaceBar)`, so a horizontal
+  scroll over it scrolls the bar instead of switching spaces.
+- The selection is a separate pill view. During a space transition, drive it with
+  `setSelectionProgress(toward:progress:)` while tracking and `settleSelection(on:animation:)`
+  inside the transition's `CATransaction`; call `endSelectionTransition()` when it lands.
+- `SpaceBarButton` (a `BaseControl`) is the square button used for all three kinds; its
+  content is dimmed unless selected or hovered.
+
+### SpaceHeaderView
+
+The current space's icon and name between the Favorites and the pinned list. It uses
+`ListMetrics`, so its icon and title line up with a top-level row of the list.
+
+```swift
+spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.color)
+spaceHeader.onRename = { newName in /* model.renameWorkspace */ }        // after a double-click
+spaceHeader.onIconClicked = { anchor in /* icon picker, kind .space */ }
+spaceHeader.onContextMenu = { event in /* SpaceMenu */ }
+spaceHeader.beginInlineRename()                                          // from a menu or a new space
+```
+
+`configure` never touches the title while it is being edited (the text field returns the
+live typed value), so a reload mid-rename can't end it. Switching spaces cancels a rename.
+
+### IconTitleButton `.listRow`
+
+A dimmed "+ Title" row that reads as the last row of a list (Arc's "New Tab" row): the
+icon sits in the list's icon column, the title where link titles start, and it is as tall
+as a list row. All of it is derived from `ListMetrics`.
+
+```swift
+let row = IconTitleButton(title: "Add from Clipboard", symbolName: "plus", style: .listRow)
+```
+
+---
+
+## Menu Builders
+
+Context menus are built by small enums that only build items (`BrowserMenus`, `SpaceMenu`);
+every action is a closure supplied by the caller, which makes the `AppModel` call.
+
+```swift
+let menu = SpaceMenu.build(
+    workspace: workspace,
+    canDelete: model.workspaces.count > 1,
+    profileItem: profileMenuItem(for: workspace),
+    actions: SpaceMenu.Actions(
+        rename: { /* … */ },
+        changeIcon: { /* … */ },
+        setColor: { colorId in model.updateWorkspaceColor(id: workspace.id, colorId: colorId) },
+        customColor: {                                  // "Custom Color…": the colour panel
+            SpaceColorPanel.shared.edit(workspace) { id, color in model.setWorkspaceCustomColor(id: id, color: color) }
+        },
+        moveLeft: index > 0 ? { /* … */ } : nil,      // nil hides the item
+        moveRight: nil,
+        delete: { /* confirm, then delete */ }
+    )
+)
+```
+
+Rules:
+
+1. **Use `ClosureMenuItem`** for closure actions. Never name an `@objc` action method
+   `perform(_:)`: `#selector` resolves to NSObject's `performSelector:`, AppKit swallows the
+   exception, and the item silently does nothing.
+2. **Capture the id** of the thing the menu is for. Don't act on "the current" space or
+   link: opening a menu must not change the selection.
+3. **Set `menu.autoenablesItems = false`** when an item can be disabled; otherwise AppKit
+   re-enables every item whose target responds to its action.
+4. **Test the dispatch**: build the menu, call `menu.performActionForItem(at:)` and check the
+   closure ran (see `ClosureMenuItemTests`, `SpaceMenuTests`). A menu that only renders is
+   not tested.
+
+---
+
 ## Common Patterns
 
 ### Pattern 1: Hover State with Animation
@@ -519,85 +683,6 @@ private func isValidTitle(_ title: String) -> Bool {
 
 ---
 
-## Migration Guide: From Old Pattern to New Pattern
-
-### Before: Manual Hover State Management
-
-```swift
-// OLD - Don't do this anymore
-final class OldButton: NSControl {
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let options: NSTrackingArea.Options = [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect]
-        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        // ... appearance logic
-    }
-}
-```
-
-### After: Using BaseControl
-
-```swift
-// NEW - Much cleaner!
-final class NewButton: BaseControl {
-    override func handleHoverStateChanged() {
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        // isHovered is automatically managed by BaseControl
-        layer?.backgroundColor = isHovered
-            ? ThemeConstants.Colors.darkGray.withAlphaComponent(ThemeConstants.Opacity.minimal).cgColor
-            : NSColor.clear.cgColor
-    }
-}
-```
-
-### Before: Hardcoded Constants
-
-```swift
-// OLD - Don't do this anymore
-let color = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 1.0)
-let opacity: CGFloat = 0.8
-let font = NSFont.systemFont(ofSize: 14, weight: .regular)
-let spacing: CGFloat = 10
-let cornerRadius: CGFloat = 8
-```
-
-### After: Using ThemeConstants
-
-```swift
-// NEW - Centralized and consistent!
-let color = ThemeConstants.Colors.darkGray
-let opacity = ThemeConstants.Opacity.high
-let font = ThemeConstants.Fonts.bodyRegular
-let spacing = ThemeConstants.Spacing.regular
-let cornerRadius = ThemeConstants.CornerRadius.medium
-```
-
----
-
 ## Best Practices
 
 1. **Always use ThemeConstants** instead of hardcoded values for colors, fonts, spacing, etc.
@@ -613,7 +698,8 @@ let cornerRadius = ThemeConstants.CornerRadius.medium
 
 ## Additional Resources
 
-- See [REFACTORING_PLAN.md](/REFACTORING_PLAN.md) for the full refactoring history
-- See [CLAUDE.md](/CLAUDE.md) for architecture overview
+- See [REFACTORING_PLAN.md](REFACTORING_PLAN.md) for the full refactoring history
+- See [ARCHITECTURE.md](ARCHITECTURE.md) and [INTERNALS.md](INTERNALS.md) for the architecture
 - Check the source code for `BaseControl`, `BaseView`, and `InlineEditableTextField` for implementation details
 - Look at existing components like `IconTitleButton`, `NodeRowView`, and `WorkspaceRowView` for real-world examples
+- For the space UI, see `SpaceBarView`, `SpaceHeaderView`, `SpaceIconView` and `SpaceMenu`; for the space switch, [SPACES.md](SPACES.md)

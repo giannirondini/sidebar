@@ -1,0 +1,804 @@
+import AppKit
+import os
+
+@MainActor
+public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WindowAttachmentServiceDelegate, GlobalHotkeyServiceDelegate {
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "app")
+
+    public override init() {
+        super.init()
+    }
+    private var window: NSWindow?
+    private var mainViewController: MainViewController?
+    private var alwaysOnTopMenuItem: NSMenuItem?
+    private var noteServer: NoteServer?
+    private var scheduler: SchedulerService?
+    private var agentEndpointFileURL: URL?
+
+    // Attachment state
+    /// Attachment is enabled (the setting is on and the service runs). The window
+    /// is locked only while `windowMode` is `.attached`.
+    private var isAttachmentMode: Bool = false
+    /// Whether the window is beside a browser window now (`windowModeTransition`).
+    private var windowMode: WindowAttachmentService.WindowMode = .standalone
+    /// The standalone frame, captured when the window is first placed beside a browser.
+    private var lastManualFrame: NSRect?
+    private let attachLogger = Logger(subsystem: AppIdentity.logSubsystem, category: "attach")
+
+    // Shortcut toggle state
+    private var isUserHidden: Bool = false
+
+    public func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: [UserDefaultsKeys.tooltipsEnabled: true])
+
+        setupMenus()
+
+        let model = AppModel()
+        let loadedCleanly = model.dataLoadIssue == nil
+        guard handleDataLoadIssue(model: model) else {
+            NSApp.terminate(nil)
+            return
+        }
+        // Never after "Start Empty Library": the preserved library's icons are
+        // still in Icons/ and must stay for its recovery.
+        if loadedCleanly {
+            model.removeUnusedLegacyFavicons()
+        }
+        var saveFailureShown = false
+        let dataFilePath = model.dataFileURL.path
+        model.onSaveFailure = {
+            guard !saveFailureShown else { return }
+            saveFailureShown = true
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.alertStyle = .critical
+                alert.messageText = "Could not save your library"
+                alert.informativeText = "Recent changes may not be saved. Check available disk space and permissions, then try again. Your data file is at \(dataFilePath)."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+        let mainViewController = MainViewController(model: model)
+        self.mainViewController = mainViewController
+        mainViewController.onModelReload = { [weak self] in self?.refreshAttachmentBrowsers() }
+
+        // Without the note server (no token could be generated) notes and the agent
+        // API are unavailable; everything else still works.
+        do {
+            let noteServer = try NoteServer(model: model)
+            noteServer.start()
+            mainViewController.noteServer = noteServer
+            self.noteServer = noteServer
+            publishAgentEndpoint(noteServer: noteServer)
+        } catch {
+            logger.error("NoteServer could not generate an access token: \(error.localizedDescription, privacy: .public)")
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 680),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = AppIdentity.displayName
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.isReleasedWhenClosed = false
+        // The space colour is painted once, by MainViewController over the blur.
+        window.backgroundColor = .clear
+        window.minSize = NSSize(width: 280, height: 420)
+        window.maxSize = NSSize(width: 520, height: 10000) // Unlimited height for attachment mode
+        window.collectionBehavior = [.moveToActiveSpace]
+        window.contentViewController = SidebarBackdropViewController(content: mainViewController)
+
+        // Restore saved frame AFTER content view controller is set
+        let restoredFrame = applySavedWindowFrame(to: window)
+        if !restoredFrame {
+            window.center()
+        }
+        ensureWindowVisible(window)
+        window.delegate = self
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+
+        self.window = window
+        applyAlwaysOnTopFromDefaults()
+        setupAttachmentService()
+        setupGlobalHotkey()
+        setupSwipeGesture()
+        observeBrowserChanges()
+        setupScheduler(model: model)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func handleDataLoadIssue(model: AppModel) -> Bool {
+        guard let issue = model.dataLoadIssue else { return true }
+        let reason: String
+        let canStartEmpty: Bool
+        switch issue {
+        case .newerSchema(let version):
+            reason = "This library uses data version \(version), which requires a newer version of \(AppIdentity.displayName)."
+            canStartEmpty = true
+        case .unreadable(let detail):
+            reason = "This library could not be decoded: \(detail)"
+            canStartEmpty = true
+        case .readFailed(let detail):
+            reason = "This library could not be read: \(detail)"
+            canStartEmpty = false
+        case .migrationCopyFailed(let detail):
+            // The library itself is fine: no backup to restore, nothing to replace.
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Your library could not be upgraded"
+            alert.informativeText = "This library uses an older data format. Before upgrading it, \(AppIdentity.displayName) keeps a copy of it in the Backups folder, and that copy could not be written: \(detail)\n\nNothing was changed: your data is untouched at \(model.dataFileURL.path). Free some disk space or fix the permissions of the Backups folder in the same location, then open \(AppIdentity.displayName) again."
+            alert.addButton(withTitle: "Quit")
+            alert.runModal()
+            return false
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Your library could not be opened"
+        alert.informativeText = "\(reason)\n\nYour data is untouched at \(model.dataFileURL.path). Check the Backups folder in the same location. Quit and update \(AppIdentity.displayName) or restore a backup."
+        alert.addButton(withTitle: "Quit")
+        if canStartEmpty {
+            alert.informativeText += "\n\nAlternatively, start an empty library. The original data file will be preserved as data.unreadable-…json in the same folder."
+            alert.addButton(withTitle: "Start Empty Library")
+        }
+        guard alert.runModal() == .alertSecondButtonReturn, canStartEmpty else { return false }
+
+        do {
+            let preserved = try model.startEmptyLibrary()
+            let confirmation = NSAlert()
+            confirmation.alertStyle = .warning
+            confirmation.messageText = "Original library preserved"
+            confirmation.informativeText = "The original data file is at \(preserved.path). Back it up along with the Notes and Icons folders before importing or making changes. To recover it, quit \(AppIdentity.displayName), update the app if needed, and restore the file as data.json. Backups are in the Backups folder."
+            confirmation.addButton(withTitle: "Continue")
+            confirmation.runModal()
+            return true
+        } catch {
+            let failure = NSAlert()
+            failure.alertStyle = .critical
+            failure.messageText = "Could not preserve your library"
+            failure.informativeText = "The empty library was not started. Check the original file at \(model.dataFileURL.path) and the Backups folder.\n\n\(error.localizedDescription)"
+            failure.addButton(withTitle: "Quit")
+            failure.runModal()
+            return false
+        }
+    }
+
+    private func setupScheduler(model: AppModel) {
+        let scheduler = SchedulerService()
+        self.scheduler = scheduler
+
+        scheduler.onFire = { [weak model] ref in
+            guard let model else { return }
+            if let url = URL(string: ref.url) {
+                // The ref carries only the URL; look the link up for its browser override.
+                var link: Link?
+                if case .link(let found) = model.nodeAcrossWorkspaces(id: ref.linkId) {
+                    link = found
+                }
+                let profile = model.state.workspaces
+                    .first(where: { $0.id == ref.workspaceId })
+                    .map { model.profile(for: $0) } ?? model.currentProfile
+                BrowserManager.open(url: url, target: BrowserManager.resolveTarget(link: link, profile: profile))
+            }
+            model.cancelSchedule(id: ref.linkId)
+        }
+
+        let previousOnChange = model.onChange
+        model.onChange = { [weak scheduler, weak model] in
+            previousOnChange?()
+            guard let scheduler, let model else { return }
+            scheduler.sync(with: model.allScheduledLinks())
+        }
+
+        scheduler.sync(with: model.allScheduledLinks())
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(handleSchedulerWakeOrActivate),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSchedulerWakeOrActivate),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleSchedulerWakeOrActivate() {
+        guard let scheduler, let model = mainViewController?.model else { return }
+        scheduler.sync(with: model.allScheduledLinks())
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        if let window {
+            // While attached, the standalone frame to come back to is the remembered one.
+            let frame = windowMode == .attached ? lastManualFrame : window.frame
+            if let frame {
+                UserDefaults.standard.set(NSStringFromRect(frame), forKey: UserDefaultsKeys.mainWindowSize)
+            }
+        }
+        noteServer?.stop()
+        if let agentEndpointFileURL {
+            do {
+                if FileManager.default.fileExists(atPath: agentEndpointFileURL.path) {
+                    try FileManager.default.removeItem(at: agentEndpointFileURL)
+                }
+            } catch {
+                logger.error("Could not remove agent endpoint: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func publishAgentEndpoint(noteServer: NoteServer) {
+        let store = DataStore()
+        let url = store.agentEndpointFileURL()
+        agentEndpointFileURL = url
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        } catch {
+            logger.error("Could not remove stale agent endpoint: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
+        Task { @MainActor [weak self, weak noteServer] in
+            for _ in 0..<200 {
+                guard let noteServer else { return }
+                if noteServer.port > 0 {
+                    let payload: [String: Any] = [
+                        "port": Int(noteServer.port),
+                        "host": "127.0.0.1",
+                        "token": noteServer.token,
+                        // Agent API version, not the data.json schema. 2 = profiles and favorites.
+                        "schemaVersion": 2
+                    ]
+                    do {
+                        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted])
+                        try store.writeAgentEndpoint(data)
+                    } catch {
+                        self?.logger.error("Could not write agent endpoint: \(error.localizedDescription, privacy: .public)")
+                    }
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            self?.logger.error("NoteServer did not become ready; agent endpoint was not published")
+        }
+    }
+
+    /// While attached, the user's resize sets the attached width (kept across launches);
+    /// the sidebar is then placed flush with the browser again.
+    public func windowDidEndLiveResize(_ notification: Notification) {
+        guard windowMode == .attached, let window = notification.object as? NSWindow else { return }
+        UserDefaults.standard.set(Double(window.frame.width), forKey: UserDefaultsKeys.attachedSidebarWidth)
+        WindowAttachmentService.shared.forceUpdate()
+    }
+
+    public func windowDidResize(_ notification: Notification) {
+        guard windowMode == .standalone,
+              let window = notification.object as? NSWindow else { return }
+        saveWindowFrame(window)
+    }
+
+    private func ensureWindowVisible(_ window: NSWindow) {
+        // Any display counts (NSScreen.screens[0] is the primary).
+        if let origin = WindowPlacement.originToShow(frame: window.frame, visibleFrames: NSScreen.screens.map(\.visibleFrame)) {
+            window.setFrameOrigin(origin)
+        }
+    }
+
+    private func applySavedWindowFrame(to window: NSWindow) -> Bool {
+        guard let frameString = UserDefaults.standard.string(forKey: UserDefaultsKeys.mainWindowSize) else {
+            return false
+        }
+        let savedFrame = NSRectFromString(frameString)
+        guard savedFrame.width > 0, savedFrame.height > 0 else { return false }
+
+        let clampedWidth = min(max(savedFrame.width, window.minSize.width), window.maxSize.width)
+        let clampedHeight = min(max(savedFrame.height, window.minSize.height), window.maxSize.height)
+        var frame = savedFrame
+        frame.size = NSSize(width: clampedWidth, height: clampedHeight)
+        window.setFrame(frame, display: false)
+        return true
+    }
+
+    private func saveWindowFrame(_ window: NSWindow) {
+        guard windowMode == .standalone else { return }
+        let frameString = NSStringFromRect(window.frame)
+        UserDefaults.standard.set(frameString, forKey: UserDefaultsKeys.mainWindowSize)
+    }
+
+    private func setupMenus() {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenuItem.submenu = appMenu
+        appMenu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(openReleasesPage), keyEquivalent: "")
+        checkForUpdatesItem.target = self
+        appMenu.addItem(checkForUpdatesItem)
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Quit \(AppIdentity.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let fileMenuItem = NSMenuItem()
+        mainMenu.addItem(fileMenuItem)
+        let fileMenu = NSMenu(title: "File")
+        fileMenuItem.submenu = fileMenu
+        fileMenu.addItem(withTitle: "New Space…", action: #selector(newWorkspace), keyEquivalent: "n")
+        let newFolderItem = NSMenuItem(title: "New Folder…", action: #selector(newFolder), keyEquivalent: "N")
+        newFolderItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(newFolderItem)
+
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let windowMenuItem = NSMenuItem()
+        mainMenu.addItem(windowMenuItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenuItem.submenu = windowMenu
+        NSApplication.shared.windowsMenu = windowMenu
+        let showWindowItem = NSMenuItem(title: "Show \(AppIdentity.displayName)", action: #selector(showMainWindow), keyEquivalent: "")
+        showWindowItem.target = self
+        windowMenu.addItem(showWindowItem)
+        let alwaysOnTopItem = NSMenuItem(title: "Always on Top", action: #selector(toggleAlwaysOnTop), keyEquivalent: "t")
+        alwaysOnTopItem.keyEquivalentModifierMask = [.command, .option]
+        windowMenu.addItem(alwaysOnTopItem)
+        alwaysOnTopMenuItem = alwaysOnTopItem
+
+        windowMenu.addItem(NSMenuItem.separator())
+
+        let prevWorkspaceItem = NSMenuItem(
+            title: "Previous Space",
+            action: #selector(navigateToPreviousWorkspace),
+            keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!))
+        )
+        prevWorkspaceItem.keyEquivalentModifierMask = [.command, .option]
+        windowMenu.addItem(prevWorkspaceItem)
+
+        let nextWorkspaceItem = NSMenuItem(
+            title: "Next Space",
+            action: #selector(navigateToNextWorkspace),
+            keyEquivalent: String(Character(UnicodeScalar(NSRightArrowFunctionKey)!))
+        )
+        nextWorkspaceItem.keyEquivalentModifierMask = [.command, .option]
+        windowMenu.addItem(nextWorkspaceItem)
+
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+
+        NSApplication.shared.mainMenu = mainMenu
+    }
+
+    private func applyAlwaysOnTopFromDefaults() {
+        let enabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+        alwaysOnTopMenuItem?.state = enabled ? .on : .off
+        window?.level = enabled ? .floating : .normal
+    }
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
+    }
+
+    @objc private func openReleasesPage() {
+        NSWorkspace.shared.open(AppIdentity.releasesURL)
+    }
+
+    @objc private func showMainWindow() {
+        guard let window else { return }
+        isUserHidden = false
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func toggleAlwaysOnTop() {
+        let enabled = !(UserDefaults.standard.bool(forKey: UserDefaultsKeys.alwaysOnTopEnabled))
+
+        // Reset user-hidden state when toggling always on top
+        if enabled {
+            isUserHidden = false
+        }
+
+        // If enabling always on top, disable attachment first
+        if enabled && isAttachmentMode {
+            WindowAttachmentService.shared.disable()
+            isAttachmentMode = false
+            UserDefaults.standard.set(false, forKey: UserDefaultsKeys.sidebarAttachmentEnabled)
+            applyWindowMode(.disabled)
+        }
+
+        UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+        alwaysOnTopMenuItem?.state = enabled ? .on : .off
+        window?.level = enabled ? .floating : .normal
+    }
+
+    @objc private func openPreferences() {
+        // Select the settings tab in the main window instead of opening a separate preferences window
+        guard let mainVC = mainViewController else { return }
+        mainVC.model.showSettings()
+        showMainWindow()
+    }
+
+    @objc private func newWorkspace() {
+        mainViewController?.promptCreateWorkspace()
+    }
+
+    @objc private func newFolder() {
+        mainViewController?.createFolderAndBeginRename(parentId: nil)
+    }
+
+    @objc private func navigateToPreviousWorkspace() {
+        mainViewController?.navigateToPreviousWorkspace()
+    }
+
+    @objc private func navigateToNextWorkspace() {
+        mainViewController?.navigateToNextWorkspace()
+    }
+
+    // MARK: - Swipe Gesture
+
+    private func setupSwipeGesture() {
+        SwipeGestureService.shared.delegate = mainViewController
+        if let spaceBar = mainViewController?.spaceBarView {
+            SwipeGestureService.shared.addExcludedView(spaceBar)
+        }
+
+        let enabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.swipeToSwitchEnabled)
+        if enabled {
+            SwipeGestureService.shared.enable(window: window!)
+        }
+    }
+
+    // MARK: - Global Hotkey
+
+    private func setupGlobalHotkey() {
+        GlobalHotkeyService.shared.delegate = self
+
+        if let data = UserDefaults.standard.data(forKey: UserDefaultsKeys.toggleSidebarShortcut) {
+            // Key exists: decode saved shortcut, or treat as explicitly cleared
+            if let saved = try? JSONDecoder().decode(KeyboardShortcut.self, from: data) {
+                GlobalHotkeyService.shared.register(shortcut: saved)
+            }
+        } else {
+            // No data = first launch, use default
+            GlobalHotkeyService.shared.register(shortcut: .defaultToggleSidebar)
+        }
+    }
+
+    func hotkeyServiceDidTrigger(_ service: GlobalHotkeyService) {
+        // Silently ignore when Always on Top is enabled
+        let alwaysOnTopEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+        guard !alwaysOnTopEnabled else { return }
+
+        guard let window = window else { return }
+
+        if window.isVisible && !isUserHidden {
+            // Hide window
+            isUserHidden = true
+            window.orderOut(nil)
+        } else {
+            // Show window
+            isUserHidden = false
+            if isAttachmentMode {
+                WindowAttachmentService.shared.forceUpdate()
+            }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    // MARK: - Window Attachment
+
+    private func setupAttachmentService() {
+        WindowAttachmentService.shared.delegate = self
+
+        // Check for mutual exclusion with always on top
+        let alwaysOnTopEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.alwaysOnTopEnabled)
+        if alwaysOnTopEnabled {
+            // Don't enable attachment if always on top is enabled
+            return
+        }
+
+        let attachmentEnabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.sidebarAttachmentEnabled)
+        guard attachmentEnabled else { return }
+
+        // Load preferences
+        let positionString = UserDefaults.standard.string(forKey: UserDefaultsKeys.sidebarPosition) ?? "right"
+        let position: SidebarPosition = positionString == "left" ? .left : .right
+
+        let browserIds = attachmentBrowserIds()
+        guard !browserIds.isEmpty else {
+            logger.notice("No browser available to attach to (no profile browser and no default browser)")
+            return
+        }
+
+        enableAttachment(browserIds: browserIds, position: position)
+    }
+
+    /// Enabling doesn't lock the window: it stays standalone until the service
+    /// places it beside a browser window. The flag is set first because `enable`
+    /// may place it synchronously (a browser of the set already in front).
+    private func enableAttachment(browserIds: [String], position: SidebarPosition) {
+        isAttachmentMode = true
+        guard WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) else {
+            isAttachmentMode = false
+            return
+        }
+    }
+
+    /// Applies an attachment transition: window constraints, and the standalone
+    /// frame captured on the first placement or restored when the window stops
+    /// following a browser. Logged under `attach`.
+    private func applyWindowMode(_ event: WindowAttachmentService.WindowModeEvent) {
+        guard let window else { return }
+        let previous = windowMode
+        let transition = WindowAttachmentService.windowModeTransition(
+            from: previous, event: event, attachmentEnabled: isAttachmentMode
+        )
+        // Before the mode flips and before any frame change: `windowDidResize`
+        // saves the frame only while standalone.
+        if transition.captureManualFrame {
+            lastManualFrame = window.frame
+        }
+        windowMode = transition.mode
+        updateWindowConstraints()
+        if transition.restoreManualFrame, let lastManualFrame {
+            window.setFrame(lastManualFrame, display: true, animate: false)
+        }
+        if previous != transition.mode {
+            attachLogger.notice("Window \(String(describing: previous), privacy: .public) → \(String(describing: transition.mode), privacy: .public) (\(String(describing: event), privacy: .public)), movable \(window.isMovable), frame \(NSStringFromRect(window.frame), privacy: .public)")
+        }
+    }
+
+    /// Every profile's browser and the global default: the sidebar attaches to
+    /// whichever of them is frontmost.
+    private func attachmentBrowserIds() -> [String] {
+        WindowAttachmentService.attachmentBrowserIds(
+            profiles: mainViewController?.model.profiles ?? [],
+            globalDefault: BrowserManager.resolveDefaultBrowserBundleId(),
+            installed: { BrowserManager.isInstalled(bundleId: $0) }
+        )
+    }
+
+    /// Profiles or the default browser changed: attach to the new set (no-op if unchanged).
+    private func refreshAttachmentBrowsers() {
+        guard isAttachmentMode else { return }
+        WindowAttachmentService.shared.updateBrowsers(attachmentBrowserIds())
+    }
+
+    private func updateWindowConstraints() {
+        guard let window = window else { return }
+
+        switch windowMode {
+        case .attached:
+            // Beside a browser window: its height, placed by the service only.
+            window.minSize = NSSize(width: 280, height: 100)
+            window.maxSize = NSSize(width: 520, height: 10000)
+            window.isMovable = false
+            window.isMovableByWindowBackground = false
+        case .standalone:
+            window.minSize = NSSize(width: 280, height: 420)
+            window.maxSize = NSSize(width: 520, height: 10000)
+            window.isMovable = true
+            window.isMovableByWindowBackground = true
+        }
+    }
+
+    private func observeBrowserChanges() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBrowserChanged),
+            name: .defaultBrowserChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAlwaysOnTopSettingChanged),
+            name: .alwaysOnTopSettingChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAttachmentSettingChanged),
+            name: .attachmentSettingChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSidebarPositionChanged),
+            name: .sidebarPositionChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleToggleSidebarShortcutChanged),
+            name: .toggleSidebarShortcutChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSwipeToSwitchSettingChanged),
+            name: .swipeToSwitchSettingChanged,
+            object: nil
+        )
+    }
+
+    @objc private func handleBrowserChanged(_ notification: Notification) {
+        refreshAttachmentBrowsers()
+    }
+
+    @objc private func handleAlwaysOnTopSettingChanged(_ notification: Notification) {
+        guard let enabled = notification.userInfo?["enabled"] as? Bool else { return }
+
+        alwaysOnTopMenuItem?.state = enabled ? .on : .off
+        window?.level = enabled ? .floating : .normal
+
+        // Reset user-hidden state when Always on Top changes
+        if enabled {
+            isUserHidden = false
+        }
+
+        // If enabling and attachment is active, disable attachment
+        if enabled && isAttachmentMode {
+            WindowAttachmentService.shared.disable()
+            isAttachmentMode = false
+            applyWindowMode(.disabled)
+        }
+    }
+
+    @objc private func handleAttachmentSettingChanged(_ notification: Notification) {
+        guard let enabled = notification.userInfo?["enabled"] as? Bool else { return }
+
+        if enabled {
+            // Enable attachment
+            let browserIds = attachmentBrowserIds()
+            guard !browserIds.isEmpty else {
+                logger.notice("No browser available to attach to (no profile browser and no default browser)")
+                return
+            }
+
+            let positionString = notification.userInfo?["position"] as? String ?? "right"
+            let position: SidebarPosition = positionString == "left" ? .left : .right
+
+            enableAttachment(browserIds: browserIds, position: position)
+        } else {
+            // Disable attachment
+            WindowAttachmentService.shared.disable()
+            isAttachmentMode = false
+            isUserHidden = false
+            applyWindowMode(.disabled)
+
+            // Show window in case it was hidden
+            window?.orderFront(nil)
+        }
+    }
+
+    @objc private func handleSidebarPositionChanged(_ notification: Notification) {
+        guard isAttachmentMode,
+              let positionString = notification.userInfo?["position"] as? String else {
+            return
+        }
+        let browserIds = attachmentBrowserIds()
+        guard !browserIds.isEmpty else { return }
+
+        let position: SidebarPosition = positionString == "left" ? .left : .right
+
+        // Re-enable with new position
+        WindowAttachmentService.shared.disable()
+        if !WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) {
+            attachmentServiceDidLosePermissions(WindowAttachmentService.shared)
+        }
+    }
+
+    @objc private func handleToggleSidebarShortcutChanged() {
+        if let data = UserDefaults.standard.data(forKey: UserDefaultsKeys.toggleSidebarShortcut),
+           let shortcut = try? JSONDecoder().decode(KeyboardShortcut.self, from: data) {
+            GlobalHotkeyService.shared.register(shortcut: shortcut)
+        } else {
+            GlobalHotkeyService.shared.unregister()
+        }
+    }
+
+    @objc private func handleSwipeToSwitchSettingChanged() {
+        let enabled = UserDefaults.standard.bool(forKey: UserDefaultsKeys.swipeToSwitchEnabled)
+        if enabled {
+            if let window {
+                SwipeGestureService.shared.enable(window: window)
+            }
+        } else {
+            SwipeGestureService.shared.disable()
+        }
+    }
+
+    // MARK: - WindowAttachmentServiceDelegate
+
+    func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService) {
+        isAttachmentMode = false
+        applyWindowMode(.disabled)
+        if !isUserHidden {
+            window?.orderFront(nil)
+        }
+    }
+
+    func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool) {
+        guard let window = window else { return }
+        // Don't auto-show if the user explicitly hid it via the shortcut.
+        if !window.isVisible && isUserHidden { return }
+
+        // Lock the window before it moves (the standalone frame is captured first).
+        applyWindowMode(.placed)
+        guard windowMode == .attached else { return }
+
+        // Always show window if hidden, even if frame hasn't changed
+        if !window.isVisible {
+            window.setFrame(frame, display: true, animate: false)
+            window.orderFront(nil)
+            return
+        }
+
+        // Bring window to front so it matches the browser window's z-order
+        // (e.g., when switching between multiple browser windows)
+        window.orderFront(nil)
+
+        // Skip if frame hasn't changed and window is already visible
+        if window.frame == frame { return }
+
+        // Apply frame with smooth animation
+        if animated {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = ThemeConstants.Animation.attachmentDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().setFrame(frame, display: true)
+            })
+        } else {
+            window.setFrame(frame, display: true, animate: false)
+        }
+    }
+
+    func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService) {
+        guard let window else { return }
+        // Out of sight first, so going back to the standalone frame is never seen.
+        if window.isVisible {
+            window.orderOut(nil)
+        }
+        // Even when already hidden (the shortcut): a Dock reopen must show a
+        // movable standalone window, not a locked one at the attached place.
+        applyWindowMode(.hidden)
+    }
+
+    func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat {
+        let stored = UserDefaults.standard.double(forKey: UserDefaultsKeys.attachedSidebarWidth)
+        let width = stored > 0 ? CGFloat(stored) : ThemeConstants.Sizing.attachedSidebarDefaultWidth
+        guard let window else { return width }
+        return min(max(width, window.minSize.width), window.maxSize.width)
+    }
+}

@@ -1,0 +1,8 @@
+# Local code-signing identity for SidebArc builds (scripts/lib/app-config.sh › dev_sign).
+# Copy this file to .signing-config (git-ignored) and set the certificate's name.
+# Without it, builds are signed ad-hoc. Setup: docs/BUILD_AND_CODESIGN.md › Self-signed identity
+#
+# The name as Keychain Access shows it (My Certificates), or as listed by:
+#   security find-identity -p codesigning
+# (an untrusted self-signed certificate is listed with CSSMERR_TP_NOT_TRUSTED; that's fine)
+LOCAL_SIGNING_IDENTITY="SidebArc Local Signing"

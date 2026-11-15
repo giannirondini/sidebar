@@ -1,0 +1,350 @@
+(function () {
+  "use strict";
+
+  // auth.js found no token: it already said so; nothing to load or save.
+  if (!window.sidebArcAuthToken) return;
+
+  const params = new URLSearchParams(window.location.search);
+  const noteId = params.get("id");
+  const authorization = `Bearer ${window.sidebArcAuthToken}`;
+
+  const editor = document.getElementById("editor");
+  const previewPane = document.getElementById("pane-preview");
+  const editPane = document.getElementById("pane-edit");
+  const tabEdit = document.getElementById("tab-edit");
+  const tabPreview = document.getElementById("tab-preview");
+  const statusEl = document.getElementById("status");
+  const titleEl = document.getElementById("note-title");
+
+  let saveTimer = null;
+  let lastSavedAt = null;
+  let savedTickerTimer = null;
+  let serverTitle = "";
+  let noteDeleted = false;
+  let serverDisconnected = false;
+  // Saves: one PUT at a time, each carrying the revision (SHA-256 of the content)
+  // it was based on; the server refuses a stale one with 409 (another client wrote).
+  let revision = null;          // the server's revision of the saved text
+  let conflict = false;
+  let saving = false;           // a PUT is in flight
+  let saveAgain = false;        // edits arrived during it
+  let lastSentContent = null;   // text of the last PUT (or as loaded)
+  let expectedRevision = null;  // revision the in-flight PUT will produce
+
+  // Reads/writes against the contenteditable node go through these two
+  // helpers so future iterations can layer syntax-aware visual styling
+  // on top without touching the rest of the editor.
+  function getContent() {
+    return editor.innerText;
+  }
+
+  function setContent(value) {
+    editor.textContent = value;
+    refreshEmptyState();
+  }
+
+  // Browsers may leave a stray <br> or trailing newline inside a
+  // contenteditable after the user deletes all text, so normalize before
+  // deciding whether to show the placeholder.
+  function refreshEmptyState() {
+    const isEmpty = editor.innerText.replace(/\n+$/, "") === "";
+    editor.classList.toggle("is-empty", isEmpty);
+  }
+
+  function setStatus(text) {
+    statusEl.textContent = text;
+  }
+
+  function extractTitleFromContent(text) {
+    const match = text.match(/^[ \t]*#[ \t]+(.+?)[ \t]*$/m);
+    return match ? match[1].trim() : "";
+  }
+
+  function refreshTitle() {
+    const fromContent = extractTitleFromContent(getContent());
+    const resolved = fromContent || serverTitle || "Untitled";
+    titleEl.textContent = resolved;
+    document.title = `${resolved} — SidebArc`;
+  }
+
+  function updateSavedTicker() {
+    if (!lastSavedAt) return;
+    const seconds = Math.max(0, Math.round((Date.now() - lastSavedAt) / 1000));
+    if (seconds < 5) {
+      setStatus("saved");
+    } else if (seconds < 60) {
+      setStatus(`saved · ${seconds}s ago`);
+    } else {
+      const minutes = Math.round(seconds / 60);
+      setStatus(`saved · ${minutes}m ago`);
+    }
+  }
+
+  function scheduleSavedTicker() {
+    if (savedTickerTimer) clearInterval(savedTickerTimer);
+    savedTickerTimer = setInterval(updateSavedTicker, 5000);
+  }
+
+  function stopSavedTicker() {
+    if (savedTickerTimer) {
+      clearInterval(savedTickerTimer);
+      savedTickerTimer = null;
+    }
+  }
+
+  function enterDeletedState() {
+    if (noteDeleted) return;
+    noteDeleted = true;
+    stopSavedTicker();
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    document.body.classList.add("note-deleted");
+    editor.setAttribute("contenteditable", "false");
+
+    const main = document.querySelector("main.content");
+    if (main) {
+      main.innerHTML = "";
+      const card = document.createElement("div");
+      card.className = "empty-state";
+      const heading = document.createElement("h2");
+      heading.textContent = "Note no longer available";
+      const blurb = document.createElement("p");
+      blurb.textContent = "This note was deleted in SidebArc. You can close this tab.";
+      card.appendChild(heading);
+      card.appendChild(blurb);
+      main.appendChild(card);
+    }
+    setStatus("deleted");
+    document.title = "Deleted note — SidebArc";
+  }
+
+  function enterDisconnectedState() {
+    if (serverDisconnected) return;
+    serverDisconnected = true;
+    stopSavedTicker();
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    document.body.classList.add("server-disconnected");
+    editor.setAttribute("contenteditable", "false");
+
+    setStatus("disconnected — copy your text before reopening");
+    document.title = "Disconnected — SidebArc";
+  }
+
+  async function loadNote() {
+    if (!noteId) {
+      setStatus("missing note id");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/notes/${noteId}`, {
+        headers: { Authorization: authorization },
+        cache: "no-store"
+      });
+      if (response.status === 404) {
+        enterDeletedState();
+        return;
+      }
+      if (!response.ok) {
+        setStatus(`load failed (${response.status})`);
+        return;
+      }
+      const data = await response.json();
+      setContent(data.content || "");
+      revision = data.revision;
+      lastSentContent = data.content || "";
+      editor.setAttribute("contenteditable", "plaintext-only");
+      serverTitle = data.title || "";
+      refreshTitle();
+      lastSavedAt = Date.now();
+      setStatus("saved");
+      scheduleSavedTicker();
+    } catch (err) {
+      enterDisconnectedState();
+    }
+  }
+
+  async function sha256Hex(text) {
+    if (!(window.crypto && window.crypto.subtle && window.TextEncoder)) return null;
+    const digest = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest), function (b) {
+      return b.toString(16).padStart(2, "0");
+    }).join("");
+  }
+
+  function putNote(content, baseRevision, keepalive) {
+    const body = JSON.stringify({ content, revision: baseRevision });
+    return fetch(`/api/notes/${noteId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json"
+      },
+      body,
+      cache: "no-store",
+      // Browsers cap keepalive bodies at 64 KiB; a larger one is sent normally.
+      keepalive: keepalive && new Blob([body]).size <= 60 * 1024
+    });
+  }
+
+  function canSave() {
+    return noteId && revision && !noteDeleted && !serverDisconnected && !conflict;
+  }
+
+  async function saveNote() {
+    saveTimer = null;
+    if (!canSave()) return;
+    if (saving) {
+      saveAgain = true;
+      return;
+    }
+    const content = getContent();
+    if (content === lastSentContent) {
+      lastSavedAt = Date.now();
+      setStatus("saved");
+      scheduleSavedTicker();
+      return;
+    }
+    saving = true;
+    saveAgain = false;
+    lastSentContent = content;
+    setStatus("saving…");
+    try {
+      const request = putNote(content, revision, false);
+      expectedRevision = await sha256Hex(content);
+      const response = await request;
+      if (response.status === 404) {
+        enterDeletedState();
+        return;
+      }
+      if (response.status === 409) {
+        conflict = true;
+        stopSavedTicker();
+        setStatus("conflict — copy your edits and reopen the note");
+        return;
+      }
+      if (!response.ok) {
+        lastSentContent = null;
+        stopSavedTicker();
+        setStatus(`save failed (${response.status})`);
+        return;
+      }
+      revision = (await response.json()).revision;
+    } catch (err) {
+      enterDisconnectedState();
+      return;
+    } finally {
+      saving = false;
+      expectedRevision = null;
+    }
+    if (saveTimer) return;  // more typing: its own save follows
+    if (saveAgain) {
+      saveNote();
+      return;
+    }
+    lastSavedAt = Date.now();
+    setStatus("saved");
+    scheduleSavedTicker();
+  }
+
+  function scheduleSave() {
+    if (noteDeleted || serverDisconnected || conflict) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    setStatus("editing…");
+    saveTimer = setTimeout(saveNote, 500);
+  }
+
+  // Closing the tab within the save delay: send the last edits with keepalive
+  // (best effort). During an in-flight save they are based on the revision that
+  // save will produce, so they follow it instead of conflicting with it.
+  window.addEventListener("pagehide", function () {
+    if (!canSave()) return;
+    const content = getContent();
+    if (content === lastSentContent) return;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const base = saving ? expectedRevision : revision;
+    if (!base) return;
+    lastSentContent = content;
+    putNote(content, base, true).catch(function () {});
+  });
+
+  function showEdit() {
+    editPane.hidden = false;
+    previewPane.hidden = true;
+    tabEdit.classList.add("active");
+    tabPreview.classList.remove("active");
+    tabEdit.setAttribute("aria-selected", "true");
+    tabPreview.setAttribute("aria-selected", "false");
+  }
+
+  function showPreview() {
+    const rendered = window.marked && window.DOMPurify
+      ? window.DOMPurify.sanitize(window.marked.parse(getContent()))
+      : "";
+    previewPane.innerHTML = rendered;
+    editPane.hidden = true;
+    previewPane.hidden = false;
+    tabEdit.classList.remove("active");
+    tabPreview.classList.add("active");
+    tabEdit.setAttribute("aria-selected", "false");
+    tabPreview.setAttribute("aria-selected", "true");
+  }
+
+  // Belt-and-braces: even though contenteditable="plaintext-only" tells
+  // Safari/Chrome to ignore rich content, we force pastes through plain
+  // text so any future user paste from a rich source stays as markdown.
+  editor.addEventListener("paste", function (event) {
+    event.preventDefault();
+    const text = (event.clipboardData || window.clipboardData).getData("text/plain");
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(document.createTextNode(text));
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    refreshEmptyState();
+    scheduleSave();
+  });
+
+  editor.addEventListener("input", function () {
+    refreshEmptyState();
+    refreshTitle();
+    scheduleSave();
+  });
+
+  tabEdit.addEventListener("click", showEdit);
+  tabPreview.addEventListener("click", showPreview);
+
+  // Render shortcut hints in the tab buttons. macOS users see ⌘, others Ctrl.
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  const modifierLabel = isMac ? "⌘" : "Ctrl+";
+  document.querySelectorAll(".shortcut").forEach(function (el) {
+    el.textContent = modifierLabel + el.dataset.key;
+  });
+
+  // Cmd+E (macOS) / Ctrl+E (Windows/Linux) → Edit, Cmd/Ctrl+L → Preview.
+  document.addEventListener("keydown", function (event) {
+    if (!(event.metaKey || event.ctrlKey)) return;
+    if (event.shiftKey || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "e") {
+      event.preventDefault();
+      showEdit();
+      editor.focus();
+    } else if (key === "l") {
+      event.preventDefault();
+      showPreview();
+    }
+  });
+
+  loadNote();
+})();
