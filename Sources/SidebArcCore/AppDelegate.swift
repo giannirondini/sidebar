@@ -163,14 +163,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func ensureWindowVisible(_ window: NSWindow) {
-        guard let screenFrame = NSScreen.main?.visibleFrame else { return }
-        if screenFrame.intersects(window.frame) { return }
-
-        let origin = NSPoint(
-            x: screenFrame.midX - window.frame.width / 2,
-            y: screenFrame.midY - window.frame.height / 2
-        )
-        window.setFrameOrigin(origin)
+        // Any display counts (NSScreen.screens[0] is the primary).
+        if let origin = WindowPlacement.originToShow(frame: window.frame, visibleFrames: NSScreen.screens.map(\.visibleFrame)) {
+            window.setFrameOrigin(origin)
+        }
     }
 
     private func applySavedWindowFrame(to window: NSWindow) -> Bool {
