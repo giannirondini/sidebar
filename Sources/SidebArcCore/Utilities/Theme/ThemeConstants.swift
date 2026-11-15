@@ -242,6 +242,9 @@ struct ThemeConstants {
         /// Standard row height (44pt) - For list and table rows
         static let rowHeight: CGFloat = 44
 
+        /// Height of a full-width Settings control (`SettingsActionButton`, the browser picker; 36pt)
+        static let settingsButtonHeight: CGFloat = 36
+
         static let pinnedTileHeight: CGFloat = 50
 
         /// Scroll shadow gradient height (32pt) - Used for vertical overscroll fade indicators

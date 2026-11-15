@@ -50,6 +50,8 @@ final class SettingsContentViewController: NSViewController {
     // Import & Export section
     private let importButton = SettingsActionButton(title: "Import from Arc Browser")
     private let chromeImportButton = SettingsActionButton(title: "Import from Chrome, Safari, Firefox")
+    private let exportDataButton = SettingsActionButton(title: "Export Data…")
+    private let importDataButton = SettingsActionButton(title: "Import Data…")
     private let importStatusLabel = NSTextField(labelWithString: "")
 
     // App Version section
@@ -80,7 +82,7 @@ final class SettingsContentViewController: NSViewController {
     private var separator1ToToggleConstraint: NSLayoutConstraint?
     private var separator4ToOpenSettingsConstraint: NSLayoutConstraint?
     private var separator4ToRefreshButtonConstraint: NSLayoutConstraint?
-    private var separator5ToChromeImportButtonConstraint: NSLayoutConstraint?
+    private var separator5ToImportDataButtonConstraint: NSLayoutConstraint?
     private var separator5ToImportStatusConstraint: NSLayoutConstraint?
 
     override func loadView() {
@@ -313,6 +315,13 @@ final class SettingsContentViewController: NSViewController {
         chromeImportButton.action = #selector(importFromChrome)
         chromeImportButton.translatesAutoresizingMaskIntoConstraints = false
 
+        exportDataButton.target = self
+        exportDataButton.action = #selector(exportData)
+        exportDataButton.translatesAutoresizingMaskIntoConstraints = false
+
+        importDataButton.target = self
+        importDataButton.action = #selector(importData)
+        importDataButton.translatesAutoresizingMaskIntoConstraints = false
 
         importStatusLabel.font = NSFont.systemFont(ofSize: 11)
         importStatusLabel.textColor = NSColor.secondaryLabelColor
@@ -366,6 +375,8 @@ final class SettingsContentViewController: NSViewController {
         contentView.addSubview(importHeader)
         contentView.addSubview(importButton)
         contentView.addSubview(chromeImportButton)
+        contentView.addSubview(exportDataButton)
+        contentView.addSubview(importDataButton)
         contentView.addSubview(importStatusLabel)
 
         let separator5 = createSeparator()
@@ -465,7 +476,7 @@ final class SettingsContentViewController: NSViewController {
             browserPopupContainer.leadingAnchor.constraint(equalTo: browserHeader.leadingAnchor),
             browserPopupContainer.topAnchor.constraint(equalTo: browserHeader.bottomAnchor, constant: sectionHeaderSpacing),
             browserPopupContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            browserPopupContainer.heightAnchor.constraint(equalToConstant: 36),
+            browserPopupContainer.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
 
             // Browser Popup inside container
             browserPopup.leadingAnchor.constraint(equalTo: browserPopupContainer.leadingAnchor, constant: 12),
@@ -505,13 +516,13 @@ final class SettingsContentViewController: NSViewController {
             refreshStatusButton.leadingAnchor.constraint(equalTo: permissionStatusLabel.leadingAnchor),
             refreshStatusButton.topAnchor.constraint(equalTo: permissionStatusLabel.bottomAnchor, constant: itemSpacing),
             refreshStatusButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            refreshStatusButton.heightAnchor.constraint(equalToConstant: 36),
+            refreshStatusButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
 
             // Open Settings Button (below refresh button)
             openSettingsButton.leadingAnchor.constraint(equalTo: refreshStatusButton.leadingAnchor),
             openSettingsButton.topAnchor.constraint(equalTo: refreshStatusButton.bottomAnchor, constant: itemSpacing),
             openSettingsButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            openSettingsButton.heightAnchor.constraint(equalToConstant: 36),
+            openSettingsButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
 
             // Automation (tab focus), below the Accessibility buttons
             automationPermissionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding),
@@ -531,17 +542,28 @@ final class SettingsContentViewController: NSViewController {
             importButton.leadingAnchor.constraint(equalTo: importHeader.leadingAnchor),
             importButton.topAnchor.constraint(equalTo: importHeader.bottomAnchor, constant: sectionHeaderSpacing),
             importButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            importButton.heightAnchor.constraint(equalToConstant: 36),
+            importButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
 
             // Chrome Import Button (below Arc import button)
             chromeImportButton.leadingAnchor.constraint(equalTo: importButton.leadingAnchor),
             chromeImportButton.topAnchor.constraint(equalTo: importButton.bottomAnchor, constant: itemSpacing),
             chromeImportButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            chromeImportButton.heightAnchor.constraint(equalToConstant: 36),
+            chromeImportButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
 
-            // Import Status Label (below Chrome import button)
-            importStatusLabel.leadingAnchor.constraint(equalTo: chromeImportButton.leadingAnchor),
-            importStatusLabel.topAnchor.constraint(equalTo: chromeImportButton.bottomAnchor, constant: itemSpacing),
+            // Export / Import Data (moving everything to another Mac)
+            exportDataButton.leadingAnchor.constraint(equalTo: chromeImportButton.leadingAnchor),
+            exportDataButton.topAnchor.constraint(equalTo: chromeImportButton.bottomAnchor, constant: itemSpacing),
+            exportDataButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            exportDataButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            importDataButton.leadingAnchor.constraint(equalTo: exportDataButton.leadingAnchor),
+            importDataButton.topAnchor.constraint(equalTo: exportDataButton.bottomAnchor, constant: itemSpacing),
+            importDataButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
+            importDataButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
+
+            // Import Status Label (below Import Data)
+            importStatusLabel.leadingAnchor.constraint(equalTo: importDataButton.leadingAnchor),
+            importStatusLabel.topAnchor.constraint(equalTo: importDataButton.bottomAnchor, constant: itemSpacing),
             importStatusLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
 
             // Separator 5
@@ -561,7 +583,7 @@ final class SettingsContentViewController: NSViewController {
             checkForUpdatesButton.leadingAnchor.constraint(equalTo: versionLabel.leadingAnchor),
             checkForUpdatesButton.topAnchor.constraint(equalTo: versionLabel.bottomAnchor, constant: itemSpacing),
             checkForUpdatesButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -horizontalPadding),
-            checkForUpdatesButton.heightAnchor.constraint(equalToConstant: 36),
+            checkForUpdatesButton.heightAnchor.constraint(equalToConstant: ThemeConstants.Sizing.settingsButtonHeight),
 
             // Bottom constraint to define content height - use greaterThanOrEqualTo to allow content to be anchored at top
             contentView.bottomAnchor.constraint(greaterThanOrEqualTo: checkForUpdatesButton.bottomAnchor, constant: 24),
@@ -584,10 +606,10 @@ final class SettingsContentViewController: NSViewController {
 
         // Setup dynamic constraints for separator5 (import section)
         // importStatusLabel is hidden by default, shown temporarily after import
-        separator5ToChromeImportButtonConstraint = separator5.topAnchor.constraint(equalTo: chromeImportButton.bottomAnchor, constant: sectionSpacing)
+        separator5ToImportDataButtonConstraint = separator5.topAnchor.constraint(equalTo: importDataButton.bottomAnchor, constant: sectionSpacing)
         separator5ToImportStatusConstraint = separator5.topAnchor.constraint(equalTo: importStatusLabel.bottomAnchor, constant: sectionSpacing)
-        // Default: importStatusLabel is hidden, anchor to chromeImportButton
-        separator5ToChromeImportButtonConstraint?.isActive = true
+        // Default: importStatusLabel is hidden, anchor to importDataButton
+        separator5ToImportDataButtonConstraint?.isActive = true
 
         // Setup workspace collection view height constraint (will be updated dynamically)
         workspaceCollectionViewHeightConstraint = workspaceCollectionView.heightAnchor.constraint(equalToConstant: 0)
@@ -933,7 +955,7 @@ final class SettingsContentViewController: NSViewController {
 
     @objc private func importFromArc() {
         // Guard against concurrent imports
-        if importButton.getIsLoading() || chromeImportButton.getIsLoading() {
+        if isImportRunning {
             return
         }
 
@@ -955,7 +977,7 @@ final class SettingsContentViewController: NSViewController {
 
     @objc private func importFromChrome() {
         // Guard against concurrent imports
-        if importButton.getIsLoading() || chromeImportButton.getIsLoading() {
+        if isImportRunning {
             return
         }
 
@@ -998,7 +1020,7 @@ final class SettingsContentViewController: NSViewController {
             showImportStatus(message, isError: false)
 
             // Hide message after 5 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.importStatusDuration) { [weak self] in
                 self?.hideImportStatus()
             }
 
@@ -1052,7 +1074,7 @@ final class SettingsContentViewController: NSViewController {
             showImportStatus(message, isError: false)
 
             // Hide message after 5 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.importStatusDuration) { [weak self] in
                 self?.hideImportStatus()
             }
 
@@ -1064,6 +1086,107 @@ final class SettingsContentViewController: NSViewController {
     private func applyImport(_ result: ArcImportResult) {
         appModel?.applyArcImport(result)
         reloadWorkspaces()
+    }
+
+    // MARK: - Export / Import Data (Phase 3b.3)
+
+    /// How long a successful import or export message stays.
+    private static let importStatusDuration: TimeInterval = 5
+
+    private var isImportRunning: Bool {
+        importButton.getIsLoading() || chromeImportButton.getIsLoading()
+    }
+
+    @objc private func exportData() {
+        guard !isImportRunning, let appModel else { return }
+        // A standalone panel, like Chrome import: as a sheet it would be wider than the sidebar.
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Export Here"
+        panel.message = "Choose where to create the \(AppIdentity.displayName) export folder"
+        panel.begin { [weak self] response in
+            guard response == .OK, let parent = panel.url else { return }
+            self?.runExport(to: parent, appModel: appModel)
+        }
+    }
+
+    private func runExport(to parent: URL, appModel: AppModel) {
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        do {
+            let folder = try appModel.exportData(to: parent, appVersion: appVersion)
+            showImportStatus("Exported to “\(folder.lastPathComponent)”.", isError: false)
+            NSWorkspace.shared.activateFileViewerSelecting([folder])
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.importStatusDuration) { [weak self] in
+                self?.hideImportStatus()
+            }
+        } catch {
+            showImportStatus(error.localizedDescription, isError: true)
+        }
+    }
+
+    @objc private func importData() {
+        guard !isImportRunning, appModel != nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import"
+        panel.message = "Choose a folder created with Export Data…"
+        panel.begin { [weak self] response in
+            guard response == .OK, let folder = panel.url else { return }
+            // Let the panel close before the confirmation sheet opens.
+            DispatchQueue.main.async { self?.confirmImport(from: folder) }
+        }
+    }
+
+    /// Validates the export, then asks before replacing anything.
+    private func confirmImport(from folder: URL) {
+        guard let appModel, let window = view.window else { return }
+        let package: DataTransfer.Package
+        do {
+            package = try DataTransfer.readPackage(at: folder)
+        } catch {
+            showImportStatus(error.localizedDescription, isError: true)
+            return
+        }
+
+        let summary = package.summary
+        let exported = DateFormatter.localizedString(from: package.manifest.exportedAt, dateStyle: .medium, timeStyle: .short)
+        let contents = [
+            Self.counted(summary.spaces, "space", "spaces"),
+            Self.counted(summary.links, "link", "links"),
+            Self.counted(summary.favorites, "favorite", "favorites"),
+            Self.counted(summary.notes, "note", "notes"),
+        ].joined(separator: ", ")
+
+        let alert = NSAlert()
+        alert.messageText = "Replace all \(AppIdentity.displayName) data?"
+        alert.informativeText = "The export from \(exported) has \(contents) in \(Self.counted(summary.profiles, "profile", "profiles")). It replaces the spaces, favorites, profiles and notes on this Mac. Your current data is backed up first, to Backups in the data folder."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Replace")
+        alert.buttons.last?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertSecondButtonReturn else { return }
+            self?.runImport(package, appModel: appModel)
+        }
+    }
+
+    private func runImport(_ package: DataTransfer.Package, appModel: AppModel) {
+        do {
+            let backup = try appModel.applyDataImport(package)
+            reloadWorkspaces()
+            showImportStatus("Imported. The previous data is in Backups/\(backup.lastPathComponent).", isError: false)
+        } catch {
+            showImportStatus("Import failed, your spaces were not replaced: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private static func counted(_ count: Int, _ singular: String, _ plural: String) -> String {
+        "\(count) \(count == 1 ? singular : plural)"
     }
 
     private func addNodeToWorkspace(_ node: Node, parentId: UUID?, appModel: AppModel) {
@@ -1086,15 +1209,15 @@ final class SettingsContentViewController: NSViewController {
         importStatusLabel.textColor = isError ? NSColor.systemRed : regularTextColor
         importStatusLabel.isHidden = false
         // Anchor separator5 to importStatusLabel when it's visible
-        separator5ToChromeImportButtonConstraint?.isActive = false
+        separator5ToImportDataButtonConstraint?.isActive = false
         separator5ToImportStatusConstraint?.isActive = true
     }
 
     private func hideImportStatus() {
         importStatusLabel.isHidden = true
-        // Anchor separator5 to chromeImportButton when importStatusLabel is hidden
+        // Anchor separator5 to importDataButton when importStatusLabel is hidden
         separator5ToImportStatusConstraint?.isActive = false
-        separator5ToChromeImportButtonConstraint?.isActive = true
+        separator5ToImportDataButtonConstraint?.isActive = true
     }
 
     // MARK: - Workspace Management
@@ -1307,7 +1430,6 @@ final class SettingsContentViewController: NSViewController {
         profileSettingsView.onEnterBrowserProfile = { [weak self] profileId, bundleId in
             guard let self, let appModel = self.appModel else { return }
             let current = appModel.profile(id: profileId)?.browserProfiles[bundleId] ?? ""
-            let browserName = BrowserManager.appName(bundleId: bundleId) ?? bundleId
             if let dir = TextPrompt.run(
                 message: "Browser Profile",
                 informative: BrowserManager.manualProfileHint(bundleId: bundleId),
