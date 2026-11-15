@@ -68,4 +68,17 @@ import Testing
         #expect(decide(firefox, after: chrome) == .hide)
         #expect(decide(nil, after: chrome) == .hide)
     }
+
+    // MARK: - Short-lived instances (a link opened in a browser profile)
+
+    @Test func aLaunchingSecondInstanceIsIgnored() {
+        // Log 2026-11-15: pid 85986 (launched false) activated before the running 85858.
+        #expect(WindowAttachmentService.isTransientInstance(pid: 85986, finishedLaunching: false, sameBrowserPids: [85858, 85986]))
+    }
+
+    @Test func aBrowserLaunchingAloneOrAlreadyRunningIsNot() {
+        #expect(!WindowAttachmentService.isTransientInstance(pid: 85986, finishedLaunching: false, sameBrowserPids: [85986]))
+        #expect(!WindowAttachmentService.isTransientInstance(pid: 85858, finishedLaunching: true, sameBrowserPids: [85858, 85986]))
+        #expect(!WindowAttachmentService.isTransientInstance(pid: 85858, finishedLaunching: true, sameBrowserPids: [85858]))
+    }
 }

@@ -181,6 +181,16 @@ final class WindowAttachmentService {
         return .hide
     }
 
+    /// A browser instance that hasn't finished launching while another instance of
+    /// the same browser runs: the short-lived process LaunchServices starts to open a
+    /// link in a browser profile (`createsNewApplicationInstance`). It activates with
+    /// no window, hands the URL over and quits; the running instance activates right
+    /// after. Attaching to it hid the sidebar for a moment on every such link (seen
+    /// in the "attach" log: "no window found … launched false", then the real pid).
+    nonisolated static func isTransientInstance(pid: pid_t, finishedLaunching: Bool, sameBrowserPids: [pid_t]) -> Bool {
+        !finishedLaunching && sameBrowserPids.contains { $0 != pid }
+    }
+
     private func isAttachable(_ bundleId: String?) -> Bool {
         bundleId.map { browserBundleIds.contains($0.lowercased()) } ?? false
     }
@@ -434,6 +444,17 @@ final class WindowAttachmentService {
 
         guard isAttachable(frontmost.bundleIdentifier), let frontmostId = frontmost.bundleIdentifier?.lowercased() else {
             hide("frontmost \(frontmost.bundleIdentifier ?? "?") (pid \(frontmost.processIdentifier)) is not a browser of the set")
+            return
+        }
+
+        let sameBrowserPids = frontmost.bundleIdentifier.map {
+            NSRunningApplication.runningApplications(withBundleIdentifier: $0).map(\.processIdentifier)
+        } ?? []
+        if Self.isTransientInstance(pid: frontmost.processIdentifier,
+                                    finishedLaunching: frontmost.isFinishedLaunching,
+                                    sameBrowserPids: sameBrowserPids) {
+            // Leave the sidebar and the observers as they are.
+            logger.notice("Ignored \(frontmostId, privacy: .public) pid \(frontmost.processIdentifier): short-lived instance opening a link")
             return
         }
 
