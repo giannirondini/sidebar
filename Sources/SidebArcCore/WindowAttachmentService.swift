@@ -80,17 +80,19 @@ final class WindowAttachmentService {
     }
 
     /// Replaces the set of browsers (profiles or the default browser changed). A
-    /// no-op when it is the same set; if the followed browser left the set, the
-    /// sidebar hides until a browser in the set comes to the front.
+    /// no-op when it is the same set. Never hides the sidebar: the change usually
+    /// comes from Settings, shown in the sidebar itself. If the followed browser
+    /// left the set it is just dropped; the next app activation decides.
     func updateBrowsers(_ bundleIds: [String]) {
         let next = Set(bundleIds.map { $0.lowercased() })
         guard isEnabled, next != browserBundleIds else { return }
         browserBundleIds = next
         if let attachedBundleId, !next.contains(attachedBundleId) {
-            delegate?.attachmentServiceShouldHideWindow(self)
             detachFromBrowser()
         }
-        attachToBrowser()
+        if isAttachable(BrowserManager.frontmostApp()?.bundleIdentifier) {
+            attachToBrowser()
+        }
     }
 
     func forceUpdate() {
@@ -410,6 +412,12 @@ final class WindowAttachmentService {
         guard let frontmost = BrowserManager.frontmostApp() else {
             print("WindowAttachmentService: Could not determine frontmost app")
             delegate?.attachmentServiceShouldHideWindow(self)
+            return
+        }
+
+        // SidebArc itself in front (Settings: attachment, position or browsers just
+        // changed): leave the sidebar alone; the next app activation decides.
+        if frontmost.bundleIdentifier == Bundle.main.bundleIdentifier {
             return
         }
 
