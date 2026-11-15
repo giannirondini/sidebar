@@ -114,6 +114,21 @@ else
     exit 1
 fi
 
+# Finder draws the background at its size in points (pixels × 72 / DPI): a 600 × 400
+# image tagged 300 DPI shows as 144 × 96 in the top-left corner. It must be 600 × 400 pt.
+if [ -f "$DMG_BACKGROUND" ]; then
+    BG_INFO=$(sips -g pixelWidth -g pixelHeight -g dpiWidth -g dpiHeight "$DMG_BACKGROUND" 2>/dev/null)
+    BG_POINTS=$(echo "$BG_INFO" | awk '
+        /pixelWidth/ {pw = $2} /pixelHeight/ {ph = $2} /dpiWidth/ {dw = $2} /dpiHeight/ {dh = $2}
+        END { if (!dw) dw = 72; if (!dh) dh = 72; printf "%d x %d", pw * 72 / dw + 0.5, ph * 72 / dh + 0.5 }')
+    if [ "$BG_POINTS" != "600 x 400" ]; then
+        print_error "$DMG_BACKGROUND is $BG_POINTS points; the DMG window is 600 x 400"
+        print_info "600 x 400 px:  sips -s dpiWidth 72 -s dpiHeight 72 $DMG_BACKGROUND"
+        print_info "1200 x 800 px: sips -s dpiWidth 144 -s dpiHeight 144 $DMG_BACKGROUND  (sharp on Retina)"
+        exit 1
+    fi
+fi
+
 print_success "Environment validation passed"
 
 ###############################################################################
