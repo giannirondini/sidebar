@@ -11,7 +11,8 @@ import Foundation
 ///     └── Icons/        favicons; custom favicon icons point into it
 ///
 /// Import accepts only such a folder (the manifest is required) and replaces all
-/// data after a backup (`AppModel.applyDataImport`). App preferences (UserDefaults),
+/// data after a backup in the same format (`AppModel.applyDataImport`), so importing
+/// `Backups/pre-import-<ts>/` undoes an import. App preferences (UserDefaults),
 /// `agent-endpoint.json` (holds a token) and `Backups/` are not exported.
 enum DataTransfer {
     static let manifestFileName = "export.json"
@@ -78,12 +79,13 @@ enum DataTransfer {
 
     // MARK: - Export
 
-    /// Writes a new export folder inside `parent` and returns it. The name carries the
-    /// local date and time; an existing folder is never overwritten (" 2", " 3", … is
-    /// appended instead).
+    /// Writes a new export folder inside `parent` and returns it. The name is
+    /// `baseName`, or "SidebArc Export <local date and time>"; an existing folder is
+    /// never overwritten (" 2", " 3", … is appended instead).
     static func export(
         store: DataStore,
         to parent: URL,
+        baseName: String? = nil,
         now: Date = Date(),
         appVersion: String? = nil
     ) throws -> URL {
@@ -100,7 +102,7 @@ enum DataTransfer {
             throw TransferError.unreadableDataFile(error.localizedDescription)
         }
 
-        let folder = uniqueFolder(in: parent, baseName: "\(AppIdentity.displayName) Export \(folderDateFormatter.string(from: now))")
+        let folder = uniqueFolder(in: parent, baseName: baseName ?? "\(AppIdentity.displayName) Export \(folderDateFormatter.string(from: now))")
         do {
             try fileManager.createDirectory(at: folder, withIntermediateDirectories: false)
             try data.write(to: folder.appendingPathComponent(dataFileName), options: [.atomic])

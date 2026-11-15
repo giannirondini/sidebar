@@ -199,6 +199,23 @@ import Testing
         #expect(modelB.noteStorage.read(id: localNote) == "local body")
     }
 
+    @Test func importingThePreImportBackupUndoesTheImport() throws {
+        let source = try makeSource()
+        let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
+
+        let storeB = DataStore(baseDirectory: macB)
+        let modelB = AppModel(store: storeB)
+        _ = modelB.addLink(urlString: "https://local.example", title: "Local", parentId: nil)
+        let before = modelB.state
+
+        let backup = try modelB.applyDataImport(package)
+        #expect(modelB.state != before)
+        #expect(Set(try FileManager.default.contentsOfDirectory(atPath: backup.path)) == ["export.json", "data.json", "Notes", "Icons"])
+
+        try modelB.applyDataImport(try DataTransfer.readPackage(at: backup))
+        #expect(modelB.state == before)
+    }
+
     @Test func importOnTheSameMacKeepsPaths() throws {
         let source = try makeSource()
         let before = source.model.state

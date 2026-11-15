@@ -154,22 +154,11 @@ final class DataStore {
         }
     }
 
-    /// Copies `data.json` and `Notes/` into a new `Backups/pre-import-<ts>/` folder
-    /// before an import replaces them, and returns the folder. The name doesn't start
-    /// with `data-`, so `pruneBackups` never rotates it away. Throws if any copy fails,
-    /// so the import can stop before changing anything.
-    func writePreImportBackup() throws -> URL {
-        let timestamp = backupTimestampFormatter.string(from: Date())
-        let folder = backupsDirectory().appendingPathComponent("pre-import-\(timestamp)", isDirectory: true)
-        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: dataURL.path) {
-            try fileManager.copyItem(at: dataURL, to: folder.appendingPathComponent("data.json"))
-        }
-        let notes = baseDirectory.appendingPathComponent("Notes", isDirectory: true)
-        if fileManager.fileExists(atPath: notes.path) {
-            try fileManager.copyItem(at: notes, to: folder.appendingPathComponent("Notes", isDirectory: true))
-        }
-        return folder
+    /// Where an import backs up the current data: `Backups/` and a `pre-import-<ts>`
+    /// folder name. The name doesn't start with `data-`, so `pruneBackups` never
+    /// rotates it away.
+    func preImportBackupDestination() -> (parent: URL, name: String) {
+        (backupsDirectory(), "pre-import-\(backupTimestampFormatter.string(from: Date()))")
     }
 
     private func backupsDirectory() -> URL {

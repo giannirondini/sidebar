@@ -218,13 +218,20 @@ final class AppModel {
 
 
     /// Replaces all data with a validated export (`DataTransfer.readPackage`), in one
-    /// mutation. Order: back up the current `data.json` and `Notes/` to
-    /// `Backups/pre-import-<ts>/` (nothing changes if that fails), copy the export's
-    /// notes and icons in, point icon paths at this Mac's `Icons/`, then replace the
-    /// state. Selects the export's selected space (or the first). Returns the backup.
+    /// mutation. Order: back up the current data as an export in
+    /// `Backups/pre-import-<ts>/` (nothing changes if that fails; importing it undoes
+    /// this import), copy the export's notes and icons in, point icon paths at this
+    /// Mac's `Icons/`, then replace the state. Selects the export's selected space
+    /// (or the first). Returns the backup.
     @discardableResult
     func applyDataImport(_ package: DataTransfer.Package) throws -> URL {
-        let backup = try store.writePreImportBackup()
+        let destination = store.preImportBackupDestination()
+        let backup: URL
+        do {
+            backup = try DataTransfer.export(store: store, to: destination.parent, baseName: destination.name)
+        } catch {
+            throw DataTransfer.TransferError.fileOperationFailed("Backing up the current data failed: \(error.localizedDescription)")
+        }
         try DataTransfer.copyFiles(from: package, into: store)
         var next = DataTransfer.remapIconPaths(in: package.state, iconsDirectory: store.iconsDirectory()).repaired()
         if next.workspaces.isEmpty {
