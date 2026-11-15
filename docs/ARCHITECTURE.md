@@ -62,7 +62,7 @@ Sources/SidebArcCore/
 ├── ViewControllers/
 │   ├── MainViewController.swift       # Main coordinator: layout, model binding, menus
 │   ├── MainViewController+SpaceTransition.swift  # Swipe/click/keyboard space switch
-│   ├── NodeListViewController.swift   # Manages collection view (~800 lines)
+│   ├── NodeListViewController.swift   # Manages collection view (~1300 lines)
 │   ├── SearchCoordinator.swift        # Handles search/filtering (~65 lines)
 │   └── ... (preferences, settings)
 ├── Models/
@@ -184,7 +184,7 @@ click → TabFocusService.open (main actor)
 
 ### ViewController Decomposition (Phase 3)
 - **MainViewController** - Coordinator between search, Favorites, the space page, the space bar and Settings (596 lines after Phase 3; ~1000 since profiles, tab focus and the Phase 3a space UI). The space switch lives in `MainViewController+SpaceTransition` (see CLAUDE.md › "Space layout and switching")
-- **NodeListViewController** (~800 lines) - Collection view, drag-drop, context menus
+- **NodeListViewController** (~1300 lines) - Collection view, drag-drop, context menus
 - **SearchCoordinator** (~65 lines) - Search/filtering logic
 - **SettingsContentViewController** - Settings page (workspace list, default browser, profiles, permissions, import). The extracted `WorkspaceManagementView` was never wired in and was removed on 2026-11-14
 
