@@ -11,8 +11,8 @@ import Foundation
 ///     └── Icons/        favicons; custom favicon icons point into it
 ///
 /// Import accepts only such a folder (the manifest is required) and replaces all
-/// data after a backup in the same format (`AppModel.applyDataImport`), so importing
-/// `Backups/pre-import-<ts>/` undoes an import. App preferences (UserDefaults),
+/// data after a backup (`AppModel.applyDataImport`); a readable previous library
+/// can be restored by importing `Backups/pre-import-<ts>/`. App preferences (UserDefaults),
 /// `agent-endpoint.json` (holds a token) and `Backups/` are not exported.
 enum DataTransfer {
     static let manifestFileName = "export.json"
@@ -51,7 +51,7 @@ enum DataTransfer {
             case .missingDataFile:
                 return "The export has no \(DataTransfer.dataFileName)."
             case .unreadableDataFile(let detail):
-                return "The export's \(DataTransfer.dataFileName) can't be read: \(detail)"
+                return "The \(DataTransfer.dataFileName) file can't be read: \(detail)"
             case .newerSchema(let version):
                 return "The export was made by a newer \(AppIdentity.displayName) (data version \(version)). Update \(AppIdentity.displayName) and try again."
             case .fileOperationFailed(let detail):
@@ -102,23 +102,52 @@ enum DataTransfer {
             throw TransferError.unreadableDataFile(error.localizedDescription)
         }
 
-        let folder = uniqueFolder(in: parent, baseName: baseName ?? "\(AppIdentity.displayName) Export \(folderDateFormatter.string(from: now))")
+        return try writeFolder(
+            store: store, data: data, schemaVersion: schemaVersion, to: parent,
+            baseName: baseName ?? "\(AppIdentity.displayName) Export \(folderDateFormatter.string(from: now))",
+            now: now, appVersion: appVersion
+        )
+    }
+
+    /// Preserves the live bytes even if this version cannot decode them. When no
+    /// schema version can be read, the backup has no manifest and is for manual recovery.
+    static func backupForImport(store: DataStore, to parent: URL, baseName: String) throws -> URL {
+        let data: Data
+        do {
+            data = try Data(contentsOf: store.dataFileURL)
+        } catch {
+            throw TransferError.unreadableDataFile(error.localizedDescription)
+        }
+        let version = try? JSONDecoder().decode(SchemaVersionProbe.self, from: data).schemaVersion
+        return try writeFolder(store: store, data: data, schemaVersion: version, to: parent, baseName: baseName, now: Date(), appVersion: nil)
+    }
+
+    private static func writeFolder(
+        store: DataStore, data: Data, schemaVersion: Int?, to parent: URL,
+        baseName: String, now: Date, appVersion: String?
+    ) throws -> URL {
+        let fileManager = FileManager.default
+        let folder = uniqueFolder(in: parent, baseName: baseName)
+        var created = false
         do {
             try fileManager.createDirectory(at: folder, withIntermediateDirectories: false)
+            created = true
             try data.write(to: folder.appendingPathComponent(dataFileName), options: [.atomic])
             try copyFolder(store.notesDirectory(), to: folder.appendingPathComponent(notesFolderName, isDirectory: true))
             try copyFolder(store.iconsDirectory(), to: folder.appendingPathComponent(iconsFolderName, isDirectory: true))
-            let manifest = Manifest(
-                format: format,
-                formatVersion: formatVersion,
-                schemaVersion: schemaVersion,
-                exportedAt: now,
-                appVersion: appVersion
-            )
-            try manifestEncoder.encode(manifest).write(to: folder.appendingPathComponent(manifestFileName), options: [.atomic])
+            if let schemaVersion {
+                let manifest = Manifest(
+                    format: format,
+                    formatVersion: formatVersion,
+                    schemaVersion: schemaVersion,
+                    exportedAt: now,
+                    appVersion: appVersion
+                )
+                try manifestEncoder.encode(manifest).write(to: folder.appendingPathComponent(manifestFileName), options: [.atomic])
+            }
         } catch {
             // Don't leave a half-written export that looks complete.
-            try? fileManager.removeItem(at: folder)
+            if created { try? fileManager.removeItem(at: folder) }
             throw TransferError.fileOperationFailed("Export failed: \(error.localizedDescription)")
         }
         return folder
@@ -140,14 +169,22 @@ enum DataTransfer {
 
         let dataURL = folder.appendingPathComponent(dataFileName)
         guard FileManager.default.fileExists(atPath: dataURL.path) else { throw TransferError.missingDataFile }
-        let decoded: (state: AppState, schemaVersion: Int)
+        let data: Data
+        let version: Int
         do {
-            decoded = try DataStore.decodeState(from: try Data(contentsOf: dataURL))
+            data = try Data(contentsOf: dataURL)
+            version = try JSONDecoder().decode(SchemaVersionProbe.self, from: data).schemaVersion
         } catch {
             throw TransferError.unreadableDataFile(error.localizedDescription)
         }
-        guard decoded.schemaVersion <= AppState.currentSchemaVersion else {
-            throw TransferError.newerSchema(decoded.schemaVersion)
+        guard version <= AppState.currentSchemaVersion else {
+            throw TransferError.newerSchema(version)
+        }
+        let decoded: (state: AppState, schemaVersion: Int)
+        do {
+            decoded = try DataStore.decodeState(from: data)
+        } catch {
+            throw TransferError.unreadableDataFile(error.localizedDescription)
         }
 
         let state = decoded.state.repaired()

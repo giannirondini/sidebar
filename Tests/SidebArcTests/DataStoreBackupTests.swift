@@ -57,6 +57,102 @@ import Testing
         #expect((try Data(contentsOf: backups[0])) == corruptBytes)
     }
 
+    @Test(arguments: ["future", "node", "icon", "invalid"])
+    func incompatibleDataRequiresExplicitRecovery(kind: String) throws {
+        let directory = makeTempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(makeState(name: "Original"))) as? [String: Any])
+        var workspaces = try #require(object["workspaces"] as? [[String: Any]])
+        switch kind {
+        case "future":
+            object["schemaVersion"] = AppState.currentSchemaVersion + 1
+            object["futureField"] = "keep me"
+        case "node":
+            workspaces[0]["items"] = [["type": "future-node"]]
+            object["workspaces"] = workspaces
+        case "icon":
+            workspaces[0]["icon"] = ["type": "future-icon"]
+            object["workspaces"] = workspaces
+        default:
+            break
+        }
+        let original = kind == "invalid" ? Data("not json".utf8) : try JSONSerialization.data(withJSONObject: object)
+        try original.write(to: dataURL(in: directory))
+
+        let store = DataStore(baseDirectory: directory)
+        let model = AppModel(store: store)
+        if kind == "future" {
+            guard case .newerSchema(let version) = model.dataLoadIssue else {
+                Issue.record("Expected newer schema warning")
+                return
+            }
+            #expect(version == AppState.currentSchemaVersion + 1)
+        } else {
+            guard case .unreadable = model.dataLoadIssue else {
+                Issue.record("Expected unreadable data warning")
+                return
+            }
+        }
+
+        model.renameWorkspace(id: model.currentWorkspace.id, newName: "Changed")
+        #expect(try Data(contentsOf: dataURL(in: directory)) == original)
+        #expect(try Data(contentsOf: try #require(backupURLs(in: directory).first)) == original)
+
+        let preserved = try model.startEmptyLibrary()
+        #expect(preserved.lastPathComponent.hasPrefix("data.unreadable-"))
+        #expect(try Data(contentsOf: preserved) == original)
+        #expect(model.dataLoadIssue == nil)
+        let saved = try DataStore.decodeState(from: Data(contentsOf: dataURL(in: directory)))
+        #expect(saved.schemaVersion == AppState.currentSchemaVersion)
+        #expect(saved.state.workspaces.map(\.name) == ["Inbox"])
+        model.renameWorkspace(id: model.currentWorkspace.id, newName: "After recovery")
+        #expect(DataStore(baseDirectory: directory).load().workspaces.first?.name == "After recovery")
+        #expect(try Data(contentsOf: preserved) == original)
+    }
+
+    @Test func unreadableFileAccessBlocksWritesAndRecovery() throws {
+        let directory = makeTempDirectory()
+        try FileManager.default.createDirectory(at: dataURL(in: directory), withIntermediateDirectories: true)
+        let store = DataStore(baseDirectory: directory)
+        let state = store.load()
+        guard case .readFailed = store.loadIssue else {
+            Issue.record("Expected read failure")
+            return
+        }
+        store.save(state)
+        #expect(throws: (any Error).self) { try store.startEmptyLibrary(with: state) }
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: dataURL(in: directory).path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+    }
+
+    @Test func failedPreservationDoesNotEnableWrites() throws {
+        let directory = makeTempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let original = Data("invalid json".utf8)
+        try original.write(to: dataURL(in: directory))
+        let store = DataStore(baseDirectory: directory)
+        let state = store.load()
+        let relocated = directory.appendingPathComponent("relocated.json")
+        try FileManager.default.moveItem(at: dataURL(in: directory), to: relocated)
+
+        #expect(throws: (any Error).self) { try store.startEmptyLibrary(with: state) }
+        store.save(state)
+        #expect(!FileManager.default.fileExists(atPath: dataURL(in: directory).path))
+        #expect(try Data(contentsOf: relocated) == original)
+    }
+
+    @Test func saveRejectsNewerVersionLabel() throws {
+        let directory = makeTempDirectory()
+        let store = DataStore(baseDirectory: directory)
+        let original = store.load()
+        let before = try Data(contentsOf: dataURL(in: directory))
+        var newer = original
+        newer.schemaVersion += 1
+        store.save(newer)
+        #expect(try Data(contentsOf: dataURL(in: directory)) == before)
+    }
+
     @Test func testRelaunchWithUnchangedDataDoesNotDuplicateBackup() {
         let directory = makeTempDirectory()
         DataStore(baseDirectory: directory).save(makeState(name: "A"))

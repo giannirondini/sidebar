@@ -294,7 +294,7 @@ import Testing
 
         // Second launch reads v2 with the same profile ids, and doesn't migrate again.
         let reloaded = DataStore(baseDirectory: directory).load()
-        #expect(reloaded == state)
+        #expect(deeplyEqual(reloaded, state))
         let backupsAfter = try FileManager.default.contentsOfDirectory(
             at: directory.appendingPathComponent("Backups"), includingPropertiesForKeys: nil
         )
@@ -356,6 +356,6 @@ import Testing
         #expect(Set(before) == Set(after))
         #expect(state.workspaces.map(\.id) == old.workspaces.map(\.id))
         // Re-reading gives the same state (persisted once, no second migration).
-        #expect(DataStore(baseDirectory: directory).load() == state)
+        #expect(deeplyEqual(DataStore(baseDirectory: directory).load(), state))
     }
 }

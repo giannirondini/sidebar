@@ -1173,7 +1173,7 @@ final class SettingsContentViewController: NSViewController {
         do {
             let backup = try appModel.applyDataImport(package)
             reloadWorkspaces()
-            showImportStatus("Imported. The previous data is in Backups/\(backup.lastPathComponent); import that folder to undo.", isError: false)
+            showImportStatus("Imported. The previous data is in Backups/\(backup.lastPathComponent).", isError: false)
         } catch {
             showImportStatus("Import failed, your spaces were not replaced: \(error.localizedDescription)", isError: true)
         }

@@ -230,6 +230,17 @@ final class WindowAttachmentService {
         !finishedLaunching && sameBrowserPids.contains { $0 != pid }
     }
 
+    enum PositionUpdateDecision: Equatable {
+        case update
+        case keepVisible
+        case hide
+    }
+
+    nonisolated static func positionUpdateDecision(frontmostPid: pid_t?, ownPid: pid_t, hasBrowserWindow: Bool) -> PositionUpdateDecision {
+        if frontmostPid == ownPid { return .keepVisible }
+        return hasBrowserWindow ? .update : .hide
+    }
+
     private func isAttachable(_ bundleId: String?) -> Bool {
         bundleId.map { browserBundleIds.contains($0.lowercased()) } ?? false
     }
@@ -421,11 +432,21 @@ final class WindowAttachmentService {
     private func updateSidebarPosition(forceShow: Bool = false) {
         guard isEnabled else { return }
 
-        // Find the frontmost browser window
-        guard let windowElement = findFrontmostBrowserWindow() else {
+        let windowElement = findFrontmostBrowserWindow()
+        switch Self.positionUpdateDecision(
+            frontmostPid: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+            ownPid: ProcessInfo.processInfo.processIdentifier,
+            hasBrowserWindow: windowElement != nil
+        ) {
+        case .keepVisible:
+            return
+        case .hide:
             hide("position update: no frontmost browser window")
             return
+        case .update:
+            break
         }
+        guard let windowElement else { return }
 
         // Get the browser window frame
         guard let browserFrame = getWindowFrame(windowElement) else {

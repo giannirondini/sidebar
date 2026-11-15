@@ -38,7 +38,7 @@ No release has been published yet: for now, [build it from source](#building-fro
 - **Profiles** - Group spaces into profiles (e.g. Personal, Work). Each profile can open links in its own browser and browser profile, and shares one Favorites grid across its spaces. Any link can be set to always open in a specific browser.
 - **Arc Import** - Import pinned tabs, folders and Favorites directly from Arc browser via settings; Arc profiles map to SidebArc profiles.
 - **Browser Import** - Import bookmarks exported as HTML from Chrome, Safari or Firefox.
-- **Export and Import** - Move everything (spaces, Favorites, profiles, notes, icons) to another Mac with **Settings** → **Import & Export** → **Export Data…** / **Import Data…**. Importing replaces your data after a confirmation, and the previous data is kept as an export you can import to undo.
+- **Export and Import** - Move everything (spaces, Favorites, profiles, notes, icons) to another Mac with **Settings** → **Import & Export** → **Export Data…** / **Import Data…**. Importing replaces your data after a confirmation and backs up the previous data; a readable backup can be imported to undo.
 
 ### Organization
 - **Spaces** - Separate bookmark collections. Switch with the space bar at the bottom, ⌘⌥← / ⌘⌥→, or a horizontal two-finger swipe (turn on **Swipe to switch spaces** in Settings).

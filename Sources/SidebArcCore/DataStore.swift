@@ -2,11 +2,27 @@ import Foundation
 import os
 
 final class DataStore {
+    enum LoadIssue: Equatable {
+        case newerSchema(Int)
+        case unreadable(String)
+        case readFailed(String)
+    }
+
+    struct RecoveryWriteError: LocalizedError {
+        let preservedURL: URL
+        let underlying: Error
+
+        var errorDescription: String? {
+            "The original was preserved at \(preservedURL.path), but the empty library could not be saved: \(underlying.localizedDescription)"
+        }
+    }
+
     private let fileManager = FileManager.default
     private let baseDirectory: URL
     private let dataURL: URL
     private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "store")
     private var hasBackedUpThisSession = false
+    private(set) var loadIssue: LoadIssue?
     private let backupKeepCount = 10
     private let backupTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -36,9 +52,23 @@ final class DataStore {
 
         backupDataFileIfNeeded()
 
+        let data: Data
         do {
-            let data = try Data(contentsOf: dataURL)
-            let (decoded, version) = try Self.decodeState(from: data)
+            data = try Data(contentsOf: dataURL)
+        } catch {
+            loadIssue = .readFailed(error.localizedDescription)
+            logger.error("Failed to read data.json: \(error.localizedDescription, privacy: .public)")
+            return Self.defaultState()
+        }
+
+        do {
+            let version = try JSONDecoder().decode(SchemaVersionProbe.self, from: data).schemaVersion
+            if version > AppState.currentSchemaVersion {
+                loadIssue = .newerSchema(version)
+                logger.warning("data.json has unsupported schema v\(version)")
+                return Self.defaultState()
+            }
+            let decoded = try Self.decodeState(from: data).state
             if version < 2 {
                 // Persist right away so profile ids are stable across launches, but only
                 // once a copy of the v1 file is safe outside the rotating backups.
@@ -48,17 +78,36 @@ final class DataStore {
                 }
                 return decoded
             }
-            if version > AppState.currentSchemaVersion {
-                logger.warning("data.json has schema v\(version), newer than v\(AppState.currentSchemaVersion); unknown fields will be lost on save")
-            }
             return decoded.repaired()
         } catch {
-            // Leave data.json untouched so a newer-schema or corrupt file can be
-            // recovered (e.g. by re-upgrading); it is only overwritten on the
-            // first actual mutation, and the pre-decode backup exists by then.
+            loadIssue = .unreadable(error.localizedDescription)
             logger.error("Failed to decode data.json; leaving file untouched: \(error.localizedDescription, privacy: .public)")
             return Self.defaultState()
         }
+    }
+
+    /// Only a deliberate user action may replace an incompatible library.
+    /// The original is copied out of the rotation before writes are enabled.
+    func startEmptyLibrary(with state: AppState) throws -> URL {
+        guard let loadIssue else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        if case .readFailed = loadIssue {
+            throw CocoaError(.fileReadNoPermission, userInfo: [NSFilePathErrorKey: dataURL.path])
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(state)
+        let timestamp = backupTimestampFormatter.string(from: Date())
+        let preserved = baseDirectory.appendingPathComponent("data.unreadable-\(timestamp)-\(UUID().uuidString).json")
+        try fileManager.copyItem(at: dataURL, to: preserved)
+        do {
+            try data.write(to: dataURL, options: [.atomic])
+        } catch {
+            throw RecoveryWriteError(preservedURL: preserved, underlying: error)
+        }
+        self.loadIssue = nil
+        return preserved
     }
 
     /// Decodes a `data.json` of any known schema and returns it with the file's
@@ -77,6 +126,14 @@ final class DataStore {
     var dataFileURL: URL { dataURL }
 
     func save(_ state: AppState) {
+        guard loadIssue == nil else {
+            logger.error("Refusing to overwrite unreadable data.json")
+            return
+        }
+        guard state.schemaVersion == AppState.currentSchemaVersion else {
+            logger.error("Refusing to save state with unsupported schema v\(state.schemaVersion)")
+            return
+        }
         backupDataFileIfNeeded()
         ensureDirectories()
         do {
@@ -85,7 +142,7 @@ final class DataStore {
             let data = try encoder.encode(state)
             try data.write(to: dataURL, options: [.atomic])
         } catch {
-            // Failing silently to avoid crashing; this can be surfaced later in a UI.
+            logger.error("Failed to save data.json: \(error.localizedDescription, privacy: .public)")
         }
     }
 

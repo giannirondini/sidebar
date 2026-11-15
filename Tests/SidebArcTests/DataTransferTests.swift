@@ -177,7 +177,7 @@ import Testing
         #expect(modelB.noteStorage.read(id: source.noteId) == "# Body")
 
         // Persisted: a fresh load on Mac B sees the imported state.
-        #expect(DataStore(baseDirectory: macB).load() == state)
+        #expect(deeplyEqual(DataStore(baseDirectory: macB).load(), state))
     }
 
     @Test func importBacksUpThePreviousDataAndNotes() throws {
@@ -199,21 +199,62 @@ import Testing
         #expect(modelB.noteStorage.read(id: localNote) == "local body")
     }
 
+    @Test(arguments: [false, true])
+    func importBacksUpUndecodableLiveBytes(hasSchemaVersion: Bool) throws {
+        let source = try makeSource()
+        let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
+        let store = DataStore(baseDirectory: macB)
+        let model = AppModel(store: store)
+        let localNote = model.addNote(title: "Local", parentId: nil, content: "keep body")
+        let original: Data
+        if hasSchemaVersion {
+            var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: store.dataFileURL)) as? [String: Any])
+            var workspaces = try #require(object["workspaces"] as? [[String: Any]])
+            workspaces[0]["items"] = [["type": "future-node"]]
+            object["workspaces"] = workspaces
+            original = try JSONSerialization.data(withJSONObject: object)
+        } else {
+            original = Data("invalid json".utf8)
+        }
+        try original.write(to: store.dataFileURL)
+
+        let backup = try model.applyDataImport(package)
+
+        #expect(try Data(contentsOf: backup.appendingPathComponent("data.json")) == original)
+        #expect(try String(contentsOf: backup.appendingPathComponent("Notes/\(localNote.uuidString).md"), encoding: .utf8) == "keep body")
+        #expect(FileManager.default.fileExists(atPath: backup.appendingPathComponent("export.json").path) == hasSchemaVersion)
+        #expect(DataStore(baseDirectory: macB).load().workspaces.map(\.id) == source.model.state.workspaces.map(\.id))
+    }
+
+    @Test func importDoesNotReplaceAStartupBlockedLibrary() throws {
+        let source = try makeSource()
+        let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
+        try FileManager.default.createDirectory(at: macB, withIntermediateDirectories: true)
+        let original = Data("invalid json".utf8)
+        let store = DataStore(baseDirectory: macB)
+        try original.write(to: store.dataFileURL)
+        let model = AppModel(store: store)
+        #expect(throws: (any Error).self) { try model.applyDataImport(package) }
+        #expect(try Data(contentsOf: store.dataFileURL) == original)
+    }
+
     @Test func importingThePreImportBackupUndoesTheImport() throws {
         let source = try makeSource()
         let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
 
         let storeB = DataStore(baseDirectory: macB)
         let modelB = AppModel(store: storeB)
-        _ = modelB.addLink(urlString: "https://local.example", title: "Local", parentId: nil)
+        let folder = modelB.addFolder(name: "Local folder", parentId: nil)
+        _ = modelB.addLink(urlString: "https://local.example", title: "Local", parentId: folder)
         let before = modelB.state
 
         let backup = try modelB.applyDataImport(package)
-        #expect(modelB.state != before)
+        #expect(!deeplyEqual(modelB.state, before))
         #expect(Set(try FileManager.default.contentsOfDirectory(atPath: backup.path)) == ["export.json", "data.json", "Notes", "Icons"])
 
         try modelB.applyDataImport(try DataTransfer.readPackage(at: backup))
-        #expect(modelB.state == before)
+        #expect(deeplyEqual(modelB.state, before))
+        expectPersisted(modelB, in: storeB)
     }
 
     @Test func importOnTheSameMacKeepsPaths() throws {
@@ -221,7 +262,8 @@ import Testing
         let before = source.model.state
         let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
         try source.model.applyDataImport(package)
-        #expect(source.model.state == before)
+        #expect(deeplyEqual(source.model.state, before))
+        expectPersisted(source.model, in: source.store)
     }
 
     @Test func importMigratesAV1Export() throws {
@@ -277,6 +319,11 @@ import Testing
         } throws: { error in
             if case .unreadableDataFile = error as? DataTransfer.TransferError { return true }
             return false
+        }
+        newer["workspaces"] = [["items": [["type": "future-node"]]]]
+        let newerUnknown = try makeFolder(manifest: validManifest(), data: JSONSerialization.data(withJSONObject: newer))
+        #expect(throws: DataTransfer.TransferError.newerSchema(AppState.currentSchemaVersion + 1)) {
+            try DataTransfer.readPackage(at: newerUnknown)
         }
 
         #expect(try Data(contentsOf: storeB.dataFileURL) == before)

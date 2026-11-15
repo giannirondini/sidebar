@@ -28,6 +28,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         setupMenus()
 
         let model = AppModel()
+        guard handleDataLoadIssue(model: model) else {
+            NSApp.terminate(nil)
+            return
+        }
         let mainViewController = MainViewController(model: model)
         self.mainViewController = mainViewController
 
@@ -79,6 +83,54 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         observeBrowserChanges()
         setupScheduler(model: model)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func handleDataLoadIssue(model: AppModel) -> Bool {
+        guard let issue = model.dataLoadIssue else { return true }
+        let reason: String
+        let canStartEmpty: Bool
+        switch issue {
+        case .newerSchema(let version):
+            reason = "This library uses data version \(version), which requires a newer version of \(AppIdentity.displayName)."
+            canStartEmpty = true
+        case .unreadable(let detail):
+            reason = "This library could not be decoded: \(detail)"
+            canStartEmpty = true
+        case .readFailed(let detail):
+            reason = "This library could not be read: \(detail)"
+            canStartEmpty = false
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Your library could not be opened"
+        alert.informativeText = "\(reason)\n\nYour data is untouched at \(model.dataFileURL.path). Check the Backups folder in the same location. Quit and update \(AppIdentity.displayName) or restore a backup."
+        alert.addButton(withTitle: "Quit")
+        if canStartEmpty {
+            alert.informativeText += "\n\nAlternatively, start an empty library. The original data file will be preserved as data.unreadable-…json in the same folder."
+            alert.addButton(withTitle: "Start Empty Library")
+        }
+        guard alert.runModal() == .alertSecondButtonReturn, canStartEmpty else { return false }
+
+        do {
+            let preserved = try model.startEmptyLibrary()
+            let confirmation = NSAlert()
+            confirmation.alertStyle = .warning
+            confirmation.messageText = "Original library preserved"
+            confirmation.informativeText = "The original data file is at \(preserved.path). Back it up along with the Notes and Icons folders before importing or making changes. To recover it, quit \(AppIdentity.displayName), update the app if needed, and restore the file as data.json. Backups are in the Backups folder."
+            confirmation.addButton(withTitle: "Continue")
+            confirmation.runModal()
+            return true
+        } catch {
+            let failure = NSAlert()
+            failure.alertStyle = .critical
+            failure.messageText = "Could not preserve your library"
+            failure.informativeText = "The empty library was not started. Check the original file at \(model.dataFileURL.path) and the Backups folder.\n\n\(error.localizedDescription)"
+            failure.addButton(withTitle: "Quit")
+            failure.runModal()
+            return false
+        }
     }
 
     private func setupScheduler(model: AppModel) {

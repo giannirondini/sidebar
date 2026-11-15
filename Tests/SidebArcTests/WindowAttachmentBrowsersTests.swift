@@ -69,6 +69,15 @@ import Testing
         #expect(decide(nil, after: chrome) == .hide)
     }
 
+    @Test func positionUpdatesKeepSidebarVisibleWhenOwnAppIsFrontmost() {
+        let ownPid: pid_t = 100
+        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: ownPid, ownPid: ownPid, hasBrowserWindow: false) == .keepVisible)
+        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: ownPid, ownPid: ownPid, hasBrowserWindow: true) == .keepVisible)
+        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: 200, ownPid: ownPid, hasBrowserWindow: false) == .hide)
+        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: nil, ownPid: ownPid, hasBrowserWindow: false) == .hide)
+        #expect(WindowAttachmentService.positionUpdateDecision(frontmostPid: 200, ownPid: ownPid, hasBrowserWindow: true) == .update)
+    }
+
     // MARK: - Short-lived instances (a link opened in a browser profile)
 
     @Test func aLaunchingSecondInstanceIsIgnored() {

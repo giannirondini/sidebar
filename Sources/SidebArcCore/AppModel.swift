@@ -27,6 +27,16 @@ final class AppModel {
         }
     }
 
+    var dataLoadIssue: DataStore.LoadIssue? { store.loadIssue }
+    var dataFileURL: URL { store.dataFileURL }
+
+    func startEmptyLibrary() throws -> URL {
+        let empty = DataStore.defaultState()
+        let preserved = try store.startEmptyLibrary(with: empty)
+        state = empty
+        return preserved
+    }
+
     var workspaces: [Workspace] {
         state.workspaces
     }
@@ -223,17 +233,19 @@ final class AppModel {
 
 
     /// Replaces all data with a validated export (`DataTransfer.readPackage`), in one
-    /// mutation. Order: back up the current data as an export in
-    /// `Backups/pre-import-<ts>/` (nothing changes if that fails; importing it undoes
-    /// this import), copy the export's notes and icons in, point icon paths at this
+    /// mutation. Order: back up the raw current data in `Backups/pre-import-<ts>/`
+    /// (nothing changes if that fails), copy the export's notes and icons in, point icon paths at this
     /// Mac's `Icons/`, then replace the state. Selects the export's selected space
     /// (or the first). Returns the backup.
     @discardableResult
     func applyDataImport(_ package: DataTransfer.Package) throws -> URL {
+        guard store.loadIssue == nil else {
+            throw DataTransfer.TransferError.fileOperationFailed("The current library could not be opened and must be preserved before importing.")
+        }
         let destination = store.preImportBackupDestination()
         let backup: URL
         do {
-            backup = try DataTransfer.export(store: store, to: destination.parent, baseName: destination.name)
+            backup = try DataTransfer.backupForImport(store: store, to: destination.parent, baseName: destination.name)
         } catch {
             throw DataTransfer.TransferError.fileOperationFailed("Backing up the current data failed: \(error.localizedDescription)")
         }

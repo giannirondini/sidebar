@@ -5,10 +5,11 @@ import Testing
 /// Profile CRUD in `AppModel`.
 @Suite struct ProfileTests {
     private let model: AppModel
+    private let store: DataStore
 
     init() {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let store = DataStore(baseDirectory: temp)
+        store = DataStore(baseDirectory: temp)
         store.save(DataStore.defaultState())
         model = AppModel(store: store)
     }
@@ -30,21 +31,26 @@ import Testing
     }
 
     @Test func createRenameAndSetBrowser() {
+        defer { expectPersisted(model, in: store) }
         let id = model.createProfile(name: "Work")
         #expect(model.profiles.map(\.name) == ["Default", "Work"])
+        expectPersisted(model, in: store)
 
         model.renameProfile(id: id, newName: "  Job  ")
         #expect(model.profile(id: id)?.name == "Job")
+        expectPersisted(model, in: store)
         model.renameProfile(id: id, newName: "   ")
         #expect(model.profile(id: id)?.name == "Job")
 
         model.setProfileBrowser(id: id, bundleId: "org.mozilla.firefox")
         #expect(model.profile(id: id)?.browserBundleId == "org.mozilla.firefox")
+        expectPersisted(model, in: store)
         model.setProfileBrowser(id: id, bundleId: nil)
         #expect(model.profile(id: id)?.browserBundleId == nil)
     }
 
     @Test func assignWorkspaceSwitchesItsFavorites() {
+        defer { expectPersisted(model, in: store) }
         let defaultId = model.currentProfile.id
         _ = pinNewLink("https://personal.com")
         let work = model.createProfile(name: "Work")
@@ -61,6 +67,7 @@ import Testing
     }
 
     @Test func lastProfileCannotBeDeleted() {
+        defer { expectPersisted(model, in: store) }
         let only = model.currentProfile.id
         #expect(model.profileDeletionTarget(for: only) == nil)
         model.deleteProfile(id: only)
@@ -68,6 +75,7 @@ import Testing
     }
 
     @Test func deletingAProfileMovesSpacesAndMergesFavoritesIntoFirstRemaining() {
+        defer { expectPersisted(model, in: store) }
         let defaultId = model.currentProfile.id
         let shared = pinNewLink("https://shared.com")
 
@@ -96,6 +104,7 @@ import Testing
     }
 
     @Test func deletingAProfileWithoutSpacesKeepsItsOverflowInTheTargetsFirstSpace() {
+        defer { expectPersisted(model, in: store) }
         let target = model.currentProfile.id
         for i in 0..<Profile.maxFavorites { _ = pinNewLink("https://t\(i).com") }
 
@@ -115,11 +124,13 @@ import Testing
     }
 
     @Test func linkBrowserOverrideOnListLinksAndFavorites() {
+        defer { expectPersisted(model, in: store) }
         let listLink = model.addLink(urlString: "https://list.com", title: "List", parentId: nil)
         let favorite = pinNewLink("https://fav.com")
 
         model.setLinkBrowserOverride(id: listLink, bundleId: "com.apple.Safari")
         model.setLinkBrowserOverride(id: favorite, bundleId: "org.mozilla.firefox")
+        expectPersisted(model, in: store)
 
         guard case .link(let updated) = model.nodeById(listLink) else {
             Issue.record("Expected list link")
@@ -133,22 +144,27 @@ import Testing
     }
 
     @Test func focusesOpenTabsSetAndReset() {
+        defer { expectPersisted(model, in: store) }
         let id = model.createProfile(name: "Work")
         #expect(model.profile(id: id)?.focusesOpenTabs == nil)
         model.setProfileFocusesOpenTabs(id: id, enabled: false)
         #expect(model.profile(id: id)?.focusesOpenTabs == false)
+        expectPersisted(model, in: store)
         model.setProfileFocusesOpenTabs(id: id, enabled: true)
         #expect(model.profile(id: id)?.focusesOpenTabs == true)
+        expectPersisted(model, in: store)
         model.setProfileFocusesOpenTabs(id: id, enabled: nil)
         #expect(model.profile(id: id)?.focusesOpenTabs == nil)
     }
 
     @Test func exactTabMatchOnListLinksAndFavorites() {
+        defer { expectPersisted(model, in: store) }
         let listLink = model.addLink(urlString: "https://list.com", title: "List", parentId: nil)
         let favorite = pinNewLink("https://fav.com")
 
         model.setLinkExactTabMatch(id: listLink, exact: true)
         model.setLinkExactTabMatch(id: favorite, exact: true)
+        expectPersisted(model, in: store)
         guard case .link(let updated) = model.nodeById(listLink) else {
             Issue.record("Expected list link")
             return
@@ -168,6 +184,7 @@ import Testing
     }
 
     @Test func arcImportMapsDefaultProfileToDefaultAndMergesFavorites() {
+        defer { expectPersisted(model, in: store) }
         let defaultId = model.currentProfile.id
         let existing = pinNewLink("https://mail.com")
         let selectedBefore = model.state.selectedWorkspaceId
@@ -195,6 +212,7 @@ import Testing
     }
 
     @Test func arcImportCreatesProfileForCustomArcProfileAndKeepsFavoritesOfSkippedSpaces() {
+        defer { expectPersisted(model, in: store) }
         let custom = ArcProfileKey(.object(["custom": .object(["_0": .object(["directoryBasename": .string("Profile 1")])])]))
         let result = ArcImportResult(
             workspaces: [],  // every Work space was empty, so none was imported
@@ -202,6 +220,7 @@ import Testing
             workspacesCreated: 0, linksImported: 0, foldersImported: 0
         )
         model.applyArcImport(result)
+        expectPersisted(model, in: store)
 
         let created = model.profiles.first(where: { $0.name == "Arc Profile 1" })
         #expect(created?.favorites.map(\.url) == ["https://w.com"])
@@ -213,6 +232,7 @@ import Testing
     }
 
     @Test func arcImportWithoutProfilesJoinsCurrentProfile() {
+        defer { expectPersisted(model, in: store) }
         let current = model.currentProfile.id
         model.applyArcImport(ArcImportResult(
             workspaces: [ImportWorkspace(name: "Plain", colorId: .ocean, nodes: [])],

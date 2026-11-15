@@ -17,19 +17,47 @@ import Testing
     }
 
     @Test func testJSONRoundTrip() throws {
-        let link = Link(id: UUID(), title: "Example", url: "https://example.com", faviconPath: nil)
+        let link = Link(id: UUID(), title: "Example", url: "https://example.com", faviconPath: "/tmp/example.ico",
+                        customIcon: .emoji("🌐"), browserBundleId: "com.apple.Safari")
         let folder = Folder(id: UUID(), name: "Folder", children: [.link(link)], isExpanded: true)
         let state = makeState { [Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder)], profileId: $0)] }
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
-        #expect(state == decoded)
+        #expect(deeplyEqual(state, decoded))
+        guard case .folder(let decodedFolder) = decoded.workspaces[0].items.first,
+              case .link(let decodedLink) = decodedFolder.children.first else {
+            Issue.record("Expected nested link")
+            return
+        }
+        #expect(decodedFolder.name == folder.name)
+        #expect(decodedFolder.isExpanded == folder.isExpanded)
+        #expect(decodedLink == link)
+    }
+
+    @Test func deepComparisonDetectsChangesInsideNodesWithTheSameIDs() {
+        let link = Link(id: UUID(), title: "Original", url: "https://example.com", faviconPath: nil)
+        let folder = Folder(id: UUID(), name: "Folder", children: [.link(link)], isExpanded: true)
+        let original = makeState { [Workspace(id: UUID(), name: "Inbox", colorId: .ember, items: [.folder(folder)], profileId: $0)] }
+        var changed = original
+        var changedLink = link
+        changedLink.title = "Changed"
+        var changedFolder = folder
+        changedFolder.children = [.link(changedLink)]
+        changed.workspaces[0].items = [.folder(changedFolder)]
+
+        #expect(original == changed)
+        #expect(!deeplyEqual(original, changed))
+        changedFolder.children = []
+        changed.workspaces[0].items = [.folder(changedFolder)]
+        #expect(!deeplyEqual(original, changed))
     }
 
     @Test func invalidLinkURLsAreRejectedByModelMutations() {
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         let workspaceId = model.currentWorkspace.id
 
         #expect(model.addLink(
@@ -50,7 +78,9 @@ import Testing
 
     @Test @MainActor func pastingHostlessURLCreatesNoteInsteadOfCrashing() {
         _ = NSApplication.shared
-        let model = AppModel(store: makeStore())
+        let store = makeStore()
+        let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         let controller = MainViewController(model: model)
 
         controller.pasteText("https://?x")
@@ -65,6 +95,7 @@ import Testing
     @Test func updatingLinkInAnotherSpacePersists() {
         let store = makeStore()
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         let id = model.addLink(urlString: "https://old.example", title: "Link", parentId: nil)
         _ = model.createWorkspace(name: "Other", colorId: .moss)
 
@@ -83,7 +114,7 @@ import Testing
             Workspace(id: UUID(), name: "Plain", colorId: .ember, items: [], profileId: $0),
         ] }
         let decoded = try JSONDecoder().decode(AppState.self, from: JSONEncoder().encode(state))
-        #expect(decoded == state)
+        #expect(deeplyEqual(decoded, state))
         #expect(decoded.workspaces.map(\.icon) == [.emoji("🚀"), .sfSymbol("briefcase"), nil])
 
         // A v2 file written before `icon` existed has no key: it must decode, as nil.
@@ -102,11 +133,13 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         let id = model.currentWorkspace.id
 
         model.setWorkspaceIcon(id: id, icon: .emoji("📚"))
         #expect(model.currentWorkspace.icon == .emoji("📚"))
         #expect(AppModel(store: store).currentWorkspace.icon == .emoji("📚"))
+        expectPersisted(model, in: store)
 
         model.setWorkspaceIcon(id: id, icon: nil)
         #expect(AppModel(store: store).currentWorkspace.icon == nil)
@@ -118,6 +151,7 @@ import Testing
         let store = DataStore(baseDirectory: directory)
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         let spaceId = model.createWorkspace(name: "Second", colorId: .moss)
         let before = try Data(contentsOf: dataFile)
 
@@ -145,6 +179,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         model.addFolder(name: "Folder", parentId: nil)
         model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -165,6 +200,7 @@ import Testing
         }
 
         model.moveNode(id: linkAId, toParentId: folderId, index: 0)
+        expectPersisted(model, in: store)
         let location = model.location(of: linkAId)
         #expect(location?.parentId == folderId)
 
@@ -183,6 +219,65 @@ import Testing
             #expect(locationB?.parentId == nil)
             #expect(locationB?.index == 0)
         }
+    }
+
+    @Test func groupingAndMovingNodesBetweenSpacesPersist() throws {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        let source = model.currentWorkspace.id
+        let first = model.addLink(urlString: "https://first.example", title: "First", parentId: nil)
+        let second = model.addLink(urlString: "https://second.example", title: "Second", parentId: nil)
+        let grouped = try #require(model.groupNodesInNewFolder(nodeIds: [first, second], folderName: "Group"))
+        guard case .folder(let folder) = model.nodeById(grouped) else {
+            Issue.record("Expected grouped folder")
+            return
+        }
+        #expect(folder.children.map(\.id) == [first, second])
+        expectPersisted(model, in: store)
+
+        let destination = model.createWorkspace(name: "Destination", colorId: .moss)
+        model.moveNodeToWorkspace(id: grouped, workspaceId: destination)
+        #expect(model.workspaceId(forNodeId: grouped) == destination)
+        expectPersisted(model, in: store)
+
+        model.selectWorkspace(id: source)
+        let third = model.addLink(urlString: "https://third.example", title: "Third", parentId: nil)
+        let fourth = model.addLink(urlString: "https://fourth.example", title: "Fourth", parentId: nil)
+        model.moveNodesToWorkspace(nodeIds: [third, fourth], toWorkspaceId: destination)
+        #expect(model.workspaceId(forNodeId: third) == destination)
+        #expect(model.workspaceId(forNodeId: fourth) == destination)
+        expectPersisted(model, in: store)
+    }
+
+    @Test func folderAndLinkEditsPersistIndividually() {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        let folderId = model.addFolder(name: "Folder", parentId: nil)
+        let linkId = model.addLink(urlString: "https://example.com", title: "example.com", parentId: folderId)
+
+        model.setFolderExpanded(id: folderId, isExpanded: false)
+        guard case .folder(let folder) = model.nodeById(folderId) else {
+            Issue.record("Expected folder")
+            return
+        }
+        #expect(!folder.isExpanded)
+        expectPersisted(model, in: store)
+
+        #expect(model.updateLinkTitleIfDefault(id: linkId, newTitle: "Example"))
+        guard case .link(let renamed) = model.nodeById(linkId) else {
+            Issue.record("Expected link")
+            return
+        }
+        #expect(renamed.title == "Example")
+        expectPersisted(model, in: store)
+
+        model.updateLinkFaviconPath(id: linkId, path: "/tmp/example.ico")
+        guard case .link(let withIcon) = model.nodeById(linkId) else {
+            Issue.record("Expected link")
+            return
+        }
+        #expect(withIcon.faviconPath == "/tmp/example.ico")
+        expectPersisted(model, in: store)
     }
 
     @Test func testWorkspaceScopedFiltering() {
@@ -204,6 +299,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         // Create three workspaces
         let id1 = model.createWorkspace(name: "First", colorId: .ember)
@@ -219,6 +315,7 @@ import Testing
 
         // Move "Second" to the right (swap with "Third")
         model.moveWorkspace(id: id2, direction: .right)
+        expectPersisted(model, in: store)
         #expect(model.workspaces[2].name == "Third")
         #expect(model.workspaces[3].name == "Second")
 
@@ -249,6 +346,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         #expect(model.currentWorkspace.items.count == 1)
@@ -265,9 +363,11 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.pinLink(id: linkId)
+        expectPersisted(model, in: store)
         #expect(model.currentProfile.favorites.count == 1)
         #expect(model.currentWorkspace.items.count == 0)
 
@@ -286,6 +386,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let max = Profile.maxFavorites
         var linkIds: [UUID] = []
@@ -312,6 +413,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         let linkId = model.addLink(urlString: "https://nested.com", title: "Nested", parentId: folderId)
@@ -336,6 +438,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         model.pinLink(id: folderId)
@@ -347,6 +450,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let firstProfileId = model.currentProfile.id
         let newId = model.createWorkspace(name: "B", colorId: .defaultColor())
@@ -358,6 +462,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let spaceA = model.currentWorkspace.id
         let linkId = model.addLink(urlString: "https://shared.com", title: "Shared", parentId: nil)
@@ -382,6 +487,7 @@ import Testing
         let store = makeStore()
         store.save(AppState(profiles: [personal, work], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id))
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         model.selectWorkspace(id: spaceA.id)
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -406,6 +512,7 @@ import Testing
         let store = makeStore()
         store.save(AppState(profiles: [personal, workWithFavorite], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id))
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
         model.selectWorkspace(id: spaceA.id)
 
         model.updatePinnedLinkFaviconPath(id: favorite.id, path: "/tmp/icon.png")
@@ -431,7 +538,7 @@ import Testing
         #expect(decoded.schemaVersion == AppState.currentSchemaVersion)
         #expect(decoded.profiles[0].favorites.map(\.title) == ["Pinned"])
         #expect(decoded.profiles[0].browserProfiles["com.google.chrome"] == "Profile 1")
-        #expect(state == decoded)
+        #expect(deeplyEqual(state, decoded))
     }
 
     @Test func testLinkBrowserOverrideIsOptionalInJSON() throws {
@@ -484,6 +591,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
         let other = model.createWorkspace(name: "B", colorId: .defaultColor())
@@ -499,6 +607,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
 
@@ -513,6 +622,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
 
@@ -531,6 +641,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         model.addLink(urlString: "https://a.com", title: "A", parentId: folderId)
@@ -553,6 +664,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Parent", parentId: nil)
         model.addLink(urlString: "https://root1.com", title: "Root Link 1", parentId: folderId)
@@ -577,6 +689,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Empty", parentId: nil)
 
@@ -595,6 +708,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Parent", parentId: nil)
         let childFolder1 = model.addFolder(name: "Child A", parentId: folderId)
@@ -620,6 +734,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId1 = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         let linkId2 = model.addLink(urlString: "https://b.com", title: "B", parentId: nil)
@@ -652,6 +767,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         model.addLink(urlString: "https://inside1.com", title: "Inside 1", parentId: folderId)
@@ -684,6 +800,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://direct.com", title: "Direct", parentId: nil)
         let folderId = model.addFolder(name: "Folder", parentId: nil)
@@ -719,6 +836,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let parentFolderId = model.addFolder(name: "Parent", parentId: nil)
         let childFolderId = model.addFolder(name: "Child", parentId: parentFolderId)
@@ -752,6 +870,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let parentFolderId = model.addFolder(name: "Parent", parentId: nil)
         let childFolderId = model.addFolder(name: "Child", parentId: parentFolderId)
@@ -825,11 +944,13 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
 
         // Set emoji custom icon
         model.setLinkCustomIcon(id: linkId, icon: .emoji("🚀"))
+        expectPersisted(model, in: store)
         if let node = model.nodeById(linkId), case .link(let link) = node {
             #expect(link.customIcon == .emoji("🚀"))
         } else {
@@ -849,11 +970,13 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.pinLink(id: linkId)
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: .sfSymbol("heart.fill"))
+        expectPersisted(model, in: store)
         #expect(model.currentProfile.favorites[0].customIcon == .sfSymbol("heart.fill"))
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: nil)
@@ -871,7 +994,7 @@ import Testing
 
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
-        #expect(state == decoded)
+        #expect(deeplyEqual(state, decoded))
 
         guard case .folder(let decodedFolder) = decoded.workspaces[0].items[0],
               case .note(let decodedNote) = decodedFolder.children[0] else {
@@ -914,6 +1037,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Test Note", parentId: nil)
         #expect(model.currentWorkspace.items.count == 1)
@@ -933,6 +1057,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Old", parentId: nil)
         model.renameNode(id: noteId, newName: "New")
@@ -948,9 +1073,11 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Note", parentId: nil)
         model.setNoteCustomIcon(id: noteId, icon: .sfSymbol("note.text"))
+        expectPersisted(model, in: store)
 
         if case .note(let note) = model.nodeById(noteId) {
             #expect(note.customIcon == .sfSymbol("note.text"))
@@ -968,6 +1095,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Doomed", parentId: nil)
         let fileURL = store.noteFileURL(for: noteId)
@@ -981,6 +1109,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Parent", parentId: nil)
         let noteAId = model.addNote(title: "A", parentId: folderId)
@@ -1045,6 +1174,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         let fireAt = Date(timeIntervalSinceNow: 60)
@@ -1060,9 +1190,11 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.scheduleLink(id: linkId, at: Date(timeIntervalSinceNow: 60))
+        expectPersisted(model, in: store)
         model.cancelSchedule(id: linkId)
 
         guard let node = model.nodeById(linkId), case .link(let link) = node else {
@@ -1075,6 +1207,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         model.scheduleLink(id: linkId, at: Date(timeIntervalSinceNow: 60))
@@ -1088,6 +1221,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         // Workspace A: nested folder containing a scheduled link
         let folderId = model.addFolder(name: "Folder", parentId: nil)
@@ -1113,6 +1247,7 @@ import Testing
         let store = makeStore()
         store.save(DataStore.defaultState())
         let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
 
