@@ -1066,7 +1066,7 @@ final class SettingsContentViewController: NSViewController {
             // Show success message
             let message = """
             Successfully imported:
-            • \(importResult.workspacesCreated) workspaces
+            • \(importResult.workspacesCreated) spaces
             • \(importResult.linksImported) links
             • \(importResult.foldersImported) folders
             • \(importResult.profiles.reduce(0) { $0 + $1.favorites.count }) favorites
