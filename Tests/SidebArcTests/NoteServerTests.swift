@@ -994,6 +994,36 @@ import Testing
         #expect(json["code"] as? String == "favorites_full")
     }
 
+    @Test func favoriteBrowserOverrideViaPatch() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let profileId = model.currentProfile.id
+        guard case .success(let favoriteId) = model.addFavorite(profileId: profileId, urlString: "https://fav.com", title: "Fav") else {
+            Issue.record("Could not add a favorite")
+            return
+        }
+        let path = "/api/links/\(favoriteId.uuidString)"
+
+        let (set, _) = try await apiRequest("PATCH", path, body: ["browser_bundle_id": "com.apple.Safari"], server: server)
+        #expect(set == 200)
+        #expect(model.currentProfile.favorites.first { $0.id == favoriteId }?.browserBundleId == "com.apple.Safari")
+
+        let (refused, refusedJson) = try await apiRequest("PATCH", path, body: ["title": "Renamed"], server: server)
+        #expect(refused == 400)
+        #expect(refusedJson["code"] as? String == "favorite_field")
+        #expect(model.currentProfile.favorites.first { $0.id == favoriteId }?.title == "Fav")
+
+        let (cleared, _) = try await apiRequest("PATCH", path, body: ["browser_bundle_id": NSNull()], server: server)
+        #expect(cleared == 200)
+        let favorite = try #require(model.currentProfile.favorites.first { $0.id == favoriteId })
+        #expect(favorite.browserBundleId == nil)
+        #expect(model.state.workspaces.allSatisfy { model.findNode(id: favoriteId, in: $0.items) == nil })
+
+        let (missing, missingJson) = try await apiRequest("PATCH", "/api/links/\(UUID().uuidString)", body: ["browser_bundle_id": NSNull()], server: server)
+        #expect(missing == 404)
+        #expect(missingJson["code"] as? String == "link_not_found")
+    }
+
     @Test func testLinkBrowserOverrideViaPatch() async throws {
         let (server, model) = try await startServer()
         defer { server.stop() }

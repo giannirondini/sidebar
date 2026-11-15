@@ -65,9 +65,9 @@ require_swift_bundler() {
     fi
 }
 
-# swift-bundler v3 expects SwiftPM's old flat resource bundles. The default
-# `swiftbuild` build system (Swift 6.3+) already emits a full macOS bundle
-# (X.bundle/Contents/Resources/...), which swift-bundler wraps a second time:
+# swift-bundler v3 expects SwiftPM's old flat resource bundles. SwiftPM's default
+# `swiftbuild` build system (checked with Swift 6.4) already emits a full macOS
+# bundle (X.bundle/Contents/Resources/...), which swift-bundler wraps a second time:
 # X.bundle/Contents/Resources/Contents/Resources/NoteEditor. Bundle.resourceURL
 # then misses the note editor. Replace each wrapper with the real bundle inside.
 # (`--build-system native` is not an option: deprecated, and its warning on

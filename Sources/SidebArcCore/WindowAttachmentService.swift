@@ -13,7 +13,6 @@ import os
 protocol WindowAttachmentServiceDelegate: AnyObject {
     func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool)
     func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService)
-    func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService)
     func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService)
     /// Width of the attached sidebar (the user's, kept within the window's limits).
     func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat
@@ -66,9 +65,6 @@ final class WindowAttachmentService {
     // Screen caching to reduce detection overhead
     private var cachedScreen: NSScreen?
     private var cachedScreenFrame: NSRect?
-
-    // Smooth animation using NSAnimationContext
-    private var isAnimating: Bool = false
 
     init(permissionCheck: @escaping () -> Bool = {
         let optionKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -727,7 +723,6 @@ final class WindowAttachmentService {
         lastSidebarFrame = nil
         cachedScreen = nil
         cachedScreenFrame = nil
-        isAnimating = false
     }
 
     // MARK: - Workspace Observers

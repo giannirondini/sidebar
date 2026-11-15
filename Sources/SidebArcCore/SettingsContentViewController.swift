@@ -851,7 +851,6 @@ final class SettingsContentViewController: NSViewController {
     @objc private func tooltipsChanged() {
         let enabled = tooltipsToggle.isOn
         UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.tooltipsEnabled)
-        NotificationCenter.default.post(name: .tooltipsSettingChanged, object: nil)
     }
 
     @objc private func swipeToSwitchChanged() {

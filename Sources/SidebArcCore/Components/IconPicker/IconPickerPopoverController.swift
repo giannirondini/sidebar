@@ -227,11 +227,9 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
         dismissPopover()
     }
 
+    /// The picker is shown in an `NSPopover` (never presented as a view
+    /// controller), so closing its window is how it goes away.
     private func dismissPopover() {
-        if let popover = view.window?.parent?.contentViewController?.presentedViewControllers?.first(where: { $0 === self }) {
-            popover.dismiss(nil)
-        } else {
-            view.window?.close()
-        }
+        view.window?.close()
     }
 }

@@ -17,8 +17,6 @@ final class SpaceHeaderView: BaseView {
     private let iconView = SpaceIconView()
     private let titleField = InlineEditableTextField()
 
-    var isRenaming: Bool { titleField.isEditing }
-
     /// The icon, to anchor the icon picker to.
     var iconAnchorView: NSView { iconView }
 

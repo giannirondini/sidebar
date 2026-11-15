@@ -38,6 +38,8 @@ final class MainViewController: NSViewController {
     var suppressNodeAnimations = false          // Suppresses collection view animations during swipe transitions
     /// The space switch in progress (MainViewController+SpaceTransition).
     var spaceTransition: SpaceTransition?
+    /// Lands a running transition on any click or key (`installTransitionInputMonitor`).
+    var transitionInputMonitor: LocalEventMonitor?
     /// A model change arrived during a space transition; reload once it finishes.
     /// Reloading mid-transition would reset the colour, snap the bar's pill and
     /// swap the list under the moving page.
@@ -78,7 +80,7 @@ final class MainViewController: NSViewController {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleFaviconUpdate),
-            name: .init("UpdateLinkFavicon"),
+            name: .linkFaviconUpdated,
             object: nil
         )
     }

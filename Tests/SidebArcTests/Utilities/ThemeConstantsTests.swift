@@ -139,7 +139,6 @@ import Testing
 
     @Test func testButtonAndRowSizes() {
         #expect(ThemeConstants.Sizing.buttonHeight > 0)
-        #expect(ThemeConstants.Sizing.rowHeight > 0)
     }
 
     @Test func testSpaceBarSizing() {

@@ -53,7 +53,7 @@ The first run may ask to let your terminal control Finder (the DMG window layout
 
 ## 3. Publish
 
-Open `.build/release/1.1.0/UPLOAD_INSTRUCTIONS.md`: edit the notes, test the DMG, then commit `VERSION`, tag `v1.1.0`, push and run `gh release create` (or upload on the GitHub releases page).
+Open `.build/release/1.1.0/UPLOAD_INSTRUCTIONS.md`: edit the notes, test the DMG, then commit `VERSION` and `Bundler.toml` (`build.sh` keeps its `version` in step), tag `v1.1.0`, push and run `gh release create` (or upload on the GitHub releases page).
 
 ## Troubleshooting
 

@@ -16,7 +16,6 @@ import Testing
         func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService) { lostPermissions += 1 }
         func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool) {}
         func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService) {}
-        func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService) {}
         func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat { 300 }
     }
 

@@ -25,7 +25,7 @@ Browsers in scope: **Chrome, Brave, Safari** (corporate set). Everything else op
 | A1 | `tccutil reset AppleEvents io.github.giannirondini.sidebarc`, Chrome running, click a favorite whose page is open | A new tab opens (as with tab focus off). **No prompt.** Settings › Permissions › Automation shows the hint and "Google Chrome: not asked yet" |
 | A2 | Settings › Permissions › **Allow Browser Access…** | macOS asks "SidebArc wants to control Google Chrome". Allow → status "✓ allowed", hint gone |
 | A3 | Click the same favorite | Chrome comes forward on that tab; no new tab |
-| A4 | **Rebuild** (`./scripts/run.sh`), relaunch, click the favorite | Still focuses; no prompt. *If it opens a new tab and Settings says "not asked yet", the bundle-id requirement didn't keep the grant: record it in the plan's Decisions log* |
+| A4 | **Rebuild** (`./scripts/run.sh`), relaunch, click the favorite | Still focuses; no prompt. *If it opens a new tab and Settings says "not asked yet", the bundle-id requirement didn't keep the grant: note it in the issue or PR that changed the signing* |
 | A5 | System Settings › Privacy & Security › Automation › SidebArc › turn Chrome off; click the favorite | A new tab opens, no error. Settings shows "not allowed"; **Allow Browser Access…** opens System Settings › Automation |
 | A6 | Accessibility grant (window attachment) after a rebuild | Still granted (same requirement change) |
 

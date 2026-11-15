@@ -122,39 +122,20 @@ final class ScheduledLinkRowView: BaseControl {
 
     private static func faviconImage(for link: Link, size: CGFloat) -> NSImage? {
         if let customIcon = link.customIcon {
-            switch customIcon {
-            case .emoji(let emoji):
-                return NodeListViewController.imageFromEmoji(emoji, size: size)
-            case .sfSymbol(let name):
-                let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
-                let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                    .withSymbolConfiguration(config)
-                image?.isTemplate = true
-                return image
-            case .cachedFavicon(let path):
-                if FileManager.default.fileExists(atPath: path),
-                   let image = NSImage(contentsOfFile: path) {
-                    image.isTemplate = false
-                    return image
-                }
-                return globeImage(size: size)
+            let image = customIcon.image(emojiSize: size, symbolPointSize: size, symbolWeight: .regular)
+            if case .cachedFavicon = customIcon {
+                return image ?? globeImage(size: size)
             }
+            return image
         }
-        if let path = link.faviconPath,
-           FileManager.default.fileExists(atPath: path),
-           let image = NSImage(contentsOfFile: path) {
-            image.isTemplate = false
+        if let path = link.faviconPath, let image = IconImages.favicon(atPath: path) {
             return image
         }
         return globeImage(size: size)
     }
 
     private static func globeImage(size: CGFloat) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
-        let image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-        image?.isTemplate = true
-        return image
+        IconImages.symbol("globe", pointSize: size, weight: .regular)
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
@@ -170,11 +151,16 @@ final class ScheduledLinkRowView: BaseControl {
         return formatter
     }()
 
-    private static let dayTimeFormatter: DateFormatter = {
+    private static let dayTimeFormatter = makeDayTimeFormatter()
+
+    /// Weekday and time in the user's locale and 12/24-hour setting ("Tue 3:45 PM",
+    /// "Di. 15:45"): `j` is the locale's preferred hour format.
+    static func makeDayTimeFormatter(locale: Locale = .current) -> DateFormatter {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEE h:mm a"
+        formatter.locale = locale
+        formatter.setLocalizedDateFormatFromTemplate("EEEjmm")
         return formatter
-    }()
+    }
 
     static func formattedFireDate(_ date: Date, now: Date = Date()) -> String {
         let interval = date.timeIntervalSince(now)

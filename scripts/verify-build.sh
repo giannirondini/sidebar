@@ -52,14 +52,25 @@ else
 fi
 
 echo "   CFBundleName: $(plist_get CFBundleName)"
-echo "   CFBundleShortVersionString: $(plist_get CFBundleShortVersionString)"
 echo "   Build configuration: $(plist_get "$BUILD_CONFIGURATION_KEY" || echo "not set (built by an older script)")"
 
 # Without it macOS denies Apple Events (tab focus) silently, without a prompt.
-if plist_get NSAppleEventsUsageDescription > /dev/null; then
-    echo "✅ NSAppleEventsUsageDescription present"
-else
+PLIST_APPLE_EVENTS=$(plist_get NSAppleEventsUsageDescription || true)
+if [ -z "$PLIST_APPLE_EVENTS" ]; then
     fail "NSAppleEventsUsageDescription missing (tab focus would be denied without a prompt)"
+elif [ "$PLIST_APPLE_EVENTS" = "$APPLE_EVENTS_USAGE" ]; then
+    echo "✅ NSAppleEventsUsageDescription matches Bundler.toml"
+else
+    fail "NSAppleEventsUsageDescription differs from Bundler.toml (rebuild): $PLIST_APPLE_EVENTS"
+fi
+
+PLIST_VERSION=$(plist_get CFBundleShortVersionString || true)
+EXPECTED_VERSION=$(tr -d '[:space:]' < "$PROJECT_ROOT/VERSION" 2>/dev/null || true)
+if [ "$PLIST_VERSION" = "$EXPECTED_VERSION" ]; then
+    echo "✅ CFBundleShortVersionString matches VERSION ($PLIST_VERSION)"
+else
+    # A warning: the app checked may be an older copy on purpose.
+    echo "⚠️  CFBundleShortVersionString is ${PLIST_VERSION:-NOT FOUND}, VERSION says ${EXPECTED_VERSION:-NOT FOUND} (an older build?)"
 fi
 
 # There is no in-app updater; a feed key here means a stale or foreign build.

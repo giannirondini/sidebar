@@ -253,7 +253,6 @@ final class WorkspaceRowView: BaseView {
     func configure(workspaceName: String,
                    workspaceColor: NSColor,
                    icon: CustomIcon?,
-                   showDelete: Bool,
                    canDelete: Bool,
                    profileName: String?,
                    profileDetail: String?,

@@ -527,7 +527,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let browserIds = attachmentBrowserIds()
         guard !browserIds.isEmpty else {
-            print("AppDelegate: No browser bundle ID available for attachment")
+            logger.notice("No browser available to attach to (no profile browser and no default browser)")
             return
         }
 
@@ -657,7 +657,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             // Enable attachment
             let browserIds = attachmentBrowserIds()
             guard !browserIds.isEmpty else {
-                print("AppDelegate: No browser bundle ID available for attachment")
+                logger.notice("No browser available to attach to (no profile browser and no default browser)")
                 return
             }
 
@@ -771,10 +771,5 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         let width = stored > 0 ? CGFloat(stored) : ThemeConstants.Sizing.attachedSidebarDefaultWidth
         guard let window else { return width }
         return min(max(width, window.minSize.width), window.maxSize.width)
-    }
-
-    func attachmentServiceShouldShowWindow(_ service: WindowAttachmentService) {
-        guard !isUserHidden else { return }
-        window?.orderFront(nil)
     }
 }

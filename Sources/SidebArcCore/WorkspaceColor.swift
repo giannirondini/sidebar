@@ -82,10 +82,6 @@ enum WorkspaceColorId: String, Codable {
     /// always looked (0.92 was painted twice, which showed as 0.99). Lower it, or pick
     /// a custom colour, for the frosted look.
     static let presetBackgroundAlpha: CGFloat = 1.0
-
-    var textColor: NSColor {
-        NSColor.white
-    }
 }
 
 extension WorkspaceColorId {

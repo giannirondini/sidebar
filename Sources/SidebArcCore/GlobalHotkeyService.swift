@@ -27,8 +27,9 @@ final class GlobalHotkeyService {
     private var hotkeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
 
-    // Signature: "ARMK"
-    private let hotkeySignature: OSType = 0x41524D4B
+    /// Carbon hot key signature, the app's own four-char code: "SBRC" (SidebArc).
+    /// Arcmark used "ARMK"; a distinct code keeps the two apps' hot keys apart.
+    private let hotkeySignature: OSType = 0x53425243
     private let hotkeyId: UInt32 = 1
 
     private init() {}

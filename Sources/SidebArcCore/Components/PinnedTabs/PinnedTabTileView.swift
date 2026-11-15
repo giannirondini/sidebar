@@ -54,7 +54,7 @@ final class PinnedTabTileView: BaseControl {
         ])
     }
 
-    func configure(link: Link, iconsDirectory: URL?) {
+    func configure(link: Link) {
         tooltipShowTask?.cancel()
         tooltipShowTask = nil
         let badge = BrowserManager.overrideBadge(for: link.browserBundleId)
@@ -63,50 +63,35 @@ final class PinnedTabTileView: BaseControl {
         linkId = link.id
         linkURL = link.url
 
+        let size = ThemeConstants.Sizing.iconLarge
+        func showGlobe() {
+            faviconView.image = IconImages.symbol("globe", pointSize: size)
+            faviconView.contentTintColor = ThemeConstants.Colors.darkGray
+                .withAlphaComponent(ThemeConstants.Opacity.low)
+        }
         if let customIcon = link.customIcon {
+            let image = customIcon.image(emojiSize: size, symbolPointSize: size)
             switch customIcon {
-            case .emoji(let emoji):
-                let image = NodeListViewController.imageFromEmoji(emoji, size: ThemeConstants.Sizing.iconLarge)
+            case .emoji:
                 faviconView.image = image
                 faviconView.contentTintColor = nil
-            case .sfSymbol(let name):
-                let config = NSImage.SymbolConfiguration(pointSize: ThemeConstants.Sizing.iconLarge, weight: .semibold)
-                let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                    .withSymbolConfiguration(config)
-                image?.isTemplate = true
+            case .sfSymbol:
                 faviconView.image = image
                 faviconView.contentTintColor = ThemeConstants.Colors.darkGray
                     .withAlphaComponent(ThemeConstants.Opacity.high)
-            case .cachedFavicon(let path):
-                if FileManager.default.fileExists(atPath: path),
-                   let image = NSImage(contentsOfFile: path) {
-                    image.isTemplate = false
+            case .cachedFavicon:
+                if let image {
                     faviconView.image = image
                     faviconView.contentTintColor = nil
                 } else {
-                    let config = NSImage.SymbolConfiguration(pointSize: ThemeConstants.Sizing.iconLarge, weight: .semibold)
-                    let globe = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)?
-                        .withSymbolConfiguration(config)
-                    globe?.isTemplate = true
-                    faviconView.image = globe
-                    faviconView.contentTintColor = ThemeConstants.Colors.darkGray
-                        .withAlphaComponent(ThemeConstants.Opacity.low)
+                    showGlobe()
                 }
             }
-        } else if let path = link.faviconPath,
-           FileManager.default.fileExists(atPath: path),
-           let image = NSImage(contentsOfFile: path) {
-            image.isTemplate = false
+        } else if let path = link.faviconPath, let image = IconImages.favicon(atPath: path) {
             faviconView.image = image
             faviconView.contentTintColor = nil
         } else {
-            let config = NSImage.SymbolConfiguration(pointSize: ThemeConstants.Sizing.iconLarge, weight: .semibold)
-            let globe = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)?
-                .withSymbolConfiguration(config)
-            globe?.isTemplate = true
-            faviconView.image = globe
-            faviconView.contentTintColor = ThemeConstants.Colors.darkGray
-                .withAlphaComponent(ThemeConstants.Opacity.low)
+            showGlobe()
         }
     }
 

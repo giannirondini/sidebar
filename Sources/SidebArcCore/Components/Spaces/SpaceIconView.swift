@@ -88,18 +88,6 @@ final class SpaceIconView: NSView {
     /// The image for a custom icon at `size` points, or nil if it can't be drawn
     /// (unknown symbol, missing favicon file).
     static func image(for icon: CustomIcon, size: CGFloat) -> NSImage? {
-        switch icon {
-        case .emoji(let emoji):
-            return NodeListViewController.imageFromEmoji(emoji, size: size)
-        case .sfSymbol(let name):
-            let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
-            let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                .withSymbolConfiguration(config)
-            image?.isTemplate = true
-            return image
-        case .cachedFavicon(let path):
-            guard FileManager.default.fileExists(atPath: path) else { return nil }
-            return NSImage(contentsOfFile: path)
-        }
+        icon.image(emojiSize: size, symbolPointSize: size)
     }
 }

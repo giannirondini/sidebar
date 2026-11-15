@@ -7,8 +7,9 @@ extension Notification.Name {
     static let attachmentSettingChanged = Notification.Name("attachmentSettingChanged")
     static let sidebarPositionChanged = Notification.Name("sidebarPositionChanged")
     static let toggleSidebarShortcutChanged = Notification.Name("toggleSidebarShortcutChanged")
-    static let tooltipsSettingChanged = Notification.Name("tooltipsSettingChanged")
     static let swipeToSwitchSettingChanged = Notification.Name("swipeToSwitchSettingChanged")
+    /// A favicon was fetched: `userInfo` holds `"linkId"` (UUID) and `"path"` (String).
+    static let linkFaviconUpdated = Notification.Name("UpdateLinkFavicon")
 }
 
 enum UserDefaultsKeys {
@@ -20,8 +21,6 @@ enum UserDefaultsKeys {
     static let attachedSidebarWidth = "attachedSidebarWidth"
     static let sidebarAttachmentEnabled = "sidebarAttachmentEnabled"
     static let sidebarPosition = "sidebarPosition"
-    static let lastArcImportDate = "lastArcImportDate"
-    static let arcImportCount = "arcImportCount"
     static let toggleSidebarShortcut = "toggleSidebarShortcut"
     static let tooltipsEnabled = "tooltipsEnabled"
     static let swipeToSwitchEnabled = "swipeToSwitchEnabled"

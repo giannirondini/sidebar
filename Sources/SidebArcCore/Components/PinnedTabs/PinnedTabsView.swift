@@ -87,7 +87,7 @@ final class PinnedTabsView: NSView {
 
         // Configure each tile
         for (index, link) in pinnedLinks.enumerated() {
-            tileViews[index].configure(link: link, iconsDirectory: nil)
+            tileViews[index].configure(link: link)
             fetchFaviconIfNeeded(for: link)
         }
 
@@ -155,7 +155,7 @@ final class PinnedTabsView: NSView {
         FaviconService.shared.favicon(for: url, cachedPath: link.faviconPath) { _, path in
             guard let path else { return }
             NotificationCenter.default.post(
-                name: .init("UpdateLinkFavicon"),
+                name: .linkFaviconUpdated,
                 object: nil,
                 userInfo: ["linkId": link.id, "path": path]
             )

@@ -30,7 +30,6 @@ final class WorkspaceCollectionViewItem: NSCollectionViewItem {
             workspaceName: workspace.name,
             workspaceColor: workspace.color,
             icon: workspace.icon,
-            showDelete: true,
             canDelete: canDelete,
             profileName: profileName,
             profileDetail: profileDetail,

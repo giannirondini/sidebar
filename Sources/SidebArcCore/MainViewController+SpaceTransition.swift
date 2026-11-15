@@ -73,9 +73,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
     /// While the pages slide, the model still selects the old space (and the live
     /// page underneath is the old one). So any click or key lands the transition
     /// first; the event then reaches the new space. Local monitors run before the
-    /// event is dispatched.
+    /// event is dispatched. The monitor is removed with this controller.
     func installTransitionInputMonitor() {
-        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
+        transitionInputMonitor = LocalEventMonitor(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
             if let self, self.spaceTransition != nil {
                 self.finishSpaceTransitionNow()
             }

@@ -318,23 +318,22 @@ enum BrowserManager {
         return profileArgs + [url.absoluteString]
     }
 
-    static func isRunning(bundleId: String) -> Bool {
-        return NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleId }
-    }
-
     static func frontmostApp() -> NSRunningApplication? {
         return NSWorkspace.shared.frontmostApplication
     }
 
     // MARK: - Browser Profile Support
 
+    /// Chromium browsers whose profiles SidebArc supports (lowercased bundle id), and
+    /// their data folder under `~/Library/Application Support`.
+    private static let chromiumProfileFolders: [String: String] = [
+        "com.google.chrome": "Google/Chrome",
+        "com.google.chrome.canary": "Google/Chrome Canary",
+        "net.imput.helium": "net.imput.helium"
+    ]
+
     static func supportsProfiles(bundleId: String) -> Bool {
-        let supported = [
-            "com.google.chrome",
-            "com.google.chrome.canary",
-            "net.imput.helium"
-        ]
-        return supported.contains(bundleId.lowercased())
+        chromiumProfileFolders[bundleId.lowercased()] != nil
     }
 
     /// Result of reading a browser's profile list.
@@ -352,25 +351,12 @@ enum BrowserManager {
         }
     }
 
-    static func detectProfiles(bundleId: String) -> [BrowserProfile] {
-        detectProfileList(bundleId: bundleId).profiles
-    }
-
     /// `supportRoot` is `~/Library/Application Support`; tests pass a temp directory.
     static func detectProfileList(bundleId: String, supportRoot: URL? = nil) -> ProfileDetection {
         let root = supportRoot ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support", isDirectory: true)
-        let result: ProfileDetection
-        switch bundleId.lowercased() {
-        case "com.google.chrome":
-            result = detectChromeProfiles(dir: root.appendingPathComponent("Google/Chrome"))
-        case "com.google.chrome.canary":
-            result = detectChromeProfiles(dir: root.appendingPathComponent("Google/Chrome Canary"))
-        case "net.imput.helium":
-            result = detectChromeProfiles(dir: root.appendingPathComponent("net.imput.helium"))
-        default:
-            return .unavailable
-        }
+        guard let folder = chromiumProfileFolders[bundleId.lowercased()] else { return .unavailable }
+        let result = detectChromeProfiles(dir: root.appendingPathComponent(folder))
         switch result {
         case .found(let profiles):
             logger.info("\(bundleId, privacy: .public): \(profiles.count) browser profile(s) detected")
@@ -390,13 +376,7 @@ enum BrowserManager {
     }
 
     static func profileArguments(for bundleId: String, profile: String) -> [String] {
-        let lowered = bundleId.lowercased()
-        switch lowered {
-        case "com.google.chrome", "com.google.chrome.canary", "net.imput.helium":
-            return ["--profile-directory=\(profile)"]
-        default:
-            return []
-        }
+        supportsProfiles(bundleId: bundleId) ? ["--profile-directory=\(profile)"] : []
     }
 
     // MARK: - Private Profile Detection

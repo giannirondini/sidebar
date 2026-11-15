@@ -31,7 +31,7 @@ import Testing
     }
 
     private func place(_ row: NodeRowView) {
-        row.frame = NSRect(x: 0, y: 0, width: Self.rowWidth, height: ThemeConstants.Sizing.rowHeight)
+        row.frame = NSRect(x: 0, y: 0, width: Self.rowWidth, height: ListMetrics().rowHeight)
         row.layoutSubtreeIfNeeded()
     }
 

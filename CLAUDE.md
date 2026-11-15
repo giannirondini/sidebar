@@ -49,6 +49,7 @@ swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host
 - All tests use swift-testing (`import Testing`, `@Suite`, `@Test`, `#expect`, `#require`); XCTest is not available with Command Line Tools only. Never index a result with `[0]` (a trap kills the whole run: `try #require(x.first)` or `x[safe: i]`), and an `if case`/`if let` around assertions needs `else { Issue.record(…) }` (or `try #require`).
 - swift-testing runs tests in parallel: don't share mutable global state (UserDefaults, the real data dir) between tests. Fixtures go in the suite's `init()` (a fresh instance per test), not `setUp`.
 - Opt-in acceptance tests run against real files only when an env var points at a **copy**: `SIDEBARC_V1_FIXTURE` (v1 `data.json` → migration, zero lost links) and `SIDEBARC_ARC_FIXTURE` (`StorableSidebar.json` → favorites per profile). They print counts only; never commit those files.
+- `SIDEBARC_LIST_PROBE=1` times the pinned list off-screen (2000 rows: scrolling, selection reload); measure with it before changing list performance.
 - `SIDEBARC_TAB_PROBE=<bundle id>` runs an opt-in, counts-only probe of a running browser's tabs with the real locator (needs Automation granted to the terminal; never asks, never focuses).
 - When the app misbehaves and the cause isn't certain, verify first (an off-screen-window probe test or temporary diagnostics) before changing code.
 

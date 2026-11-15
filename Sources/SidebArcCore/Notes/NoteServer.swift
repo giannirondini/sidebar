@@ -768,12 +768,21 @@ final class NoteServer {
             sendError(status: 400, code: "bad_id", message: "Invalid id", on: connection)
             return
         }
-        guard let node = model.nodeAcrossWorkspaces(id: id), case .link = node else {
-            sendError(status: 404, code: "link_not_found", message: "Link not found", on: connection)
-            return
+        // A favorite is a link too (in a profile's grid, not a space's list): only its
+        // browser override can be changed here.
+        let isFavorite = model.profileId(forFavoriteId: id) != nil
+        if !isFavorite {
+            guard let node = model.nodeAcrossWorkspaces(id: id), case .link = node else {
+                sendError(status: 404, code: "link_not_found", message: "Link not found", on: connection)
+                return
+            }
         }
         guard let json = parseJSONObject(body) else {
             sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
+            return
+        }
+        if isFavorite, json["title"] != nil || json["url"] != nil {
+            sendError(status: 400, code: "favorite_field", message: "A favorite's title and url can't be changed through links:*; only browser_bundle_id", on: connection)
             return
         }
         if let value = json["url"] {

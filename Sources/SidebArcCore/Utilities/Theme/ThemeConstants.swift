@@ -239,9 +239,6 @@ struct ThemeConstants {
         /// Standard button height (32pt)
         static let buttonHeight: CGFloat = 32
 
-        /// Standard row height (44pt) - For list and table rows
-        static let rowHeight: CGFloat = 44
-
         /// Width of the sidebar attached to a browser until the user resizes it (340pt)
         static let attachedSidebarDefaultWidth: CGFloat = 340
 
@@ -252,9 +249,6 @@ struct ThemeConstants {
 
         /// Scroll shadow gradient height (32pt) - Used for vertical overscroll fade indicators
         static let scrollShadowHeight: CGFloat = 32
-
-        /// Scroll shadow gradient width (32pt) - Used for horizontal overscroll fade indicators
-        static let scrollShadowWidth: CGFloat = 32
 
         /// Narrowest a Favorites tile may get before the grid drops a column
         /// (3 columns at the default 340-pt sidebar, 4 from about 412 pt, 5 from about 512)

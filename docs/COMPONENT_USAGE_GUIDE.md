@@ -22,7 +22,7 @@ _Moved from CLAUDE.md › "UI Component Architecture (Post-Refactoring)" on 2026
 - **BaseControl** - Base class for all interactive controls with hover and pressed state management
   - Owns the tracking area and mouse events; refreshes the hover state on layout and window changes
   - Provides `handleHoverStateChanged()` and `handlePressedStateChanged()` override points
-  - Used by: `IconTitleButton`, `CustomToggle`, `CustomTextButton`, `SpaceBarButton`, `PinnedTabTileView`, `IconPickerItemView`, `ScheduledLinkRowView`, the scheduled-links `HeaderButton`
+  - Used by: `IconTitleButton`, `CustomToggle`, `SpaceBarButton`, `PinnedTabTileView`, `IconPickerItemView`, `ScheduledLinkRowView`, the scheduled-links `HeaderButton`
 - **BaseView** - Base class for custom views with hover state management (no pressed state)
   - Simpler than BaseControl, designed for non-interactive views like rows
   - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`, the shortcut recorder's `RecorderBoxView`
@@ -37,7 +37,7 @@ _Moved from CLAUDE.md › "UI Component Architecture (Post-Refactoring)" on 2026
   - Fonts: Typography styles (bodyRegular, bodySemibold, bodyMedium, bodyBold)
   - Spacing: Layout spacing values (tiny=4, small=6, medium=8, regular=10, large=14, extraLarge=16, huge=20)
   - CornerRadius: Rounding values (small=6, medium=8, large=12)
-  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, iconExtraLarge=26, buttonHeight=32, rowHeight=44), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
+  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, iconExtraLarge=26, buttonHeight=32; list rows use `ListMetrics.rowHeight`), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
   - Animation: Timing values (durationFast=0.15s, durationNormal=0.2s, durationSlow=0.3s)
   - SpaceTransition: space-switch tuning (commit fraction, flick velocity, velocity window, rubber band, spring response and damping ratio)
 

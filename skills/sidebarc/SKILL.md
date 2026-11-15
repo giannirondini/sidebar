@@ -6,7 +6,7 @@ description: >
   favorite, organize or move bookmarks between SidebArc workspaces or profiles,
   take notes in SidebArc, or otherwise tidy their SidebArc sidebar. Not for creating files or folders
   on disk or in a code project.
-last-updated: 2026-11-14
+last-updated: 2026-11-15
 allowed-tools: Bash(./scripts/sidebarc.js:*)
 ---
 
@@ -50,7 +50,9 @@ file editing.
   of every workspace in that profile (at most 12). Favorites are not nodes:
   use the `favorites:*` commands, not `nodes:*`.
 - **Browser override** — a link can always open in a specific browser
-  (`links:set-browser`), regardless of its workspace's profile.
+  (`links:set-browser`), regardless of its workspace's profile. This works on
+  favorites too (pass the favorite's id); a favorite's title and URL can't be
+  changed with `links:*` (`favorite_field`).
 
 ## Common Actions
 
@@ -190,7 +192,7 @@ folders:delete   ID
 links:create     --workspace ID [--parent ID|root] --url URL [--title T]
 links:rename     ID  --title "Y"
 links:set-url    ID  --url URL
-links:set-browser ID --browser BUNDLE_ID|default
+links:set-browser ID --browser BUNDLE_ID|default   ID: a link or a favorite
 links:delete     ID
 
 notes:create     --workspace ID [--parent ID|root] --title T [--content TEXT | --file PATH | --content -]
