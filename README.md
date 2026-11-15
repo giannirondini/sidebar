@@ -154,8 +154,8 @@ cd sidebarc
 # Build only (creates .build/bundler/SidebArc.app)
 ./scripts/build.sh
 
-# Create DMG installer
-./scripts/build.sh --dmg
+# Create the DMG and release files (brew install create-dmg; see scripts/README.md)
+./scripts/create-dmg.sh --allow-adhoc   # without a signing certificate: a local test DMG
 ```
 
 Builds are signed ad-hoc unless you set up a local signing certificate (`.signing-config`), which keeps privacy permissions stable across rebuilds: see [Code signing](docs/BUILD_AND_CODESIGN.md#code-signing).

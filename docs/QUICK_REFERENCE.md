@@ -9,7 +9,8 @@ brew install mint                 # once; swift-bundler is pinned in Mintfile
 ./scripts/build.sh                # → .build/bundler/SidebArc.app
 ./scripts/run.sh                  # debug build + launch
 ./scripts/verify-build.sh         # full bundle check
-./scripts/build.sh --dmg          # + .build/dmg/SidebArc-<version>.dmg
+./scripts/build.sh 1.1.0          # set VERSION, then build
+./scripts/create-dmg.sh 1.1.0     # .build/release/1.1.0/: DMG, notes, checksums, upload steps
 ```
 
 ## Tests

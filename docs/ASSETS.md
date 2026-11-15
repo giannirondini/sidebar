@@ -26,17 +26,17 @@ If Finder or the Dock keeps showing an old icon after a rebuild, clear the icon 
 
 ## DMG background
 
-`scripts/create-dmg.sh` copies `Resources/dmg-background.png` into the DMG's hidden `.background/` folder and sets it as the Finder window's background. Without the file the DMG is created with a plain window.
+`scripts/create-dmg.sh` passes `Resources/dmg-background.png` to Homebrew's `create-dmg` (`--background`), which sets it as the Finder window's background. Without the file the DMG gets a plain window.
 
 The layout is set in `create-dmg.sh`:
 
 | Property | Value |
 |---|---|
-| Window | 600 × 400 pt (`bounds {100, 100, 700, 500}`) |
+| Window | 600 × 400 pt (`--window-size 600 400`) |
 | Icon size | 180 px, text 14 pt |
 | `SidebArc.app` | centre at (160, 200) |
 | `Applications` link | centre at (460, 200) |
 
-Size the image to the window (600 × 400); the current file is a plain 699 × 484 image. Keep the two icon areas clear.
+Size the image to the window (600 × 400 PNG) and keep the two icon areas clear.
 
-To check it: `./scripts/build.sh --dmg`, then open `.build/dmg/SidebArc-<version>.dmg`. Setting the background needs Finder automation; if it fails the script prints a warning and the DMG still works.
+To check it: `./scripts/create-dmg.sh` (after `./scripts/build.sh`), then open `.build/release/<version>/SidebArc-<version>.dmg`. Setting the layout and background needs Finder automation for the terminal; without it the DMG still works, with the default layout.

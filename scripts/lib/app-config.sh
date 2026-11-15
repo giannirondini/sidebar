@@ -31,6 +31,29 @@ APP_BUNDLE=".build/bundler/${APP_NAME}.app"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+# Output, in the style of the Anchor scripts (colours only on a terminal).
+if [ -t 1 ]; then
+    C_RED=$'\033[0;31m'; C_GREEN=$'\033[0;32m'; C_YELLOW=$'\033[1;33m'; C_BLUE=$'\033[0;34m'; C_NC=$'\033[0m'
+else
+    C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_NC=""
+fi
+print_step()    { printf '%s==>%s %s%s%s\n' "$C_BLUE" "$C_NC" "$C_GREEN" "$1" "$C_NC"; }
+print_info()    { printf '%sℹ️  %s%s\n' "$C_BLUE" "$1" "$C_NC"; }
+print_warning() { printf '%s⚠️  %s%s\n' "$C_YELLOW" "$1" "$C_NC"; }
+print_error()   { printf '%s❌ %s%s\n' "$C_RED" "$1" "$C_NC" >&2; }
+print_success() { printf '%s✅ %s%s\n' "$C_GREEN" "$1" "$C_NC"; }
+print_rule()    { echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
+
+# Semantic version: X.Y.Z or X.Y.Z-suffix (e.g. 1.0.0, 1.1.0-beta.1).
+is_valid_version() {
+    echo "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
+}
+
+# The version in the VERSION file (the single source; build.sh writes it).
+current_version() {
+    tr -d '[:space:]' < "$PROJECT_ROOT/VERSION"
+}
+
 # swift-bundler runs through Mint, pinned by the Mintfile in the repo root.
 require_swift_bundler() {
     if ! command -v mint >/dev/null 2>&1; then

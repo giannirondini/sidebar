@@ -1,82 +1,105 @@
 #!/bin/bash
-# Build the app as a macOS app bundle. Names and ids come from Bundler.toml.
+###############################################################################
+# SidebArc - build the app bundle (release configuration)
 #
 # Usage:
-#   ./scripts/build.sh                     # Build, signed with the self-signed identity in
-#                                          # .signing-config (ad-hoc if there is none)
-#   ./scripts/build.sh --dmg               # Same, and create a DMG
+#   ./scripts/build.sh [version]
 #
-# Builds aren't notarized (that needs a paid Apple Developer ID), so a downloaded
-# copy needs `xattr -dr com.apple.quarantine` once; see docs/DISTRIBUTION.md.
+#   version   optional; written to VERSION (and Bundler.toml) before building.
+#             Without it the version in VERSION is used.
+#
+# Example:
+#   ./scripts/build.sh 1.1.0
+#   ./scripts/create-dmg.sh 1.1.0      # next step for a release (scripts/README.md)
+#
+# Signed with the self-signed identity in .signing-config, else ad-hoc (only for
+# local use). Names and ids come from Bundler.toml (scripts/lib/app-config.sh).
+###############################################################################
 
-set -e  # Exit on error
+set -e
 
-CREATE_DMG=false
-
-for arg in "$@"; do
-    case $arg in
-        --dmg)
-            CREATE_DMG=true
-            ;;
-        *)
-            echo "Unknown argument: $arg"
-            echo "Usage: $0 [--dmg]"
-            exit 1
-            ;;
-    esac
-done
-
-# Ensure we're in the project root
 cd "$(dirname "$0")/.."
 source scripts/lib/app-config.sh
 
-echo "🔨 Building $APP_NAME ($BUNDLE_ID)..."
+if [ $# -gt 1 ]; then
+    print_error "Usage: $0 [version]"
+    exit 1
+fi
 
+###############################################################################
+# Validation
+###############################################################################
+
+print_step "Validating build environment..."
+
+if [[ "$OSTYPE" != "darwin"* ]]; then
+    print_error "This script must be run on macOS"
+    exit 1
+fi
 require_swift_bundler
 
-# Read version from VERSION file and sync it into Bundler.toml
-if [ -f "VERSION" ]; then
-    VERSION=$(tr -d '[:space:]' < VERSION)
-    echo "📌 Version: $VERSION"
-
-    if grep -q "^version = " Bundler.toml; then
-        CURRENT_VERSION=$(grep "^version = " Bundler.toml | head -1 | sed "s/version = '\(.*\)'/\1/" | tr -d "'")
-        if [ "$CURRENT_VERSION" != "$VERSION" ]; then
-            echo "  → Updating Bundler.toml version to $VERSION"
-            sed -i '' "s/^version = .*/version = '$VERSION'/" Bundler.toml
-        fi
+if [ $# -eq 1 ]; then
+    if ! is_valid_version "$1"; then
+        print_error "Invalid version: $1 (expected MAJOR.MINOR.PATCH, e.g. 1.1.0 or 1.1.0-beta.1)"
+        exit 1
+    fi
+    if [ "$1" != "$(current_version)" ]; then
+        echo "$1" > VERSION
+        print_info "VERSION set to $1"
     fi
 fi
+VERSION=$(current_version)
 
-# Build the app bundle using swift-bundler (revision pinned in Mintfile)
+load_signing_config
+if [ -n "$LOCAL_SIGNING_IDENTITY" ]; then
+    print_info "Signing identity: $LOCAL_SIGNING_IDENTITY"
+else
+    print_warning "No .signing-config: the build will be signed ad-hoc (fine locally, not for a release)"
+fi
+
+# Keep Bundler.toml's version in step with VERSION.
+CURRENT_TOML_VERSION=$(sed -n "s/^version = '\(.*\)'$/\1/p" Bundler.toml | head -1)
+if [ "$CURRENT_TOML_VERSION" != "$VERSION" ]; then
+    sed -i '' "s/^version = .*/version = '$VERSION'/" Bundler.toml
+    print_info "Bundler.toml version set to $VERSION"
+fi
+
+print_success "Building $APP_NAME $VERSION ($BUNDLE_ID)"
+
+###############################################################################
+# Build
+###############################################################################
+
+print_step "Building with swift-bundler (release)..."
 mint run swift-bundler bundle -c release
 unwrap_nested_resource_bundles
+print_success "App bundle built"
 
-# Post-build: swift-bundler doesn't always merge [apps.*.plist] values, so set the
-# identifier, version strings and usage descriptions explicitly.
-echo "🔧 Patching Info.plist..."
+print_step "Patching Info.plist..."
+# swift-bundler doesn't always merge [apps.*.plist] values: set the identifier,
+# version strings and usage descriptions explicitly.
 patch_info_plist "$VERSION"
-echo "  ✓ CFBundleIdentifier = $BUNDLE_ID"
-[ -n "$VERSION" ] && echo "  ✓ CFBundleShortVersionString / CFBundleVersion = $VERSION"
-echo "  ✓ NSAppleEventsUsageDescription"
+print_success "CFBundleIdentifier, version $VERSION, NSAppleEventsUsageDescription"
 
-# Code sign the app
-echo "🔏 Code signing app..."
+print_step "Code signing..."
 dev_sign
-echo "  ✓ Signed: $SIGNED_WITH"
+print_success "Signed: $SIGNED_WITH"
+
+###############################################################################
+# Summary
+###############################################################################
 
 echo ""
-echo "✅ Build complete!"
-echo "📦 App bundle: $APP_BUNDLE"
+print_rule
+print_success "Build completed: $APP_NAME $VERSION"
+print_rule
 echo ""
-echo "🔍 Verification:"
-echo "  Bundle ID: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST" 2>/dev/null || echo 'ERROR: Not found')"
-echo "  Version:   $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" 2>/dev/null || echo 'Not set')"
-echo "  Code Sign: $(codesign -dvv "$APP_BUNDLE" 2>&1 | grep "^Identifier=" | cut -d= -f2)"
-echo "  Full check: ./scripts/verify-build.sh"
-
-if [ "$CREATE_DMG" = true ]; then
-    echo ""
-    echo "────────────────────────────────────────"
-    ./scripts/create-dmg.sh
-fi
+print_info "App bundle: $APP_BUNDLE"
+print_info "Bundle size: $(du -sh "$APP_BUNDLE" | cut -f1)"
+echo ""
+print_warning "Next steps:"
+echo "  1. Test the app:      open \"$APP_BUNDLE\""
+echo "  2. Check the bundle:  ./scripts/verify-build.sh"
+echo "  3. Create the DMG:    ./scripts/create-dmg.sh $VERSION"
+echo ""
+print_rule
