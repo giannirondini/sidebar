@@ -37,6 +37,6 @@ The layout is set in `create-dmg.sh`:
 | `SidebArc.app` | centre at (160, 200) |
 | `Applications` link | centre at (460, 200) |
 
-The image is drawn from the window's top-left corner at its own pixel size, so a 600 × 400 image fills the window exactly (the current file is a plain 699 × 484 image, of which the top-left 600 × 400 shows). Keep the two icon areas clear.
+Size the image to the window (600 × 400); the current file is a plain 699 × 484 image. Keep the two icon areas clear.
 
 To check it: `./scripts/build.sh --dmg`, then open `.build/dmg/SidebArc-<version>.dmg`. Setting the background needs Finder automation; if it fails the script prints a warning and the DMG still works.

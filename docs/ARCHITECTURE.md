@@ -61,7 +61,7 @@ The model (`AppState` → `Profile`, `Workspace` → `Node`) and schema migratio
 
 ## Testing
 
-282 swift-testing tests (`import Testing`; XCTest isn't available with Command Line Tools only). Model operations are tested through `AppModel` with a temporary `DataStore`, checking the mutation and the JSON round trip; pure logic (`TabURLMatcher`, `SpaceSwipe`, `SchemaMigration`, `WindowAttachmentService.cocoaFrame`) is tested directly; layout bugs get off-screen probe tests (`InlineRenameLayoutTests`, `PinnedTabsLayoutTests`). Opt-in acceptance tests run against copies of real files (`SIDEBARC_V1_FIXTURE`, `SIDEBARC_ARC_FIXTURE`, `SIDEBARC_TAB_PROBE`). Commands and rules: [CLAUDE.md › Testing](../CLAUDE.md#testing).
+All tests use swift-testing (`import Testing`; XCTest isn't available with Command Line Tools only). Model operations are tested through `AppModel` with a temporary `DataStore`, checking the mutation and the JSON round trip; pure logic (`TabURLMatcher`, `SpaceSwipe`, `SchemaMigration`, `WindowAttachmentService.cocoaFrame`) is tested directly; layout bugs get off-screen probe tests (`InlineRenameLayoutTests`, `PinnedTabsLayoutTests`). Opt-in acceptance tests run against copies of real files (`SIDEBARC_V1_FIXTURE`, `SIDEBARC_ARC_FIXTURE`, `SIDEBARC_TAB_PROBE`). Commands and rules: [CLAUDE.md › Testing](../CLAUDE.md#testing).
 
 ## Build
 
