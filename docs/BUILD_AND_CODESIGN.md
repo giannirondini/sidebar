@@ -139,9 +139,9 @@ NSAppleEventsUsageDescription  from [apps.SidebArc.plist] in Bundler.toml
 
 | What | Where |
 |---|---|
-| Data (`data.json`, `Icons/`, `Notes/`, `Backups/`, `agent-endpoint.json`) | `~/Library/Application Support/io.github.giannirondini.sidebarc/` |
+| Data (`data.json`, `Icons/`, `Notes/`, `Backups/` with the rotating `data-*.json` and the `pre-import-*` exports, `agent-endpoint.json`) | `~/Library/Application Support/io.github.giannirondini.sidebarc/` |
 | Preferences (`UserDefaults`) | domain `io.github.giannirondini.sidebarc` |
-| Logs | `os.Logger` subsystem `io.github.giannirondini.sidebarc` |
+| Logs | `os.Logger` subsystem `io.github.giannirondini.sidebarc`; categories include `attach` (window attachment: activations, hides and why), `tabs` (tab focus), `transition`, `store`, `model` |
 
 Nothing is shared with an Arcmark install on the same Mac.
 
