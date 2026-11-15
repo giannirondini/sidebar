@@ -48,7 +48,8 @@ Workspace                     // A space
 ├── colorId: WorkspaceColorId
 ├── items: [Node]             // Root-level items (the pinned list)
 ├── profileId: UUID           // Every space belongs to exactly one profile
-└── icon: CustomIcon?         // nil = colour dot
+├── icon: CustomIcon?         // nil = colour dot
+└── customColor: SpaceColor?  // sRGB + alpha; wins over colorId (see Workspace Colors)
 
 Node                          // Recursive tree (tagged union, custom Codable)
 ├── .folder(Folder)

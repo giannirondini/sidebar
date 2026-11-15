@@ -27,12 +27,13 @@ swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host
 ## Architecture rules
 
 - **`AppModel`** owns `AppState` and is the single source of truth. Every mutation goes through an `AppModel` method, which persists through `DataStore` (`~/Library/Application Support/io.github.giannirondini.sidebarc/data.json`) and calls `onChange`. UI code never mutates state; callers never call `save()`; `notify: false` suppresses `onChange`.
-- **Model** (`Models.swift`): `AppState` (`schemaVersion` 2, `profiles`, `workspaces`, selected workspace) → `Workspace` (`items`, `profileId`, optional `icon`) → `Node` = `Folder` | `Link` | `Note` (body in `Notes/*.md`). Whether Settings is shown is runtime state (`AppModel.isSettingsShown`), never saved.
+- **Model** (`Models.swift`): `AppState` (`schemaVersion` 2, `profiles`, `workspaces`, selected workspace) → `Workspace` (`items`, `profileId`, optional `icon` and `customColor`) → `Node` = `Folder` | `Link` | `Note` (body in `Notes/*.md`). Whether Settings is shown is runtime state (`AppModel.isSettingsShown`), never saved.
 - **Schema changes:** new fields on synthesized-Codable models (`Profile`, `Link`, `Workspace`) must be `Optional` (synthesized decoding ignores defaults, so a non-optional field fails every existing file); anything else needs a `SchemaVn` mirror and a migration (`Persistence/SchemaMigration.swift`). Confirm a backup exists first.
 - **Never drop links:** migration, profile deletion and Arc import use `Profile.appendFavorites` and put the leftovers in a folder. Favorites cap: `Profile.maxFavorites` (12). `URLNormalization` (favorites dedupe) must not change.
 - **Browsers:** where a link opens is `BrowserManager.resolveTarget(link:profile:)`. **Never spawn a browser executable as a child process** (macOS attributes its privacy checks to SidebArc, and a closed Chrome exits silently); launch through LaunchServices.
 - **Tab focus:** raw Apple Events by pid (`NSAppleEventDescriptor.sendEvent`, 300 ms) from a detached task. Never `NSAppleScript` or `osascript`, never send to a browser that isn't running (it would launch), and clicks never prompt for Automation. Add a browser only after verifying it on a Mac.
 - **Spaces:** user navigation goes through `requestSpaceSwitch(to:)`, never `model.selectWorkspace`. Model reloads are held while a transition runs. **Never move or animate an AppKit view through its layer `transform`** (AppKit can reset it).
+- **Space colours:** read them through `Workspace.color` (opaque) / `Workspace.backgroundColor`, never `colorId.color` (a custom colour wins). Paint the background **once**, on `MainViewController`'s layer: `window.backgroundColor` stays clear and the window root is `SidebarBackdropViewController` (blur), or the opacity stacks.
 - **Screen coordinates:** Accessibility frames use the primary display's top-left origin; flip with the primary display's height, never `NSScreen.main`.
 
 ## UI rules

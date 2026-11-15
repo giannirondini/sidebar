@@ -473,7 +473,7 @@ Use it anywhere a space is shown, so icons look the same everywhere.
 let iconView = SpaceIconView()
 iconView.iconSize = ThemeConstants.Sizing.iconMedium   // emoji/symbol size
 iconView.dotSize = ThemeConstants.Sizing.iconSmall     // colour dot diameter
-iconView.configure(icon: workspace.icon, color: workspace.colorId.color)
+iconView.configure(icon: workspace.icon, color: workspace.color)   // never colorId.color: a custom colour wins
 
 // Just the image (e.g. for an NSImageView in an existing row):
 let image = SpaceIconView.image(for: .emoji("🚀"), size: ThemeConstants.Sizing.iconMedium)
@@ -486,7 +486,7 @@ it rebuilds buttons only when the items change, and keeps the selected one scrol
 
 ```swift
 spaceBar.update(
-    items: model.workspaces.map { SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, colorId: $0.colorId) },
+    items: model.workspaces.map { SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color) },
     selectedId: model.currentWorkspace.id,
     isSettingsShown: model.isSettingsShown
 )
@@ -510,7 +510,7 @@ The current space's icon and name between the Favorites and the pinned list. It 
 `ListMetrics`, so its icon and title line up with a top-level row of the list.
 
 ```swift
-spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.colorId.color)
+spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.color)
 spaceHeader.onRename = { newName in /* model.renameWorkspace */ }        // after a double-click
 spaceHeader.onIconClicked = { anchor in /* icon picker, kind .space */ }
 spaceHeader.onContextMenu = { event in /* SpaceMenu */ }
@@ -546,6 +546,9 @@ let menu = SpaceMenu.build(
         rename: { /* … */ },
         changeIcon: { /* … */ },
         setColor: { colorId in model.updateWorkspaceColor(id: workspace.id, colorId: colorId) },
+        customColor: {                                  // "Custom Color…": the colour panel
+            SpaceColorPanel.shared.edit(workspace) { id, color in model.setWorkspaceCustomColor(id: id, color: color) }
+        },
         moveLeft: index > 0 ? { /* … */ } : nil,      // nil hides the item
         moveRight: nil,
         delete: { /* confirm, then delete */ }

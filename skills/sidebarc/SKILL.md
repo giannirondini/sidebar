@@ -141,8 +141,11 @@ Combinations:
   `org.mozilla.firefox`, `com.apple.Safari`). Pass `default` to clear a
   profile's browser or a link's override.
 - Workspace **color names**: Blush, Apricot, Butter, Leaf, Mint, Sky,
-  Periwinkle, Lavender. Case-insensitive; raw enum cases (ember, ruby,
-  coral, tangerine, moss, ocean, indigo, graphite) also work.
+  Periwinkle, Lavender, Rose, Peach, Sand, Sage, Seafoam, Cornflower, Orchid,
+  Stone. Case-insensitive; raw enum cases (ember, ruby, coral, tangerine,
+  moss, ocean, indigo, graphite) also work. Setting a color replaces a custom
+  color picked in the app; `colorId` reports the preset even while a custom
+  color is set.
 - Every command exits non-zero on failure and prints `{ error, code, ... }`
   to stderr. Inspect `code` — `app_not_running`, `workspace_not_found`,
   `parent_not_folder`, `node_not_found`, `profile_not_found`,

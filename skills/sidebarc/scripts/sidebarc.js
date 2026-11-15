@@ -530,8 +530,9 @@ Generic:
   nodes:move       ID [--to-workspace ID] [--to-parent ID|root] [--index N]
   nodes:delete     ID
 
-Color names: Blush, Apricot, Butter, Leaf, Mint, Sky, Periwinkle, Lavender
-(also accepts the raw enum cases ember, ruby, coral, tangerine, moss, ocean, indigo, graphite).
+Color names: Blush, Apricot, Butter, Leaf, Mint, Sky, Periwinkle, Lavender, Rose,
+Peach, Sand, Sage, Seafoam, Cornflower, Orchid, Stone (also accepts the raw enum
+cases ember, ruby, coral, tangerine, moss, ocean, indigo, graphite).
 
 Endpoint file: ${ENDPOINT_FILE}
 `;
