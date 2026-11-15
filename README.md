@@ -5,7 +5,7 @@
 # SidebArc
 
 <p align="center">
-  <img src="./Resources/screenshots/screenshot-1-app.png" alt="SidebArc main window" width="100%">
+  <img src="./Resources/screenshots/application.jpeg" alt="SidebArc main window" width="100%">
 </p>
 
 SidebArc is a native macOS bookmark manager built with Swift and AppKit that attaches to any browser window as a sidebar, organized the way Arc browser's sidebar organizes tabs.
@@ -47,7 +47,7 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 - **Search & Filter** - Quickly find bookmarks in any workspace
 
 <p align="center">
-  <img src="./Resources/screenshots/screenshot-2-settings.png" alt="SidebArc settings" width="100%">
+  <img src="./Resources/screenshots/settings.jpeg" alt="SidebArc settings" width="100%">
 </p>
 
 ## Installation
