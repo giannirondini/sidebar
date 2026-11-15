@@ -1,4 +1,4 @@
-# Switching to open tabs (Phase 2)
+# Switching to open tabs
 
 _Moved from CLAUDE.md on 2026-11-15. The rules most tasks need are summarised in [CLAUDE.md](../CLAUDE.md)._
 

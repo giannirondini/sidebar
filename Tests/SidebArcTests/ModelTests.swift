@@ -553,6 +553,59 @@ import Testing
         }
     }
 
+    /// A favorite can't carry a reminder: pinning cancels it, so it neither waits
+    /// forever nor fires at once, overdue, after unpinning.
+    @Test func testPinningAScheduledLinkCancelsTheSchedule() throws {
+        let store = makeStore()
+        store.save(DataStore.defaultState())
+        let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
+
+        let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
+        let past = Date(timeIntervalSinceNow: -3600)
+        model.scheduleLink(id: linkId, at: past)
+        #expect(model.allScheduledLinks().map(\.linkId) == [linkId])
+
+        model.pinLink(id: linkId)
+        let favorite = try #require(model.currentProfile.favorites.first)
+        #expect(favorite.id == linkId)
+        #expect(favorite.scheduledOpenAt == nil)
+        #expect(model.allScheduledLinks().isEmpty)
+        expectPersisted(model, in: store)
+
+        model.unpinLink(id: linkId)
+        guard case .link(let unpinned) = try #require(model.currentWorkspace.items.last) else {
+            Issue.record("Expected the unpinned link at the root")
+            return
+        }
+        #expect(unpinned.id == linkId)
+        #expect(unpinned.scheduledOpenAt == nil)
+        #expect(model.allScheduledLinks().isEmpty)
+    }
+
+    /// A favorite saved with a reminder (before pinning cancelled it) loses it on unpin.
+    @Test func testUnpinningAFavoriteWithAStaleScheduleCancelsIt() throws {
+        let store = makeStore()
+        var state = DataStore.defaultState()
+        let linkId = UUID()
+        var link = Link(id: linkId, title: "A", url: "https://a.com", faviconPath: nil)
+        link.scheduledOpenAt = Date(timeIntervalSinceNow: -3600)
+        state.profiles[0].favorites = [link]
+        store.save(state)
+        let model = AppModel(store: store)
+        defer { expectPersisted(model, in: store) }
+
+        model.unpinLink(id: linkId)
+        #expect(model.currentProfile.favorites.isEmpty)
+        guard case .link(let unpinned) = try #require(model.currentWorkspace.items.last) else {
+            Issue.record("Expected the unpinned link at the root")
+            return
+        }
+        #expect(unpinned.id == linkId)
+        #expect(unpinned.scheduledOpenAt == nil)
+        #expect(model.allScheduledLinks().isEmpty)
+    }
+
     @Test func testPinLinkMaximum() {
         let store = makeStore()
         store.save(DataStore.defaultState())
@@ -721,7 +774,7 @@ import Testing
         #expect(!encoded.contains("browserBundleId"))
     }
 
-    /// Phase 2 fields are optional: a v2 file written before them still decodes,
+    /// The tab-focus fields are optional: a v2 file written before them still decodes,
     /// and nil values are left out of the JSON (no schema bump).
     @Test func testTabFocusFieldsAreOptionalInJSON() throws {
         let linkJSON = #"{"id": "00000000-0000-0000-0000-000000000021", "title": "T", "url": "https://t.com"}"#

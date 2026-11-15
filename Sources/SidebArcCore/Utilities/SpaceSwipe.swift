@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Pure decisions behind the space transition (Phase 3a.5): whether a released
+/// Pure decisions behind the space transition: whether a released
 /// swipe switches, the rubber-band past the first and last space, and the spring
 /// that settles the page. No AppKit, so it is unit-tested directly.
 enum SpaceSwipe {

@@ -2,7 +2,7 @@ import AppKit
 import Testing
 @testable import SidebArcCore
 
-/// 3b.1 option B: the sidebar attaches to whichever profile browser (or the global
+/// The sidebar attaches to whichever profile browser (or the global
 /// default) is frontmost.
 @MainActor
 @Suite struct WindowAttachmentBrowsersTests {

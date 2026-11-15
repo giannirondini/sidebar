@@ -786,6 +786,58 @@ import Testing
         }
     }
 
+    // MARK: - Cycles in childrenIds (corrupt files)
+
+    /// The tree as indented lines: `Folder/` for a folder, the URL for a link.
+    private func outline(_ nodes: [Node], depth: Int = 0) -> [String] {
+        let indent = String(repeating: "  ", count: depth)
+        return nodes.flatMap { node -> [String] in
+            switch node {
+            case .link(let link): return ["\(indent)\(link.url)"]
+            case .folder(let folder): return ["\(indent)\(folder.name)/"] + outline(folder.children, depth: depth + 1)
+            case .note: return ["\(indent)note"]
+            }
+        }
+    }
+
+    /// An item listing itself, A → B → A, and a container listing itself: each
+    /// repeated edge is dropped, every item and link is kept, nothing recurses forever.
+    @Test func testCyclicChildrenIdsDropOnlyTheRepeatedEdge() async throws {
+        var space = createSpace(id: "s1", title: "Loops")
+        space["profile"] = ["default": true]
+        let favContainer: [String: Any?] = [
+            "id": "fav", "title": nil, "parentID": nil, "childrenIds": ["fav", "f1"],
+            "data": ["itemContainer": ["containerType": ["topApps": ["_0": ["default": true]]]]]
+        ]
+        let items: [[String: Any?]] = [
+            createFolderItem(id: "container1", parentID: "", title: nil, childrenIds: ["container1", "a", "self", "top"]),
+            createFolderItem(id: "a", parentID: "container1", title: "A", childrenIds: ["b", "linkA"]),
+            createFolderItem(id: "b", parentID: "a", title: "B", childrenIds: ["a", "linkB"]),
+            createFolderItem(id: "self", parentID: "container1", title: "Self", childrenIds: ["self", "linkS"]),
+            createLinkItem(id: "linkA", parentID: "a", savedTitle: "A", savedURL: "https://a.com"),
+            createLinkItem(id: "linkB", parentID: "b", savedTitle: "B", savedURL: "https://b.com"),
+            createLinkItem(id: "linkS", parentID: "self", savedTitle: "S", savedURL: "https://s.com"),
+            createLinkItem(id: "top", parentID: "container1", savedTitle: "Top", savedURL: "https://top.com"),
+            favContainer,
+            createLinkItem(id: "f1", parentID: "fav", savedTitle: "Fav", savedURL: "https://fav.com"),
+        ]
+        let result = try await importJSON(createArcJSON(spaces: [space], items: items, topApps: [["default": true], "fav"]))
+
+        let workspace = try #require(result.workspaces.first)
+        #expect(outline(workspace.nodes) == [
+            "A/",
+            "  B/",
+            "    https://b.com",
+            "  https://a.com",
+            "Self/",
+            "  https://s.com",
+            "https://top.com"
+        ])
+        #expect(result.linksImported == 4)
+        #expect(result.foldersImported == 3)
+        #expect(result.profiles.first?.favorites.map(\.url) == ["https://fav.com"])
+    }
+
     // MARK: - Profiles and favorites (topAppsContainerIDs)
 
     private func importJSON(_ data: Data) async throws -> ArcImportResult {

@@ -1,7 +1,7 @@
 import AppKit
 import os
 
-/// One space switch in progress (Phase 3a.5).
+/// One space switch in progress.
 ///
 /// The page being left and the page being revealed are drawn as images on the
 /// `SpacePageStage` (the live page is hidden meanwhile) and move by the same offset:

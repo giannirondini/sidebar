@@ -10,6 +10,7 @@
 #   APPLE_EVENTS_USAGE  `NSAppleEventsUsageDescription` from `[apps.<name>.plist]`
 #
 # Signing: dev_sign (self-signed LOCAL_SIGNING_IDENTITY from .signing-config, else ad-hoc).
+# Releases: the leaf certificate's SHA-256 must match scripts/release-signing-cert.sha256.
 #
 # Swift mirrors APP_NAME and BUNDLE_ID in `AppIdentity` (Constants.swift);
 # AppIdentityTests fails if they drift.
@@ -96,9 +97,14 @@ plist_set() {
     fi
 }
 
-# patch_info_plist [version]: swift-bundler doesn't always merge Bundler.toml's plist
-# values, so set the identifier, version strings and usage descriptions explicitly.
-# Without NSAppleEventsUsageDescription macOS denies Apple Events without a prompt.
+# Info.plist key naming the build configuration (release or debug). Set before
+# signing, so the signature seals it; create-dmg.sh packages only "release".
+BUILD_CONFIGURATION_KEY="SidebArcBuildConfiguration"
+
+# patch_info_plist <version> <release|debug>: swift-bundler doesn't always merge
+# Bundler.toml's plist values, so set the identifier, version strings and usage
+# descriptions explicitly. Without NSAppleEventsUsageDescription macOS denies Apple
+# Events without a prompt.
 patch_info_plist() {
     plist_set "$INFO_PLIST" CFBundleIdentifier "$BUNDLE_ID"
     if [ -n "$1" ]; then
@@ -106,6 +112,31 @@ patch_info_plist() {
         plist_set "$INFO_PLIST" CFBundleVersion "$1"
     fi
     plist_set "$INFO_PLIST" NSAppleEventsUsageDescription "$APPLE_EVENTS_USAGE"
+    plist_set "$INFO_PLIST" "$BUILD_CONFIGURATION_KEY" "$2"
+}
+
+# run_codesign <codesign args…>: runs codesign unpiped (its exit status counts),
+# hiding only the "replacing existing signature" notice. Exits on failure.
+run_codesign() {
+    local output
+    if ! output=$(codesign "$@" 2>&1); then
+        echo "$output" >&2
+        echo "❌ codesign failed" >&2
+        exit 1
+    fi
+    if [ -n "$output" ]; then
+        echo "$output" | grep -v "replacing existing signature" || true
+    fi
+}
+
+# verify_signature: the whole bundle, nested code included, must verify strictly.
+verify_signature() {
+    local output
+    if ! output=$(codesign --verify --deep --strict "$APP_BUNDLE" 2>&1); then
+        echo "$output" >&2
+        echo "❌ The signature of $APP_BUNDLE doesn't verify (codesign --verify --deep --strict)" >&2
+        exit 1
+    fi
 }
 
 # Ad-hoc signature, the fallback when no local identity is configured. The default
@@ -114,9 +145,33 @@ patch_info_plist() {
 # Accessibility). Pinning the requirement to the bundle id keeps them across rebuilds,
 # but on that Mac any binary with that identifier would match the grants.
 adhoc_sign() {
-    codesign --force --deep --sign - \
+    run_codesign --force --deep --sign - \
         -r="designated => identifier \"$BUNDLE_ID\"" \
-        "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+        "$APP_BUNDLE"
+    verify_signature
+}
+
+# The certificate every release must be signed with: the SHA-256 of its DER
+# encoding, in scripts/release-signing-cert.sha256 (committed: the hash is public,
+# and it must survive a lost .signing-config). Prints it in lower case, or nothing.
+RELEASE_CERT_FILE="$PROJECT_ROOT/scripts/release-signing-cert.sha256"
+expected_release_cert_sha256() {
+    [ -f "$RELEASE_CERT_FILE" ] || return 0
+    sed -e 's/#.*//' -e 's/[[:space:]]//g' "$RELEASE_CERT_FILE" | grep -v '^$' | head -1 | tr '[:upper:]' '[:lower:]'
+}
+
+# leaf_cert_sha256 <app>: SHA-256 of the leaf certificate in the app's signature,
+# in lower case; nothing for an ad-hoc or unsigned app. The certificate's name is
+# not enough: a recreated certificate can have the same name and a new key, and a
+# release signed with it would reset every user's privacy grants.
+leaf_cert_sha256() {
+    local dir hash=""
+    dir=$(mktemp -d "${TMPDIR:-/tmp}/sidebarc-cert.XXXXXX") || return 0
+    if codesign -d --extract-certificates="$dir/cert" "$1" >/dev/null 2>&1 && [ -s "$dir/cert0" ]; then
+        hash=$(shasum -a 256 "$dir/cert0" | cut -d' ' -f1 | tr '[:upper:]' '[:lower:]')
+    fi
+    rm -rf "$dir"
+    echo "$hash"
 }
 
 # LOCAL_SIGNING_IDENTITY: the name of a self-signed code-signing certificate in the
@@ -149,11 +204,13 @@ dev_sign() {
         echo "   LOCAL_SIGNING_IDENTITY / remove .signing-config to sign ad-hoc." >&2
         exit 1
     fi
-    codesign --force --deep --timestamp=none \
+    run_codesign --force --deep --timestamp=none \
         --sign "$LOCAL_SIGNING_IDENTITY" \
-        "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
-    if ! codesign -dvv "$APP_BUNDLE" 2>&1 | grep -qF "Authority=$LOCAL_SIGNING_IDENTITY"; then
-        echo "❌ Signing with \"$LOCAL_SIGNING_IDENTITY\" failed (see the codesign output above)" >&2
+        "$APP_BUNDLE"
+    verify_signature
+    # The first Authority line is the leaf certificate; the name must match exactly.
+    if [ "$(codesign -dvv "$APP_BUNDLE" 2>&1 | grep -m1 '^Authority=')" != "Authority=$LOCAL_SIGNING_IDENTITY" ]; then
+        echo "❌ The app isn't signed by \"$LOCAL_SIGNING_IDENTITY\" (see the codesign output above)" >&2
         exit 1
     fi
     SIGNED_WITH="self-signed identity \"$LOCAL_SIGNING_IDENTITY\""

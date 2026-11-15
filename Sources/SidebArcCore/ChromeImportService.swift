@@ -92,103 +92,110 @@ final class ChromeImportService: Sendable {
 
     // MARK: - Private Methods
 
-    /// Parse Chrome bookmarks HTML using a line-by-line scanner with stack-based nesting
+    /// Top-level Chrome folders whose contents go straight to the root.
+    private static let topLevelFolderNames: Set<String> = ["Bookmarks bar", "Other bookmarks", "Mobile bookmarks", "Bookmarks Bar"]
+
+    /// Parses a Netscape bookmark file with one scan over its tags, in document
+    /// order, so line breaks don't matter (a minified one-line file works) and
+    /// `HREF` may be anywhere among the link's attributes.
+    ///
+    /// `<H3>` names a folder whose contents are the next `<DL>`; `</DL>` closes the
+    /// innermost `<DL>`, and only one that opened a folder closes that folder.
+    /// Malformed files lose no links: an `<H3>` without its `<DL>` becomes an empty
+    /// folder, a stray `</DL>` is ignored, and folders still open at the end of
+    /// the file (missing `</DL>`) are closed into their parents.
     private func parseBookmarksHTML(_ content: String) throws -> [Node] {
-        // Regex patterns for matching bookmark elements
-        let folderPattern = try NSRegularExpression(pattern: "<DT><H3[^>]*>(.*?)</H3>", options: .caseInsensitive)
-        let linkPattern = try NSRegularExpression(pattern: "<DT><A\\s+HREF=\"([^\"]*)\"[^>]*>(.*?)</A>", options: .caseInsensitive)
-        let dlOpenPattern = try NSRegularExpression(pattern: "<DL>", options: .caseInsensitive)
-        let dlClosePattern = try NSRegularExpression(pattern: "</DL>", options: .caseInsensitive)
+        // An attribute list that may contain `>` inside quoted values.
+        let attributes = #"((?:\s+[^\s=>"']+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*)\s*"#
+        let tokenPattern = try NSRegularExpression(
+            pattern: #"<H3\b[^>]*>([^<]*)(?:</H3\s*>)?|<A\b"# + attributes + #">([^<]*)|<DL\b[^>]*>|</DL\s*>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        let hrefPattern = try NSRegularExpression(
+            pattern: #"(?:^|\s)HREF\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#,
+            options: .caseInsensitive
+        )
 
-        // Stack-based parsing: each level is an array of nodes being built
-        var stack: [[Node]] = [[]]
-        // Track folder names so we can assign them when popping
-        var folderNameStack: [String] = []
-        // Track whether the last item was a folder header (next <DL> belongs to it)
-        var pendingFolder = false
-        // Track top-level folder names to flatten them
-        let topLevelFolderNames: Set<String> = ["Bookmarks bar", "Other bookmarks", "Mobile bookmarks", "Bookmarks Bar"]
+        struct Level {
+            let folderName: String?
+            var nodes: [Node] = []
+        }
+        // The root, then one level per open folder.
+        var levels = [Level(folderName: nil)]
+        // One entry per open <DL>: whether it opened a folder level.
+        var openLists: [Bool] = []
+        var pendingFolderName: String?
 
-        let lines = content.components(separatedBy: .newlines)
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let range = NSRange(trimmed.startIndex..., in: trimmed)
-
-            // Check for folder header: <DT><H3...>Name</H3>
-            if let folderMatch = folderPattern.firstMatch(in: trimmed, range: range) {
-                let nameRange = Range(folderMatch.range(at: 1), in: trimmed)!
-                let folderName = decodeHTMLEntities(String(trimmed[nameRange]))
-                folderNameStack.append(folderName)
-                pendingFolder = true
-                continue
+        func closeLevel() {
+            let level = levels.removeLast()
+            let name = level.folderName ?? "Untitled Folder"
+            if levels.count == 1 && Self.topLevelFolderNames.contains(name) {
+                levels[0].nodes.append(contentsOf: level.nodes)
+            } else {
+                let folder = Folder(id: UUID(), name: name, children: level.nodes, isExpanded: false)
+                levels[levels.count - 1].nodes.append(.folder(folder))
             }
+        }
 
-            // Check for link: <DT><A HREF="url"...>Title</A>
-            if let linkMatch = linkPattern.firstMatch(in: trimmed, range: range) {
-                let urlRange = Range(linkMatch.range(at: 1), in: trimmed)!
-                let titleRange = Range(linkMatch.range(at: 2), in: trimmed)!
-                let urlString = String(trimmed[urlRange])
-                var title = decodeHTMLEntities(String(trimmed[titleRange]))
+        // A folder heading not followed by its <DL> is kept as an empty folder.
+        func flushPendingFolder() {
+            guard let name = pendingFolderName else { return }
+            pendingFolderName = nil
+            levels.append(Level(folderName: name))
+            closeLevel()
+        }
 
+        func capture(_ match: NSTextCheckingResult, _ index: Int, in string: String) -> String? {
+            Range(match.range(at: index), in: string).map { String(string[$0]) }
+        }
+
+        let fullRange = NSRange(content.startIndex..., in: content)
+        for match in tokenPattern.matches(in: content, range: fullRange) {
+            guard let token = capture(match, 0, in: content) else { continue }
+
+            if let folderName = capture(match, 1, in: content) {
+                flushPendingFolder()
+                pendingFolderName = decodeHTMLEntities(folderName.trimmingCharacters(in: .whitespacesAndNewlines))
+            } else if let attributeList = capture(match, 2, in: content) {
+                flushPendingFolder()
+                let attributeRange = NSRange(attributeList.startIndex..., in: attributeList)
+                guard let hrefMatch = hrefPattern.firstMatch(in: attributeList, range: attributeRange) else { continue }
+                let urlString = (1...3).lazy.compactMap { capture(hrefMatch, $0, in: attributeList) }.first ?? ""
+                var title = decodeHTMLEntities((capture(match, 3, in: content) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
                 if title.isEmpty {
                     title = "Untitled"
                 }
-
                 if urlString.isEmpty ||
                     urlString.hasPrefix("javascript:") ||
                     urlString.hasPrefix("chrome://") ||
                     URL(string: urlString) == nil {
                     continue
                 }
-
-                let link = Link(
-                    id: UUID(),
-                    title: title,
-                    url: urlString,
-                    faviconPath: nil
-                )
-                stack[stack.count - 1].append(.link(link))
-                continue
-            }
-
-            // Check for <DL> - begin folder contents
-            if dlOpenPattern.firstMatch(in: trimmed, range: range) != nil {
-                if pendingFolder {
-                    // This <DL> belongs to the pending folder
-                    stack.append([])
-                    pendingFolder = false
+                let link = Link(id: UUID(), title: title, url: urlString, faviconPath: nil)
+                levels[levels.count - 1].nodes.append(.link(link))
+            } else if token.hasPrefix("</") {
+                flushPendingFolder()
+                guard let openedFolder = openLists.popLast() else { continue }
+                if openedFolder {
+                    closeLevel()
                 }
-                // If no pending folder, this is a top-level or structural <DL> - ignore
-                continue
-            }
-
-            // Check for </DL> - end folder contents
-            if dlClosePattern.firstMatch(in: trimmed, range: range) != nil {
-                if stack.count > 1 && !folderNameStack.isEmpty {
-                    let children = stack.removeLast()
-                    let folderName = folderNameStack.removeLast()
-
-                    // Check if this is a top-level Chrome folder to flatten
-                    if stack.count == 1 && topLevelFolderNames.contains(folderName) {
-                        // Flatten: add children directly to parent level
-                        stack[stack.count - 1].append(contentsOf: children)
-                    } else {
-                        let folder = Folder(
-                            id: UUID(),
-                            name: folderName,
-                            children: children,
-                            isExpanded: false
-                        )
-                        stack[stack.count - 1].append(.folder(folder))
-                    }
-                }
-                continue
+            } else if let name = pendingFolderName {
+                // <DL>: the contents of the folder just named.
+                pendingFolderName = nil
+                levels.append(Level(folderName: name))
+                openLists.append(true)
+            } else {
+                // <DL> without a heading (the root list): structure only.
+                openLists.append(false)
             }
         }
 
-        // Return the root-level nodes
-        return stack.first ?? []
+        // Missing </DL>s: close what's still open into its parent.
+        flushPendingFolder()
+        while levels.count > 1 {
+            closeLevel()
+        }
+        return levels[0].nodes
     }
 
     /// Decode common HTML entities in a string

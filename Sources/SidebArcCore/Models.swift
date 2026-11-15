@@ -10,7 +10,7 @@ struct AppState: Codable, Equatable {
     var workspaces: [Workspace]
     var selectedWorkspaceId: UUID?
     // Whether Settings is shown is runtime state (`AppModel.isSettingsShown`), not saved.
-    // Files written before Phase 3a still carry an `isSettingsSelected` key; it is ignored.
+    // Files written when Settings was a saved selection still carry an `isSettingsSelected` key; it is ignored.
 
     init(
         schemaVersion: Int = AppState.currentSchemaVersion,

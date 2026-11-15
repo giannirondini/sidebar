@@ -63,7 +63,7 @@ Anything else (an empty folder, a tab without a usable URL, other item kinds) is
 1. **Decode** `ArcData`. A JSON error → `invalidJSON`; no container with `spaces` and `items` → `noDataContainer`.
 2. **Item map**: `items` objects by id.
 3. **Spaces**, in Arc's order: find the pinned container, build its tree, skip the space if the tree is empty, name it (`title`, or "Untitled"; duplicates become "Work 2", "Work 3", …) and give it a colour by its index in Arc's space list (`ember`, `ruby`, `coral`, `tangerine`, `moss`, `ocean`, `indigo`, `graphite`, then repeat).
-4. **Tree** (`buildNodeHierarchy`): when the parent is in the item map and has `childrenIds`, its children are those ids **in that order** (Arc's order). Otherwise (a container missing from `items`) the children are the items whose `parentID` is the parent, minus any item listed in some folder's `childrenIds`, so nothing appears twice. Folders recurse.
+4. **Tree** (`buildNodeHierarchy`): when the parent is in the item map and has `childrenIds`, its children are those ids **in that order** (Arc's order). Otherwise (a container missing from `items`) the children are the items whose `parentID` is the parent, minus any item listed in some folder's `childrenIds`, so nothing appears twice. Folders recurse, skipping any child already on the path from the root (an item listing itself, or A → B → A in a corrupt file): only that edge is dropped, so the import can't recurse forever.
 5. **Favorites** (`convertFavorites`): `topAppsContainerIDs` alternates `[profile, containerId, …]`. Each container's tree is flattened to its links, in order, giving one `ImportProfile` per Arc profile with at least one favorite. A missing or malformed list imports no favorites.
 
 ### Arc profiles
@@ -120,7 +120,7 @@ Favicons are not copied from Arc. Links are created with `faviconPath: nil`, and
 
 ## Tests
 
-`ArcImportTests` covers null titles and URLs, `childrenIds` ordering and deep nesting, the `parentID` fallback, `containerIDs` with unpinned before pinned, favorites per profile, custom profile keys, malformed `topAppsContainerIDs` and spaces without `profile`. The opt-in `SIDEBARC_ARC_FIXTURE` test runs against a **copy** of a real `StorableSidebar.json` and prints counts only.
+`ArcImportTests` covers null titles and URLs, `childrenIds` ordering and deep nesting, the `parentID` fallback, `containerIDs` with unpinned before pinned, favorites per profile, custom profile keys, malformed `topAppsContainerIDs`, spaces without `profile` and cycles in `childrenIds`. The opt-in `SIDEBARC_ARC_FIXTURE` test runs against a **copy** of a real `StorableSidebar.json` and prints counts only.
 
 ## Arc versions
 

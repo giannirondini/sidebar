@@ -1107,7 +1107,7 @@ final class SettingsContentViewController: NSViewController {
         reloadWorkspaces()
     }
 
-    // MARK: - Export / Import Data (Phase 3b.3)
+    // MARK: - Export / Import Data
 
     /// How long a successful import or export message stays.
     private static let importStatusDuration: TimeInterval = 5

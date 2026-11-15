@@ -2,7 +2,7 @@ import AppKit
 import Testing
 @testable import SidebArcCore
 
-/// The window root (Phase 3b colours): a behind-window blur that stays active when
+/// The window root: a behind-window blur that stays active when
 /// the sidebar isn't key, with the main view filling it.
 @MainActor
 @Suite struct SidebarBackdropTests {

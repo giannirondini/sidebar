@@ -12,7 +12,7 @@ Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file vi
 
 The Netscape Bookmark File format dates back to the 1990s Netscape Navigator browser. It became the de facto standard for bookmark interchange between browsers. Chrome, Firefox, Safari, Edge, Brave, and virtually all browsers support exporting and importing this format.
 
-The format is **not valid XML or XHTML**. It uses a loose, non-standard HTML dialect with unclosed tags and non-standard elements. This is why the parser uses line-by-line regex scanning rather than an XML/HTML parser.
+The format is **not valid XML or XHTML**. It uses a loose, non-standard HTML dialect with unclosed tags and non-standard elements. This is why the parser scans for a few tags with a regex rather than using an XML/HTML parser.
 
 ### Specification Reference
 
@@ -94,73 +94,71 @@ This produces a file typically named `bookmarks_MM_DD_YY.html`.
 
 ## Import Algorithm
 
-### Phase 1: Validation
+### Step 1: Validation
 
 1. Check the file exists on disk
 2. Read as UTF-8 string
 3. Validate the content contains `NETSCAPE-Bookmark-file-1`, `<DL>`, or `<dl>` to confirm it's a bookmark file
 4. If validation fails, return `.invalidHTML` error
 
-### Phase 2: Line-by-Line Parsing
+### Step 2: Tokenizing
 
-The parser uses four regex patterns matched against each line:
-
-```
-Folder:  <DT><H3[^>]*>(.*?)</H3>         → captures folder name
-Link:    <DT><A\s+HREF="([^"]*)"[^>]*>(.*?)</A>  → captures URL and title
-Open:    <DL>                              → begins folder contents
-Close:   </DL>                             → ends folder contents
-```
-
-All patterns use `.caseInsensitive` matching to handle variations.
-
-### Phase 3: Stack-Based Nesting
-
-The parser maintains two parallel stacks:
+The parser scans the whole file once, in document order, for four tokens (one regex, `.caseInsensitive` and `.dotMatchesLineSeparators`):
 
 ```
-stack: [[Node]]        — each level is the array of nodes being built
-folderNameStack: [String]  — folder names awaiting their closing </DL>
+Folder:  <H3 …>Name</H3>    → folder name
+Link:    <A …>Title         → attributes and title (text up to the next tag)
+Open:    <DL …>             → begins a list
+Close:   </DL>              → ends the innermost list
 ```
 
-And a boolean flag:
+Line breaks don't matter: a minified one-line file parses like Chrome's one-element-per-line output, and a link's attributes may span lines. `<DT>` and `<p>` are ignored.
+
+`HREF` is found **anywhere** among the link's attributes, in any case, double-quoted, single-quoted or unquoted. The attribute pattern is quote-aware, so a `>` inside a quoted value (`TAGS="a>b"`) doesn't end the tag. The title is the text after `<A …>` up to the next `<`, so a missing `</A>` can't swallow the next link. `HREF` values are used as written (no entity decoding).
+
+### Step 3: Nesting
+
+The parser keeps a stack of levels, the root first and one per open folder, and a stack of open lists:
 
 ```
-pendingFolder: Bool    — true when a <H3> was just seen (next <DL> belongs to it)
+levels: [Level]        — Level = (folderName, nodes being built); levels[0] is the root
+openLists: [Bool]      — one per open <DL>: whether it opened a folder level
+pendingFolderName      — set by <H3>, consumed by the next <DL>
 ```
 
 #### State Machine
 
 ```
-Initial state:
-  stack = [[]]              (one empty root level)
-  folderNameStack = []
-  pendingFolder = false
+On <H3>Name</H3>:
+  Flush a pending folder (see below)
+  pendingFolderName = Name (entities decoded)
 
-On <DT><H3>Name</H3>:
-  Push "Name" onto folderNameStack
-  Set pendingFolder = true
+On <A … HREF=url …>Title:
+  Flush a pending folder
+  Skip if the URL is empty, javascript:, chrome:// or malformed
+  Append a Link (title entity-decoded, "Untitled" if empty) to the innermost level
 
-On <DT><A HREF="url">Title</A>:
-  Validate URL (skip if empty, javascript:, chrome://, or malformed)
-  Decode HTML entities in title
-  Append Link node to stack.last
+On <DL>:
+  If a folder name is pending: push a level for it, openLists.push(true)
+  Else (the root list):        openLists.push(false)
 
-On <DL> (when pendingFolder == true):
-  Push new empty [] onto stack      (start collecting folder's children)
-  Set pendingFolder = false
+On </DL>:
+  Flush a pending folder
+  Pop openLists (a stray </DL> with nothing open is ignored)
+  If that <DL> opened a folder level: close the level
 
-On <DL> (when pendingFolder == false):
-  Ignore                            (structural/root <DL>)
+Close a level:
+  Pop it; if it's a top-level Chrome folder directly under the root, append its
+  nodes to the root (flatten), else wrap them in a Folder in the parent level
 
-On </DL> (when stack.count > 1):
-  Pop children from stack
-  Pop folderName from folderNameStack
-  If this is a top-level Chrome folder (stack.count == 1 after pop):
-    Flatten: append children directly to stack.last
-  Else:
-    Create Folder node with children, append to stack.last
+Flush a pending folder:
+  An <H3> not followed by its <DL> becomes an empty folder in the current level
+
+At the end of the file:
+  Flush a pending folder, then close every level still open into its parent
 ```
+
+**No link is dropped by a malformed file**: a missing `</DL>` leaves levels open, and they are closed into their parents at the end of the file, so their links land in the folder they were written in.
 
 #### Visual Example
 
@@ -180,30 +178,28 @@ Given this HTML:
 
 Parser trace:
 ```
-Line: <DL>                    → structural, ignore (pendingFolder=false)
-Line: <H3>Bookmarks bar</H3> → folderNameStack=["Bookmarks bar"], pendingFolder=true
-Line: <DL>                    → pendingFolder=true, push [], stack=[[], []]
-Line: <A HREF=a.com>A</A>    → append Link(A) to stack[1]
-Line: <H3>Dev</H3>           → folderNameStack=["Bookmarks bar","Dev"], pendingFolder=true
-Line: <DL>                    → push [], stack=[[], [Link(A)], []]
-Line: <A HREF=b.com>B</A>    → append Link(B) to stack[2]
-Line: </DL>                   → pop children=[Link(B)], name="Dev"
-                                stack.count=2 (not top-level) → create Folder("Dev")
-                                stack=[[], [Link(A), Folder(Dev)]]
-Line: </DL>                   → pop children=[Link(A), Folder(Dev)], name="Bookmarks bar"
-                                stack.count=1 (top-level!) → FLATTEN
-                                stack=[[Link(A), Folder(Dev)]]
-Line: </DL>                   → stack.count=1, no folderNameStack items → skip
+<DL>                    → no pending folder: openLists=[false]
+<H3>Bookmarks bar</H3>  → pending "Bookmarks bar"
+<DL>                    → push level "Bookmarks bar", openLists=[false, true]
+<A HREF=a.com>A         → Link(A) into "Bookmarks bar"
+<H3>Dev</H3>            → pending "Dev"
+<DL>                    → push level "Dev", openLists=[false, true, true]
+<A HREF=b.com>B         → Link(B) into "Dev"
+</DL>                   → close "Dev": Folder(Dev, [B]) into "Bookmarks bar"
+</DL>                   → close "Bookmarks bar": top-level under the root → FLATTEN
+</DL>                   → the root list: nothing to close
 
 Result: [Link(A), Folder(Dev, [Link(B)])]
 ```
 
-### Phase 4: Top-Level Folder Flattening
+Without the last two `</DL>`s the result is the same: both levels are closed at the end of the file.
+
+### Step 4: Top-Level Folder Flattening
 
 The following folder names are recognized as Chrome's structural containers and flattened:
 
 ```swift
-let topLevelFolderNames: Set<String> = [
+static let topLevelFolderNames: Set<String> = [
     "Bookmarks bar",
     "Other bookmarks",
     "Mobile bookmarks",
@@ -211,11 +207,11 @@ let topLevelFolderNames: Set<String> = [
 ]
 ```
 
-Flattening means: when a `</DL>` closes one of these folders and the stack depth would return to the root level (`stack.count == 1` after pop), the folder's children are appended directly to the root rather than being wrapped in a Folder node.
+Flattening means: when one of these folders is closed directly under the root (by its `</DL>` or at the end of the file), its children are appended to the root rather than wrapped in a Folder node.
 
 This ensures the user doesn't see Chrome's internal folder structure in SidebArc. A user with bookmarks in both "Bookmarks bar" and "Other bookmarks" gets all of them at the root level.
 
-### Phase 5: Apply to SidebArc
+### Step 5: Apply to SidebArc
 
 `SettingsContentViewController.applyChromeImport`:
 
@@ -268,10 +264,10 @@ The Netscape Bookmark format has several properties that make XML/HTML parsers a
 1. **Not valid XML**: The `<p>` tags are unclosed, `<DT>` tags are unclosed, and there's no proper root element
 2. **Not valid HTML5**: The DOCTYPE is non-standard (`NETSCAPE-Bookmark-file-1`)
 3. **No need for DOM**: We only need four token types (folder, link, DL open, DL close) — a full DOM is unnecessary overhead
-4. **Predictable line structure**: Chrome always outputs one element per line with consistent formatting
+4. **Few, simple tokens**: four tag types carry all the structure, wherever the line breaks fall
 5. **Zero dependencies**: Regex scanning uses Foundation's `NSRegularExpression`, no third-party libraries needed
 
-The line-by-line regex approach is simple, fast, and robust for this specific format.
+The single-pass regex scan is simple, fast, and tolerant of minified or slightly malformed files.
 
 ## Example: Complete Flow
 
@@ -320,7 +316,7 @@ Space: "Imported Bookmarks" (color: ember)
 |--------|-----------|---------------|
 | Source | Fixed path (`~/Library/.../StorableSidebar.json`) | User-selected HTML file |
 | Format | JSON | Netscape Bookmark HTML |
-| Parser | JSONDecoder + Codable models | Line-by-line regex scanner |
+| Parser | JSONDecoder + Codable models | Single-pass regex tokenizer |
 | Spaces | Multiple (one per Arc space, in the Arc profile's profile) | Single ("Imported Bookmarks", current profile) |
 | Top-level folders | N/A (Arc spaces become spaces) | Flattened into root |
 | Favorites | Per Arc profile (`topAppsContainerIDs`) | None |
@@ -399,7 +395,7 @@ func createBookmarksHTML(body: String) -> String {
 }
 ```
 
-### Test Cases (`ChromeImportTests`, 15)
+### Test Cases (`ChromeImportTests`)
 
 | Test | What It Verifies |
 |------|-----------------|
@@ -418,6 +414,10 @@ func createBookmarksHTML(body: String) -> String {
 | HTML entities in folder names | Entity decoding applies to `<H3>` content too |
 | Entities not double-decoded | `&amp;lt;` stays `&lt;` (`&amp;` is decoded last) |
 | Mixed content | Folders and links at same level, correct order |
+| Missing `</DL>` | Folders left open at the end of the file keep their links, in place |
+| Minified one-line file | Every link and folder imported regardless of line breaks |
+| `HREF` in any position | After other attributes, lower case, single-quoted, unquoted, with a quoted `>` in another attribute |
+| Heading without list, stray `</DL>` | Empty folder kept; a stray close doesn't break the structure |
 
 ## References
 

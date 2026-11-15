@@ -16,7 +16,7 @@ enum TabLocatorError: Error, Equatable {
     case unexpectedReply
 }
 
-/// Lists and focuses a browser's tabs over Apple Events (plan-v2 Phase 2.1–2.2).
+/// Lists and focuses a browser's tabs over Apple Events.
 ///
 /// Calls block until the reply or `timeout`, so call them off the main actor
 /// (`TabFocusService` does). They target a running process by pid, so they never
@@ -47,7 +47,7 @@ enum TabLocators {
         case "com.apple.safari":
             return SafariTabLocator()
         default:
-            // Not verified on a Mac with SidebArc (plan-v2 decisions): Dia and Arc ship
+            // Not verified on a Mac with SidebArc, so not supported: Dia and Arc ship
             // their own dictionaries; Edge, Vivaldi, Canary and Helium aren't installed.
             return nil
         }

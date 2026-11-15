@@ -121,6 +121,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         case .readFailed(let detail):
             reason = "This library could not be read: \(detail)"
             canStartEmpty = false
+        case .migrationCopyFailed(let detail):
+            // The library itself is fine: no backup to restore, nothing to replace.
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Your library could not be upgraded"
+            alert.informativeText = "This library uses an older data format. Before upgrading it, \(AppIdentity.displayName) keeps a copy of it in the Backups folder, and that copy could not be written: \(detail)\n\nNothing was changed: your data is untouched at \(model.dataFileURL.path). Free some disk space or fix the permissions of the Backups folder in the same location, then open \(AppIdentity.displayName) again."
+            alert.addButton(withTitle: "Quit")
+            alert.runModal()
+            return false
         }
 
         NSApp.activate(ignoringOtherApps: true)
@@ -531,7 +541,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         updateWindowConstraints()
     }
 
-    /// Every profile's browser and the global default (3b.1 option B).
+    /// Every profile's browser and the global default: the sidebar attaches to
+    /// whichever of them is frontmost.
     private func attachmentBrowserIds() -> [String] {
         WindowAttachmentService.attachmentBrowserIds(
             profiles: mainViewController?.model.profiles ?? [],

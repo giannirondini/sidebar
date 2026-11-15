@@ -47,9 +47,9 @@ Steps:
 2. Syncs `VERSION` into `Bundler.toml`.
 3. `mint run swift-bundler bundle -c release`.
 4. **Unwraps the nested resource bundle** (`unwrap_nested_resource_bundles`). Swift 6.4's default `swiftbuild` build system already emits the SwiftPM resource bundle as a full macOS bundle, and swift-bundler v3 wraps it again (`…/Contents/Resources/Contents/Resources/NoteEditor`). Without this step the note editor is not found at runtime. `--build-system native` is not a way out: it is deprecated, and its warning on stdout breaks swift-bundler's `--show-bin-path` parsing.
-5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion` and `NSAppleEventsUsageDescription` in Info.plist (`patch_info_plist`; swift-bundler doesn't always merge `[apps.SidebArc.plist]`). Without the usage string macOS denies Apple Events without a prompt, so "switch to open tabs" never works.
-6. Code signs (`dev_sign`, see below): with the self-signed identity named in `.signing-config`, else ad-hoc with the requirement pinned to the bundle id.
-7. Prints the bundle path and size and the next steps. A version argument is written to `VERSION` first. The DMG and release files are `scripts/create-dmg.sh` ([DISTRIBUTION.md › Releasing](DISTRIBUTION.md#releasing)).
+5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion` and `NSAppleEventsUsageDescription` in Info.plist (`patch_info_plist`; swift-bundler doesn't always merge `[apps.SidebArc.plist]`). Without the usage string macOS denies Apple Events without a prompt, so "switch to open tabs" never works. Also sets `SidebArcBuildConfiguration` to `release` (`run.sh` sets `debug`); the signature seals it, and `create-dmg.sh` packages only `release`.
+6. Code signs (`dev_sign`, see below): with the self-signed identity named in `.signing-config`, else ad-hoc with the requirement pinned to the bundle id. A codesign failure stops the build, and the result must pass `codesign --verify --deep --strict`.
+7. Prints the certificate's SHA-256 (with a warning if it isn't the release certificate in `scripts/release-signing-cert.sha256`), the bundle path and size and the next steps. The build is arm64 only (Apple silicon). A version argument is written to `VERSION` first. The DMG and release files are `scripts/create-dmg.sh` ([DISTRIBUTION.md › Releasing](DISTRIBUTION.md#releasing)).
 
 **Output**: `.build/bundler/SidebArc.app` (executable `Contents/MacOS/SidebArc`).
 
@@ -103,7 +103,14 @@ Setup, once, on the Mac that builds:
    tccutil reset Accessibility io.github.giannirondini.sidebarc
    tccutil reset AppleEvents io.github.giannirondini.sidebarc
    ```
-6. **Back it up.** Keychain Access › My Certificates › the certificate › Export… as `.p12` (certificate + private key). A new certificate has a new hash, so every Mac would have to re-grant once.
+6. **Back it up.** Keychain Access › My Certificates › the certificate › Export… as `.p12` (certificate + private key), **outside the repository** (a password manager or an encrypted volume; `.gitignore` also ignores `*.p12`, `*.pfx`, `*.pem`, `*.cer`, `*.key` and `.env` as a safety net). A new certificate has a new hash, so every Mac would have to re-grant once.
+7. **Record the release certificate.** `create-dmg.sh` compares the leaf certificate's SHA-256, not its name (a recreated certificate can have the same name), with `scripts/release-signing-cert.sha256` (committed; the hash is public). `build.sh` prints the hash of the certificate it signed with; check it against the keychain from the repo root (it must print exactly one line; two mean a recreated certificate with the same name) and put it in that file:
+
+   ```bash
+   (source ./.signing-config && security find-certificate -a -c "$LOCAL_SIGNING_IDENTITY" -Z | awk '/^SHA-256 hash:/ {print tolower($3)}')
+   ```
+
+   Change the file only on purpose: a new certificate resets every user's grants.
 
 ### Ad-hoc (fallback)
 

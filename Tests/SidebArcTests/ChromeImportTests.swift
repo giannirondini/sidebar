@@ -539,6 +539,135 @@ struct ChromeImportTests {
             Issue.record("Import should succeed: \(error)")
         }
     }
+
+    // MARK: - Malformed and minified files
+
+    /// Imports `html` and returns the result, recording an issue on failure.
+    private func importSucceeding(_ html: String) async throws -> ChromeImportResult {
+        let fileURL = try writeTempFile(html)
+        defer { cleanup(fileURL) }
+        switch await ChromeImportService.shared.importFromChrome(fileURL: fileURL) {
+        case .success(let result):
+            return result
+        case .failure(let error):
+            Issue.record("Import should succeed: \(error)")
+            throw error
+        }
+    }
+
+    /// The tree as indented lines: `Folder` for a folder, `title url` for a link.
+    private func outline(_ nodes: [Node], depth: Int = 0) -> [String] {
+        let indent = String(repeating: "  ", count: depth)
+        return nodes.flatMap { node -> [String] in
+            switch node {
+            case .link(let link): return ["\(indent)\(link.title) \(link.url)"]
+            case .folder(let folder): return ["\(indent)\(folder.name)/"] + outline(folder.children, depth: depth + 1)
+            case .note: return ["\(indent)note"]
+            }
+        }
+    }
+
+    @Test("Folders left open by missing </DL> keep their links")
+    func testMissingClosingListKeepsLinks() async throws {
+        let html = """
+        <!DOCTYPE NETSCAPE-Bookmark-file-1>
+        <H1>Bookmarks</H1>
+        <DL><p>
+            <DT><H3>Bookmarks bar</H3>
+            <DL><p>
+                <DT><A HREF="https://top.com">Top</A>
+                <DT><H3>Work</H3>
+                <DL><p>
+                    <DT><A HREF="https://a.com">A</A>
+                    <DT><H3>Deep</H3>
+                    <DL><p>
+                        <DT><A HREF="https://b.com">B</A>
+        """
+        let result = try await importSucceeding(html)
+        #expect(outline(result.workspace.nodes) == [
+            "Top https://top.com",
+            "Work/",
+            "  A https://a.com",
+            "  Deep/",
+            "    B https://b.com"
+        ])
+        #expect(result.linksImported == 3)
+        #expect(result.foldersImported == 2)
+    }
+
+    @Test("A minified one-line file imports every link and folder")
+    func testMinifiedSingleLineFile() async throws {
+        let html = #"<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><H3>Bookmarks bar</H3><DL><p><DT><A HREF="https://a.com">A</A><DT><H3>Sub</H3><DL><p><DT><A HREF="https://b.com">B</A></DL><p><DT><A HREF="https://c.com">C</A></DL><p></DL><p>"#
+        let result = try await importSucceeding(html)
+        #expect(outline(result.workspace.nodes) == [
+            "A https://a.com",
+            "Sub/",
+            "  B https://b.com",
+            "C https://c.com"
+        ])
+    }
+
+    @Test("HREF is found among the attributes in any order, case and quoting")
+    func testHrefAttributeInAnyPosition() async throws {
+        let html = createBookmarksHTML(body: """
+            <DT><A ADD_DATE="1" HREF="https://first.com" ICON="data:image/png;base64,AAA=">First</A>
+            <DT><a add_date="2" href='https://single.com'>Single</a>
+            <DT><A TAGS="a>b" HREF="https://quoted-gt.com">Quoted gt</A>
+            <DT><A
+                ADD_DATE="3"
+                HREF=https://unquoted.com>Unquoted</A>
+            <DT><A DATA-HREF="https://not-a-link.com" HREF="https://real.com">Real</A>
+        """)
+        let result = try await importSucceeding(html)
+        #expect(outline(result.workspace.nodes) == [
+            "First https://first.com",
+            "Single https://single.com",
+            "Quoted gt https://quoted-gt.com",
+            "Unquoted https://unquoted.com",
+            "Real https://real.com"
+        ])
+    }
+
+    @Test("A heading missing </H3> doesn't swallow the links after it")
+    func testHeadingWithoutClosingTag() async throws {
+        let html = createBookmarksHTML(body: """
+            <DT><H3>Broken
+            <DL><p>
+                <DT><A HREF="https://x.com">X</A>
+            </DL><p>
+            <DT><H3>Later</H3>
+            <DL><p>
+                <DT><A HREF="https://y.com">Y</A>
+            </DL><p>
+        """)
+        let result = try await importSucceeding(html)
+        #expect(outline(result.workspace.nodes) == [
+            "Broken/",
+            "  X https://x.com",
+            "Later/",
+            "  Y https://y.com"
+        ])
+    }
+
+    @Test("A folder heading without its list and a stray </DL> keep the structure")
+    func testHeadingWithoutListAndStrayClose() async throws {
+        let html = createBookmarksHTML(body: """
+            <DT><H3>Empty</H3>
+            <DT><H3>Full</H3>
+            <DL><p>
+                <DT><A HREF="https://in.com">In</A>
+            </DL><p>
+            </DL><p>
+            <DT><A HREF="https://after.com">After</A>
+        """)
+        let result = try await importSucceeding(html)
+        #expect(outline(result.workspace.nodes) == [
+            "Empty/",
+            "Full/",
+            "  In https://in.com",
+            "After https://after.com"
+        ])
+    }
 }
 
 // MARK: - Equatable for ChromeImportError (for test assertions)

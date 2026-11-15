@@ -1,7 +1,7 @@
 import Testing
 @testable import SidebArcCore
 
-/// `TabURLMatcher`: which open tab a sidebar link may focus (plan-v2 2.3, 2.7).
+/// `TabURLMatcher`: which open tab a sidebar link may focus.
 @Suite struct TabURLMatcherTests {
     struct Case: CustomTestStringConvertible, Sendable {
         let item: String

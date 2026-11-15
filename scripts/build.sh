@@ -78,12 +78,21 @@ print_success "App bundle built"
 print_step "Patching Info.plist..."
 # swift-bundler doesn't always merge [apps.*.plist] values: set the identifier,
 # version strings and usage descriptions explicitly.
-patch_info_plist "$VERSION"
-print_success "CFBundleIdentifier, version $VERSION, NSAppleEventsUsageDescription"
+patch_info_plist "$VERSION" release
+print_success "CFBundleIdentifier, version $VERSION, NSAppleEventsUsageDescription, $BUILD_CONFIGURATION_KEY=release"
 
 print_step "Code signing..."
 dev_sign
-print_success "Signed: $SIGNED_WITH"
+print_success "Signed: $SIGNED_WITH (codesign --verify --deep --strict passed)"
+
+CERT_SHA256=$(leaf_cert_sha256 "$APP_BUNDLE")
+EXPECTED_CERT_SHA256=$(expected_release_cert_sha256)
+if [ -n "$CERT_SHA256" ]; then
+    print_info "Certificate SHA-256: $CERT_SHA256"
+    if [ -n "$EXPECTED_CERT_SHA256" ] && [ "$CERT_SHA256" != "$EXPECTED_CERT_SHA256" ]; then
+        print_warning "Not the release certificate (scripts/release-signing-cert.sha256): create-dmg.sh will refuse this build"
+    fi
+fi
 
 ###############################################################################
 # Summary

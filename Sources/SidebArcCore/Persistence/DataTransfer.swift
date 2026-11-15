@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Export and import of SidebArc's data, to move it to another Mac (Phase 3b.3).
+/// Export and import of SidebArc's data, to move it to another Mac.
 ///
 /// An export is a folder:
 ///

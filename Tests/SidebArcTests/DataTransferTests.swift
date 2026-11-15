@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import SidebArcCore
 
-/// Export and import (Phase 3b.3). Two temporary data folders stand in for two Macs
+/// Export and import. Two temporary data folders stand in for two Macs
 /// with different home folders; nothing touches the real data directory.
 @Suite struct DataTransferTests {
     private let root: URL

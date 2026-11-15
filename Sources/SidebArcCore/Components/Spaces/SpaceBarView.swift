@@ -8,7 +8,7 @@ import AppKit
 ///
 /// Space icons are centred while they fit and scroll horizontally (with faded edges)
 /// when they don't; the selected one is kept in view. The selection is a separate
-/// pill view behind the icons, so a space switch can slide it (Phase 3a.5).
+/// pill view behind the icons, so a space switch can slide it.
 /// Outside the swipe clip; register it with `SwipeGestureService.addExcludedView`
 /// so a horizontal scroll here scrolls the bar instead of switching spaces.
 @MainActor

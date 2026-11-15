@@ -15,8 +15,9 @@ require_swift_bundler
 mint run swift-bundler bundle
 unwrap_nested_resource_bundles
 
-# Post-build: swift-bundler doesn't always merge plist values
-patch_info_plist "$(tr -d '[:space:]' < VERSION)"
+# Post-build: swift-bundler doesn't always merge plist values. Marked "debug", so
+# create-dmg.sh refuses to package this bundle (same path as the release build).
+patch_info_plist "$(tr -d '[:space:]' < VERSION)" debug
 
 # Self-signed identity from .signing-config if configured, else ad-hoc
 dev_sign

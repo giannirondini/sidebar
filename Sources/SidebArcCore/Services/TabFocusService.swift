@@ -2,9 +2,9 @@ import AppKit
 import os
 
 /// Opens a clicked favorite or list link, focusing an already open matching tab
-/// when `TabFocus.decide` says to look for one (plan-v2 Phase 2). Anything that
-/// goes wrong (no match, no permission, timeout, browser not running) opens the
-/// link normally, exactly as before Phase 2.
+/// when `TabFocus.decide` says to look for one. Anything that goes wrong (no
+/// match, no permission, timeout, browser not running) opens the link normally,
+/// exactly as with tab focus turned off.
 @MainActor
 final class TabFocusService {
     static let shared = TabFocusService()

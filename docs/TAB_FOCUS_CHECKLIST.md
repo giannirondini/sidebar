@@ -22,7 +22,7 @@ Browsers in scope: **Chrome, Brave, Safari** (corporate set). Everything else op
 
 | # | Steps | Expected |
 |---|---|---|
-| A1 | `tccutil reset AppleEvents io.github.giannirondini.sidebarc`, Chrome running, click a favorite whose page is open | A new tab opens (as before Phase 2). **No prompt.** Settings › Permissions › Automation shows the hint and "Google Chrome: not asked yet" |
+| A1 | `tccutil reset AppleEvents io.github.giannirondini.sidebarc`, Chrome running, click a favorite whose page is open | A new tab opens (as with tab focus off). **No prompt.** Settings › Permissions › Automation shows the hint and "Google Chrome: not asked yet" |
 | A2 | Settings › Permissions › **Allow Browser Access…** | macOS asks "SidebArc wants to control Google Chrome". Allow → status "✓ allowed", hint gone |
 | A3 | Click the same favorite | Chrome comes forward on that tab; no new tab |
 | A4 | **Rebuild** (`./scripts/run.sh`), relaunch, click the favorite | Still focuses; no prompt. *If it opens a new tab and Settings says "not asked yet", the bundle-id requirement didn't keep the grant: record it in the plan's Decisions log* |
@@ -76,7 +76,7 @@ Use a favorite and change the open tab's URL.
 | # | Steps | Expected |
 |---|---|---|
 | E1 | Two SidebArc profiles routed to Chrome `Default` and `Profile 1` | Settings › Profiles shows **Switch to open tabs off** for both, with the orange warning |
-| E2 | Click a favorite whose page is open in the other Chrome profile | New tab in the right Chrome profile (as before Phase 2) |
+| E2 | Click a favorite whose page is open in the other Chrome profile | New tab in the right Chrome profile (as with tab focus off) |
 | E3 | Turn the switch on for one profile, repeat E2 | The tab in the **other** Chrome profile is focused: the accepted risk |
 | E4 | Only one SidebArc profile routes to Chrome (or all to the same browser profile) | Switch on by default, no warning |
 

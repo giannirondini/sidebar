@@ -6,6 +6,9 @@ final class DataStore {
         case newerSchema(Int)
         case unreadable(String)
         case readFailed(String)
+        /// An older-schema file was read, but its copy outside the rotating backups
+        /// couldn't be written: nothing may be saved over it until the copy exists.
+        case migrationCopyFailed(String)
     }
 
     struct RecoveryWriteError: LocalizedError {
@@ -72,10 +75,17 @@ final class DataStore {
             if version < 2 {
                 // Persist right away so profile ids are stable across launches, but only
                 // once a copy of the v1 file is safe outside the rotating backups.
-                if writePreMigrationCopy(data, fromVersion: version) {
-                    if save(decoded) {
-                        logger.info("Migrated data.json from schema v\(version) to v2")
-                    }
+                // Without it, block every save: the next mutation would replace the
+                // v1 file, and the rotating backups live in the same folder.
+                do {
+                    try writePreMigrationCopy(data, fromVersion: version)
+                } catch {
+                    loadIssue = .migrationCopyFailed(error.localizedDescription)
+                    logger.error("Failed to write the pre-migration copy; data.json stays untouched: \(error.localizedDescription, privacy: .public)")
+                    return decoded
+                }
+                if save(decoded) {
+                    logger.info("Migrated data.json from schema v\(version) to v2")
                 }
                 return decoded
             }
@@ -93,8 +103,14 @@ final class DataStore {
         guard let loadIssue else {
             throw CocoaError(.fileWriteUnknown)
         }
-        if case .readFailed = loadIssue {
+        switch loadIssue {
+        case .readFailed:
             throw CocoaError(.fileReadNoPermission, userInfo: [NSFilePathErrorKey: dataURL.path])
+        case .migrationCopyFailed:
+            // The library is readable: it only needs its copy, never to be replaced.
+            throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: dataURL.path])
+        case .newerSchema, .unreadable:
+            break
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -231,16 +247,10 @@ final class DataStore {
 
     /// Copies the pre-migration file to `Backups/pre-v<n+1>-migration-<ts>.json`.
     /// The name doesn't start with `data-`, so `pruneBackups` never rotates it away.
-    private func writePreMigrationCopy(_ data: Data, fromVersion version: Int) -> Bool {
+    private func writePreMigrationCopy(_ data: Data, fromVersion version: Int) throws {
         let timestamp = backupTimestampFormatter.string(from: Date())
         let url = backupsDirectory().appendingPathComponent("pre-v\(version + 1)-migration-\(timestamp).json")
-        do {
-            try data.write(to: url, options: [.atomic])
-            return true
-        } catch {
-            logger.error("Failed to write pre-migration copy; keeping the migrated state in memory only: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
+        try data.write(to: url, options: [.atomic])
     }
 
     /// Where an import backs up the current data: `Backups/` and a `pre-import-<ts>`

@@ -25,7 +25,7 @@ SidebArc is a fork of Arcmark (MIT). It runs independently on the same Mac: sepa
 No release has been published yet: for now, [build it from source](#building-from-source). Releases will appear on the [Releases page](https://github.com/giannirondini/sidebarc/releases) as a DMG.
 
 ### System Requirements
-- macOS 13.0 or later
+- macOS 13.0 or later on a Mac with Apple silicon (the DMG is arm64 only; Intel Macs aren't supported)
 - Accessibility permissions (required for browser window attachment); Not needed if you intend to use it as a standalone window.
 
 ## Features
@@ -141,7 +141,7 @@ server inside the app.
 
 ### Prerequisites
 
-- macOS 13.0 or later
+- macOS 13.0 or later on Apple silicon (the scripts build an arm64 app)
 - Swift 6.2 or later (Xcode Command Line Tools are enough)
 - [Mint](https://github.com/yonaskolb/Mint): `brew install mint`
 
@@ -159,8 +159,9 @@ cd sidebarc
 # Build only (creates .build/bundler/SidebArc.app)
 ./scripts/build.sh
 
-# Create the DMG and release files (brew install create-dmg; see scripts/README.md)
-./scripts/create-dmg.sh --allow-adhoc   # without a signing certificate: a local test DMG
+# Create a DMG (brew install create-dmg; see scripts/README.md). Without the
+# release certificate this is a local test DMG in .build/release/<version>-adhoc/
+./scripts/create-dmg.sh --allow-adhoc
 ```
 
 Builds are signed ad-hoc unless you set up a local signing certificate (`.signing-config`), which keeps privacy permissions stable across rebuilds: see [Code signing](docs/BUILD_AND_CODESIGN.md#code-signing).

@@ -53,6 +53,7 @@ fi
 
 echo "   CFBundleName: $(plist_get CFBundleName)"
 echo "   CFBundleShortVersionString: $(plist_get CFBundleShortVersionString)"
+echo "   Build configuration: $(plist_get "$BUILD_CONFIGURATION_KEY" || echo "not set (built by an older script)")"
 
 # Without it macOS denies Apple Events (tab focus) silently, without a prompt.
 if plist_get NSAppleEventsUsageDescription > /dev/null; then
@@ -96,11 +97,11 @@ else
 fi
 echo "   Designated requirement: $(codesign -d -r- "$APP_PATH" 2>&1 | sed -n 's/^designated => //p')"
 
-if codesign --verify --verbose=4 "$APP_PATH" > /dev/null 2>&1; then
+if codesign --verify --deep --strict --verbose=4 "$APP_PATH" > /dev/null 2>&1; then
     echo "✅ Signature is valid"
 else
     fail "Signature is invalid or missing"
-    codesign --verify --verbose=4 "$APP_PATH"
+    codesign --verify --deep --strict --verbose=4 "$APP_PATH"
 fi
 
 echo ""

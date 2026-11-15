@@ -9,7 +9,7 @@ enum LinkClickSource: Equatable, Sendable {
 }
 
 /// The pure part of "focus an open tab instead of opening a duplicate"
-/// (plan-v2 Phase 2): whether to look, and what to do with what was found.
+/// whether to look, and what to do with what was found.
 /// `TabFocusService` runs it against real browsers.
 enum TabFocus {
     enum Decision: Equatable {

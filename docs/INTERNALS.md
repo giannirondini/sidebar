@@ -76,7 +76,7 @@ CustomIcon                    // .emoji(String) | .sfSymbol(String) | .cachedFav
 
 - The UI says "Space"; code, data keys and the agent API keep `workspace`.
 - All models are Codable and use UUID-based identification.
-- Files written before Phase 3a still carry an `isSettingsSelected` key; it is ignored.
+- Files written when Settings was a saved selection still carry an `isSettingsSelected` key; it is ignored.
 
 ### Schema versions
 
@@ -86,11 +86,11 @@ CustomIcon                    // .emoji(String) | .sfSymbol(String) | .cachedFav
 2. A profile's favorites are its spaces' pinned links in space order, deduplicated by normalised URL (`URLNormalization`) and capped at 12.
 3. Duplicates and overflow go into a "Favorites (migrated)" folder at the top of the space they came from. No link is dropped.
 
-The original bytes are first copied to `Backups/pre-v2-migration-<ts>.json`, which the 10-file backup rotation never prunes, then the result is saved. Every load runs `AppState.repaired()` (at least one profile; dangling `profileId`s fall back to the first). The v2 model carries no legacy fields; add a new `SchemaVn` mirror + migration for the next change instead. **Bump `schemaVersion` for every change an older release would lose on save, even a new Optional field**: an older release decodes a same-version file, drops the fields it doesn't know and writes the rest back; it only stops (with the alert below) when the version is newer. A pure Optional addition needs no migration code: the newer decoder reads the previous version's file as it is.
+The original bytes are first copied to `Backups/pre-v2-migration-<ts>.json`, which the 10-file backup rotation never prunes, then the result is saved. If that copy can't be written, nothing is saved over the v1 file (`LoadIssue.migrationCopyFailed`): startup explains why and quits, and the next launch tries again. Every load runs `AppState.repaired()` (at least one profile; dangling `profileId`s fall back to the first). The v2 model carries no legacy fields; add a new `SchemaVn` mirror + migration for the next change instead. **Bump `schemaVersion` for every change an older release would lose on save, even a new Optional field**: an older release decodes a same-version file, drops the fields it doesn't know and writes the rest back; it only stops (with the alert below) when the version is newer. A pure Optional addition needs no migration code: the newer decoder reads the previous version's file as it is.
 
 If the library has a newer schema or cannot be decoded, startup warns and refuses to write it. Quit and update the app or restore a backup. Alternatively, explicitly choose **Start Empty Library**: the original is copied to `data.unreadable-<ts>-<id>.json` beside `data.json` (outside backup rotation) before replacement, and its path is shown. Back up that file and the `Notes/` and `Icons/` folders before importing or making changes. To restore it, quit the app, update if necessary, and replace `data.json` with the preserved file; first back up any new library that must be kept. If the file cannot be read or preserved, the app quits without starting an empty library.
 
-## Export and import (Phase 3b.3)
+## Export and import
 
 Settings › Import & Export › **Export Data…** / **Import Data…** move everything to another Mac (`Persistence/DataTransfer.swift`, `AppModel.exportData`, `AppModel.applyDataImport`).
 

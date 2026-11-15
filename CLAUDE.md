@@ -60,8 +60,8 @@ swift test -Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host
 | Versioning, DMG, releases | [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) |
 | Data flow, data model, mutation pattern, node tree operations, list updates, space colours, search | [docs/INTERNALS.md](docs/INTERNALS.md) |
 | Profiles, Favorites, browser routing, window attachment, browser profiles, Arc import, agent API v2 | [docs/PROFILES_AND_BROWSERS.md](docs/PROFILES_AND_BROWSERS.md) |
-| Switching to open tabs (Phase 2) | [docs/TAB_FOCUS.md](docs/TAB_FOCUS.md), manual checklist [docs/TAB_FOCUS_CHECKLIST.md](docs/TAB_FOCUS_CHECKLIST.md) |
-| Space layout, space bar, header, menu, Settings, transitions, Favorites grid (Phase 3a) | [docs/SPACES.md](docs/SPACES.md) |
+| Switching to open tabs | [docs/TAB_FOCUS.md](docs/TAB_FOCUS.md), manual checklist [docs/TAB_FOCUS_CHECKLIST.md](docs/TAB_FOCUS_CHECKLIST.md) |
+| Space layout, space bar, header, menu, Settings, transitions, Favorites grid | [docs/SPACES.md](docs/SPACES.md) |
 | Base classes, `ThemeConstants`, component patterns | [docs/COMPONENT_USAGE_GUIDE.md](docs/COMPONENT_USAGE_GUIDE.md) |
 | Project structure, architecture overview | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Refactoring history (2026-02-10) | [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md) |

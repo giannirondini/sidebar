@@ -12,3 +12,10 @@ DerivedData/
 
 # Misc
 misc/
+# Signing keys and secrets (export the signing key outside the repo)
+*.p12
+*.pfx
+*.pem
+*.cer
+*.key
+.env

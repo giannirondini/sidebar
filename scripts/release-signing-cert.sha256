@@ -1,0 +1,13 @@
+# SHA-256 of the self-signed certificate that signs every SidebArc release (public).
+# create-dmg.sh refuses an app whose leaf certificate has another hash: a release
+# signed with a different certificate, even one with the same name, would reset
+# every user's Accessibility and Automation grants.
+#
+# Change it only on purpose (a lost key means a new certificate; say so in the
+# release notes). To compute it for a built app:
+#   codesign -d --extract-certificates=/tmp/sidebarc-cert .build/bundler/SidebArc.app
+#   shasum -a 256 /tmp/sidebarc-cert0
+# and cross-check it with the keychain, from the repo root (must print exactly
+# one line, equal to the hash below; two lines mean a recreated certificate):
+#   (source ./.signing-config && security find-certificate -a -c "$LOCAL_SIGNING_IDENTITY" -Z | awk '/^SHA-256 hash:/ {print tolower($3)}')
+bfdc6d4c4dfca18863397d1d0568ea6fa765910088dcc0f6981be8c50c9d2ddd

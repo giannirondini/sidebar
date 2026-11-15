@@ -461,7 +461,7 @@ final class EditableRowView: BaseView {
 
 ## Space Components
 
-The space UI (Phase 3a) lives in `Components/Spaces/`. All three take data, never the
+The space UI lives in `Components/Spaces/`. All three take data, never the
 `AppModel`; `MainViewController` wires their callbacks to model calls.
 
 ### SpaceIconView

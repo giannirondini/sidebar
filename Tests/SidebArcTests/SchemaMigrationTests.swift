@@ -301,6 +301,49 @@ import Testing
         #expect(backupsAfter.filter { $0.lastPathComponent.hasPrefix("pre-v2-migration-") }.count == 1)
     }
 
+    /// Without the pre-migration copy, the v1 file must stay as it is: no save may
+    /// replace it (the rotating backups live in the same unwritable folder).
+    @Test func v1FileIsNeverOverwrittenWhenThePreMigrationCopyFails() throws {
+        let fileManager = FileManager.default
+        let directory = makeTempDirectory()
+        let backups = directory.appendingPathComponent("Backups")
+        let dataURL = directory.appendingPathComponent("data.json")
+        try fileManager.createDirectory(at: backups, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+        let original = v1Data([v1Workspace("A", items: [.link(link("https://b.com"))], pinned: [link("https://a.com")])])
+        try original.write(to: dataURL)
+
+        try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: backups.path)
+        defer { try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backups.path) }
+        // Not vacuous: the folder really refuses writes (it wouldn't for root).
+        try #require(throws: (any Error).self) {
+            try Data("probe".utf8).write(to: backups.appendingPathComponent("probe"))
+        }
+
+        let model = AppModel(store: DataStore(baseDirectory: directory))
+        var copyFailureReported = false
+        if case .migrationCopyFailed = model.dataLoadIssue { copyFailureReported = true }
+        #expect(copyFailureReported, "load issue: \(String(describing: model.dataLoadIssue))")
+        model.renameWorkspace(id: model.currentWorkspace.id, newName: "Changed")
+        #expect(try Data(contentsOf: dataURL) == original)
+        #expect(throws: (any Error).self) { try model.startEmptyLibrary() }
+        #expect(try Data(contentsOf: dataURL) == original)
+
+        // Once Backups/ is writable again, the next launch migrates and keeps the copy.
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backups.path)
+        let store = DataStore(baseDirectory: directory)
+        let relaunched = AppModel(store: store)
+        #expect(relaunched.dataLoadIssue == nil)
+        #expect(relaunched.state.profiles[0].favorites.map(\.url) == ["https://a.com"])
+        let copies = try fileManager.contentsOfDirectory(at: backups, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("pre-v2-migration-") }
+        #expect(copies.count == 1)
+        #expect(try Data(contentsOf: try #require(copies.first)) == original)
+        let saved = try DataStore.decodeState(from: Data(contentsOf: dataURL))
+        #expect(saved.schemaVersion == AppState.currentSchemaVersion)
+        expectPersisted(relaunched, in: store)
+    }
+
     @Test func dataStoreRepairsV2FileMissingProfiles() throws {
         let directory = makeTempDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

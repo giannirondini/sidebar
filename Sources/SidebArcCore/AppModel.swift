@@ -259,7 +259,7 @@ final class AppModel {
         persist()
     }
 
-    // MARK: - Data export and import (Phase 3b.3)
+    // MARK: - Data export and import
 
     /// Writes an export folder of the saved data inside `parent` (`DataTransfer.export`).
     /// Every mutation is saved right away, so `data.json` is the current state.
@@ -760,9 +760,13 @@ final class AppModel {
     }
 
     /// Moves a link from the current space's list into its profile's Favorites.
+    /// Its scheduled reminder is cancelled: the scheduler only watches space lists,
+    /// so it would never fire as a favorite and would fire at once, overdue, if
+    /// the link were unpinned later.
     func pinLink(id: UUID) {
         guard canPinMore else { return }
-        guard let node = nodeById(id), case .link(let link) = node else { return }
+        guard let node = nodeById(id), case .link(var link) = node else { return }
+        link.scheduledOpenAt = nil
         let profileId = currentProfile.id
         guard let profileIndex = state.profiles.firstIndex(where: { $0.id == profileId }),
               let workspaceIndex = state.workspaces.firstIndex(where: { $0.id == currentWorkspace.id }),
@@ -785,7 +789,9 @@ final class AppModel {
     func unpinFavorite(id: UUID, toWorkspaceId workspaceId: UUID) -> Bool {
         guard let (profileIndex, favoriteIndex) = favoriteLocation(id: id),
               let workspaceIndex = state.workspaces.firstIndex(where: { $0.id == workspaceId }) else { return false }
-        let link = state.profiles[profileIndex].favorites.remove(at: favoriteIndex)
+        var link = state.profiles[profileIndex].favorites.remove(at: favoriteIndex)
+        // A favorite has no reminder; one left over from before it was pinned is stale.
+        link.scheduledOpenAt = nil
         state.workspaces[workspaceIndex].items.append(.link(link))
         persist()
         return true

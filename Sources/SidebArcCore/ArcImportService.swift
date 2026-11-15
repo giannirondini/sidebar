@@ -504,25 +504,31 @@ final class ArcImportService: Sendable {
     /// Uses `childrenIds` traversal when the parent item exists in the map (preserves Arc's
     /// canonical ordering and parent-child relationships). Falls back to `parentID` filtering
     /// for the root level where the pinned container itself may not be in the items array.
-    private func buildNodeHierarchy(parentId: String, items: [String: ArcItem]) -> [Node] {
+    ///
+    /// `ancestors` holds the ids on the path from the root to `parentId`. A child that
+    /// is already on that path (an item listing itself, or A → B → A in a corrupt
+    /// file) is skipped: only that edge is dropped, the item stays where it was first
+    /// reached, and the recursion can't overflow the stack.
+    private func buildNodeHierarchy(parentId: String, items: [String: ArcItem], ancestors: Set<String> = []) -> [Node] {
+        let path = ancestors.union([parentId])
         // Determine child items: prefer childrenIds lookup, fall back to parentID filtering
         let childItems: [ArcItem]
         if let parentItem = items[parentId], let childIds = parentItem.childrenIds {
             // Traverse using childrenIds (Arc's canonical ordering)
-            childItems = childIds.compactMap { items[$0] }
+            childItems = childIds.filter { !path.contains($0) }.compactMap { items[$0] }
         } else {
             // Fallback: pinned container may not exist as an item in the map.
             // Exclude items that are claimed by a folder's childrenIds to avoid duplication
             // (an item referenced in a folder's childrenIds belongs inside that folder,
             // even if its parentID points to the container).
             let claimedIds = collectClaimedChildIds(items: items)
-            childItems = items.values.filter { $0.parentID == parentId && !claimedIds.contains($0.id) }
+            childItems = items.values.filter { $0.parentID == parentId && !claimedIds.contains($0.id) && !path.contains($0.id) }
         }
 
         var nodes: [Node] = []
 
         for item in childItems {
-            if let node = convertItemToNode(item, items: items) {
+            if let node = convertItemToNode(item, items: items, ancestors: path) {
                 nodes.append(node)
             }
         }
@@ -545,10 +551,10 @@ final class ArcImportService: Sendable {
     }
 
     /// Convert a single Arc item into a SidebArc Node, recursing into folders.
-    private func convertItemToNode(_ item: ArcItem, items: [String: ArcItem]) -> Node? {
+    private func convertItemToNode(_ item: ArcItem, items: [String: ArcItem], ancestors: Set<String>) -> Node? {
         // Check if it's a folder (has non-empty childrenIds)
         if let childrenIds = item.childrenIds, !childrenIds.isEmpty {
-            let childNodes = buildNodeHierarchy(parentId: item.id, items: items)
+            let childNodes = buildNodeHierarchy(parentId: item.id, items: items, ancestors: ancestors)
             let folder = Folder(
                 id: UUID(),
                 name: item.title ?? "Untitled Folder",
