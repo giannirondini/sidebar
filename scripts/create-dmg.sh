@@ -3,15 +3,13 @@
 # Names come from Bundler.toml (see scripts/lib/app-config.sh).
 #
 # Usage:
-#   ./scripts/create-dmg.sh              # Create DMG without notarization
-#   ./scripts/create-dmg.sh --notarize   # Create and notarize DMG (requires .notarization-config)
+#   ./scripts/create-dmg.sh   # after ./scripts/build.sh; not notarized (see docs/DISTRIBUTION.md)
 
 set -e  # Exit on error
 
-# Parse arguments
-NOTARIZE=false
-if [ "$1" = "--notarize" ]; then
-    NOTARIZE=true
+if [ $# -gt 0 ]; then
+    echo "Usage: $0" >&2
+    exit 1
 fi
 
 echo "📦 Creating DMG installer..."
@@ -213,76 +211,6 @@ echo "✅ DMG created successfully!"
 echo "📦 Output: $DMG_PATH"
 echo "📏 Size: $(du -h "$DMG_PATH" | cut -f1)"
 
-# Notarize if requested
-if [ "$NOTARIZE" = true ]; then
-    echo ""
-    echo "────────────────────────────────────────"
-    echo "📝 Starting notarization..."
-
-    # Check for config file
-    if [ ! -f ".notarization-config" ]; then
-        echo "❌ Error: .notarization-config not found"
-        echo "   See docs/PRODUCTION_SIGNING.md for setup instructions"
-        exit 1
-    fi
-
-    # Load credentials
-    source .notarization-config
-
-    if [ -z "$APPLE_ID" ] || [ -z "$TEAM_ID" ] || [ -z "$APP_PASSWORD" ]; then
-        echo "❌ Error: Missing credentials in .notarization-config"
-        echo "   Required: APPLE_ID, TEAM_ID, APP_PASSWORD"
-        exit 1
-    fi
-
-    echo "  → Submitting to Apple for notarization..."
-    echo "  → This typically takes 2-5 minutes"
-
-    # Submit for notarization and wait
-    SUBMISSION_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
-        --apple-id "$APPLE_ID" \
-        --team-id "$TEAM_ID" \
-        --password "$APP_PASSWORD" \
-        --wait 2>&1)
-
-    echo "$SUBMISSION_OUTPUT"
-
-    # Check if notarization succeeded
-    if echo "$SUBMISSION_OUTPUT" | grep -q "status: Accepted"; then
-        echo ""
-        echo "  ✓ Notarization successful!"
-
-        # Staple the notarization ticket
-        echo "  → Stapling notarization ticket to DMG..."
-        xcrun stapler staple "$DMG_PATH"
-
-        echo "  ✓ Notarization ticket stapled"
-        echo ""
-        echo "✅ DMG is fully notarized and ready for distribution!"
-    else
-        echo ""
-        echo "❌ Notarization failed!"
-        echo ""
-        echo "To see detailed error log:"
-        SUBMISSION_ID=$(echo "$SUBMISSION_OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
-        if [ -n "$SUBMISSION_ID" ]; then
-            echo "  xcrun notarytool log $SUBMISSION_ID \\"
-            echo "    --apple-id \"$APPLE_ID\" \\"
-            echo "    --team-id \"$TEAM_ID\" \\"
-            echo "    --password \"$APP_PASSWORD\""
-        fi
-        exit 1
-    fi
-fi
-
-
 echo ""
 echo "🧪 To test the DMG:"
 echo "   open $DMG_PATH"
-
-if [ "$NOTARIZE" = true ]; then
-    echo ""
-    echo "🔍 To verify notarization:"
-    echo "   spctl -a -vvv -t install $DMG_PATH"
-    echo "   (Should show: source=Notarized Developer ID)"
-fi

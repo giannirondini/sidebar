@@ -96,15 +96,6 @@ else
 fi
 echo "   Designated requirement: $(codesign -d -r- "$APP_PATH" 2>&1 | sed -n 's/^designated => //p')"
 
-# Under the hardened runtime, Apple Events need the entitlement or they fail silently.
-if echo "$CODESIGN_OUTPUT" | grep -q "flags=.*runtime"; then
-    if codesign -d --entitlements - --xml "$APP_PATH" 2>/dev/null | grep -q "com.apple.security.automation.apple-events"; then
-        echo "✅ Hardened runtime with the Apple Events entitlement"
-    else
-        fail "Hardened runtime without com.apple.security.automation.apple-events (tab focus would fail)"
-    fi
-fi
-
 if codesign --verify --verbose=4 "$APP_PATH" > /dev/null 2>&1; then
     echo "✅ Signature is valid"
 else

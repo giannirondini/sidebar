@@ -38,10 +38,8 @@ icon = 'Resources/AppIcon.png'
 ### `scripts/build.sh`
 
 ```bash
-./scripts/build.sh                     # release build, self-signed (.signing-config) or ad-hoc
-./scripts/build.sh --dmg               # + DMG
-./scripts/build.sh --production        # Developer ID signing, hardened runtime
-./scripts/build.sh --production --dmg  # + notarized DMG
+./scripts/build.sh          # release build, self-signed (.signing-config) or ad-hoc
+./scripts/build.sh --dmg    # + DMG
 ```
 
 Steps:
@@ -51,7 +49,7 @@ Steps:
 3. `mint run swift-bundler bundle -c release`.
 4. **Unwraps the nested resource bundle** (`unwrap_nested_resource_bundles`). Swift 6.4's default `swiftbuild` build system already emits the SwiftPM resource bundle as a full macOS bundle, and swift-bundler v3 wraps it again (`…/Contents/Resources/Contents/Resources/NoteEditor`). Without this step the note editor is not found at runtime. `--build-system native` is not a way out: it is deprecated, and its warning on stdout breaks swift-bundler's `--show-bin-path` parsing.
 5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion` and `NSAppleEventsUsageDescription` in Info.plist (`patch_info_plist`; swift-bundler doesn't always merge `[apps.SidebArc.plist]`). Without the usage string macOS denies Apple Events without a prompt, so "switch to open tabs" never works.
-6. Code signs (`dev_sign`, see below): with the self-signed identity named in `.signing-config`, else ad-hoc with the requirement pinned to the bundle id; or Developer ID with `--production` (hardened runtime + `scripts/SidebArc.entitlements`).
+6. Code signs (`dev_sign`, see below): with the self-signed identity named in `.signing-config`, else ad-hoc with the requirement pinned to the bundle id.
 7. Prints the bundle id, version and signing identifier; `--dmg` then calls `scripts/create-dmg.sh`.
 
 **Output**: `.build/bundler/SidebArc.app` (executable `Contents/MacOS/SidebArc`).
@@ -71,7 +69,6 @@ Fails unless all of these hold:
 - Info.plist is valid; `CFBundleIdentifier` equals the `Bundler.toml` identifier; `CFBundleExecutable` equals the app name.
 - `NSAppleEventsUsageDescription` is in Info.plist.
 - The code signature identifier equals the bundle id, and the signature verifies. It also prints who signed it (ad-hoc or the certificate) and the designated requirement.
-- Under the hardened runtime (`--production`), the `com.apple.security.automation.apple-events` entitlement is present.
 - `Contents/MacOS/<app name>` exists.
 - The note editor is at `Contents/Resources/*.bundle/Contents/Resources/NoteEditor/index.html`. The bundle is matched by content, not name, the same rule as `NoteServer.resolveBundledResourcesURL()`. A missing editor once crashed the app at launch, and a double-wrapped bundle silently disables notes.
 - Regression guards: no `SUFeedURL` in Info.plist and no `Sparkle.framework` (the app has no in-app updater).
@@ -89,7 +86,6 @@ Without notarization, Gatekeeper blocks a **downloaded** app whatever its signat
 |---|---|---|---|
 | Self-signed identity (recommended) | Yes | No | Once, on the Mac that builds |
 | Ad-hoc (fallback) | Yes | Yes, any binary with the bundle id on that Mac | None |
-| Developer ID | Yes | No | Paid Apple Developer account |
 
 `dev_sign` (`scripts/lib/app-config.sh`, used by `build.sh` and `run.sh`) uses `LOCAL_SIGNING_IDENTITY` from the environment or `.signing-config`, and falls back to ad-hoc when it's unset. A configured identity that isn't in the keychain stops the build: a silent ad-hoc fallback would change the requirement.
 
@@ -99,7 +95,7 @@ codesign's default requirement for a certificate is the bundle id **and** the ce
 
 Setup, once, on the Mac that builds:
 
-1. Keychain Access › Keychain Access › Certificate Assistant › **Create a Certificate…**: Name `SidebArc Local Signing`, Identity Type **Self-Signed Root**, Certificate Type **Code Signing** › Create. Leave its trust settings alone.
+1. Keychain Access (on macOS 27 it's no longer in Applications: open it with Spotlight, or from `/System/Library/CoreServices/Applications/`) › Keychain Access › Certificate Assistant › **Create a Certificate…**: Name `SidebArc Local Signing`, Identity Type **Self-Signed Root**, Certificate Type **Code Signing** › Create. Leave its trust settings alone.
 2. `cp .signing-config.template .signing-config` (git-ignored) and check the name. `security find-identity -p codesigning` lists it as `CSSMERR_TP_NOT_TRUSTED`, which is expected (`-v` hides it).
 3. Build. The first signature asks to let `codesign` use the key: **Always Allow**.
 4. `./scripts/verify-build.sh` shows `Signed by: SidebArc Local Signing` and the requirement with `certificate leaf`.
@@ -122,9 +118,9 @@ By default an ad-hoc signature's designated requirement is the build's `cdhash`,
 
 Ad-hoc and self-signed builds have no hardened runtime, so they need no entitlements.
 
-### Developer ID (distribution)
+### No Developer ID
 
-`./scripts/build.sh --production` reads `SIGNING_IDENTITY` from `.notarization-config` and signs with `--options runtime --entitlements scripts/SidebArc.entitlements --timestamp`. The entitlement `com.apple.security.automation.apple-events` is required: under the hardened runtime, Apple Events to browsers fail silently without it. Setup: [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+SidebArc is open source and has no paid Apple Developer account, so builds are neither Developer ID-signed nor notarized; downloaded copies need the `xattr` step above ([DISTRIBUTION.md › Installing](DISTRIBUTION.md#installing-for-users)). Adding it later would mean signing with the hardened runtime, which needs the `com.apple.security.automation.apple-events` entitlement (without it Apple Events to browsers fail silently), and submitting the DMG with `notarytool`; the scripts for that were removed on 2026-11-15 and are in the git history.
 
 ## Info.plist as built
 
@@ -194,16 +190,21 @@ The resource bundle was not unwrapped. Rebuild with `./scripts/build.sh` (not a 
 ### SidebArc doesn't appear in Accessibility, or the grant doesn't stick
 
 1. Check the bundle id and the signature identifier match (`./scripts/verify-build.sh`).
-2. Reset the grant and relaunch:
+2. TCC keeps the code requirement from **grant time**; turning the switch off and on doesn't refresh it. After a change of signing identity (e.g. ad-hoc → self-signed) the old grant no longer matches. Reset it, relaunch the current build and grant again:
    ```bash
    tccutil reset Accessibility io.github.giannirondini.sidebarc
    ```
 3. macOS caches the check: quit and relaunch SidebArc, or use "Refresh Status" in Settings.
+4. To see why a grant is rejected, read `tccd`'s log (in zsh, plain `log` is a builtin):
+   ```bash
+   /usr/bin/log show --last 10m --predicate 'process == "tccd" AND eventMessage CONTAINS[c] "sidebarc"'
+   ```
+   `Failed to match existing code requirement` means the stored grant belongs to another signature: reset as in step 2.
 
 ### Clicking a favorite opens a duplicate instead of switching to the open tab
 
 1. Settings › Permissions › Automation shows each profile browser's status. "Not asked yet": click **Allow Browser Access…** with the browser running. "Not allowed": turn it on in System Settings › Privacy & Security › Automation › SidebArc.
-2. `./scripts/verify-build.sh` must show `NSAppleEventsUsageDescription` (and, for `--production`, the Apple Events entitlement).
+2. `./scripts/verify-build.sh` must show `NSAppleEventsUsageDescription`.
 3. Reset the grant to be asked again:
    ```bash
    tccutil reset AppleEvents io.github.giannirondini.sidebarc
@@ -214,4 +215,3 @@ The resource bundle was not unwrapped. Rebuild with `./scripts/build.sh` (not a 
 
 - [Swift Bundler documentation](https://swiftbundler.dev/documentation/swift-bundler/)
 - [Apple: Code Signing Guide](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/)
-- [Apple: Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution)

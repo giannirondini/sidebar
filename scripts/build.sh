@@ -4,26 +4,23 @@
 # Usage:
 #   ./scripts/build.sh                     # Build, signed with the self-signed identity in
 #                                          # .signing-config (ad-hoc if there is none)
-#   ./scripts/build.sh --dmg               # Same, and create a DMG (not notarized)
-#   ./scripts/build.sh --production        # Build with Developer ID signing (production)
-#   ./scripts/build.sh --production --dmg  # Build and create notarized DMG
+#   ./scripts/build.sh --dmg               # Same, and create a DMG
+#
+# Builds aren't notarized (that needs a paid Apple Developer ID), so a downloaded
+# copy needs `xattr -dr com.apple.quarantine` once; see docs/DISTRIBUTION.md.
 
 set -e  # Exit on error
 
 CREATE_DMG=false
-PRODUCTION=false
 
 for arg in "$@"; do
     case $arg in
         --dmg)
             CREATE_DMG=true
             ;;
-        --production)
-            PRODUCTION=true
-            ;;
         *)
             echo "Unknown argument: $arg"
-            echo "Usage: $0 [--production] [--dmg]"
+            echo "Usage: $0 [--dmg]"
             exit 1
             ;;
     esac
@@ -65,36 +62,8 @@ echo "  ✓ NSAppleEventsUsageDescription"
 
 # Code sign the app
 echo "🔏 Code signing app..."
-
-if [ "$PRODUCTION" = true ]; then
-    if [ ! -f ".notarization-config" ]; then
-        echo "❌ Error: .notarization-config not found"
-        echo "   See docs/PRODUCTION_SIGNING.md for setup instructions"
-        exit 1
-    fi
-
-    source .notarization-config
-
-    if [ -z "$SIGNING_IDENTITY" ]; then
-        echo "❌ Error: SIGNING_IDENTITY not set in .notarization-config"
-        exit 1
-    fi
-
-    echo "  → Using Developer ID: $SIGNING_IDENTITY"
-
-    # Sign with hardened runtime for notarization
-    codesign --force --deep \
-        --sign "$SIGNING_IDENTITY" \
-        --options runtime \
-        --entitlements "$ENTITLEMENTS" \
-        --timestamp \
-        "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
-
-    echo "  ✓ Signed with Developer ID (hardened runtime, Apple Events entitlement)"
-else
-    dev_sign
-    echo "  ✓ Signed: $SIGNED_WITH"
-fi
+dev_sign
+echo "  ✓ Signed: $SIGNED_WITH"
 
 echo ""
 echo "✅ Build complete!"
@@ -109,9 +78,5 @@ echo "  Full check: ./scripts/verify-build.sh"
 if [ "$CREATE_DMG" = true ]; then
     echo ""
     echo "────────────────────────────────────────"
-    if [ "$PRODUCTION" = true ]; then
-        ./scripts/create-dmg.sh --notarize
-    else
-        ./scripts/create-dmg.sh
-    fi
+    ./scripts/create-dmg.sh
 fi

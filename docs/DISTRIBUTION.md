@@ -4,7 +4,6 @@ How to version, package and publish SidebArc.
 
 **See also:**
 - [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md): toolchain, build scripts, code signing, verification
-- [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md): Developer ID and notarization setup
 - [ASSETS.md](ASSETS.md): app icon and DMG background
 
 ## Updates
@@ -23,20 +22,12 @@ echo "1.1.0" > VERSION
 
 ## Building
 
-| Build | Command | Signing | Notarized | User experience |
-|---|---|---|---|---|
-| Development | `./scripts/build.sh` | Self-signed (`.signing-config`), else ad-hoc | No | Runs locally; a downloaded copy is blocked until `xattr` |
-| DMG | `./scripts/build.sh --dmg` | Self-signed, else ad-hoc | No | Blocked until `xattr` |
-| Production | `./scripts/build.sh --production` | Developer ID | No | Click-through warning |
-| Production DMG | `./scripts/build.sh --production --dmg` | Developer ID | Yes | No warning |
+| Build | Command | Signing | User experience |
+|---|---|---|---|
+| App | `./scripts/build.sh` | Self-signed (`.signing-config`), else ad-hoc | Runs locally; a downloaded copy is blocked until `xattr` |
+| DMG | `./scripts/build.sh --dmg` | Self-signed, else ad-hoc | Blocked until `xattr` |
 
-`--production --dmg`:
-
-1. Builds and signs the app with your Developer ID (hardened runtime).
-2. Creates the DMG.
-3. Submits it to Apple for notarization (about 2 to 5 minutes) and staples the ticket.
-
-Production signing needs `.notarization-config`; see [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+Nothing is notarized: that needs a paid Apple Developer ID, which this open-source project doesn't have ([BUILD_AND_CODESIGN.md › No Developer ID](BUILD_AND_CODESIGN.md#no-developer-id)).
 
 ## DMG
 
@@ -55,18 +46,17 @@ SidebArc <version>/
 ## Releasing
 
 ```bash
-./scripts/release.sh 1.1.0                          # Developer ID, notarized
-./scripts/release.sh 1.1.0 --no-notarize            # self-signed, not notarized
-./scripts/release.sh 1.1.0 --no-notarize --dry-run  # build and sign only, no git/GitHub
+./scripts/release.sh 1.1.0            # self-signed, not notarized
+./scripts/release.sh 1.1.0 --dry-run  # build and sign only, no git/GitHub
 ```
 
 The script:
 
-1. Checks the working tree is clean (except `VERSION` and `Bundler.toml`), that `gh` is installed, the branch, and that the tag doesn't exist.
+1. Requires the self-signed identity (`.signing-config`): an ad-hoc release would let any app with the bundle id claim the users' grants, and another identity would reset them. Checks the working tree is clean (except `VERSION` and `Bundler.toml`), that `gh` is installed, the branch, and that the tag doesn't exist.
 2. Opens your editor with the commits since the previous tag, for the release notes.
-3. Writes `VERSION` and runs `./scripts/build.sh --production --dmg`, or `./scripts/build.sh --dmg` with `--no-notarize`. `--no-notarize` requires the self-signed identity (`.signing-config`): an ad-hoc release would let any app with the bundle id claim the users' grants, and another identity would reset them.
+3. Writes `VERSION` and runs `./scripts/build.sh --dmg`.
 4. Commits `VERSION` and `Bundler.toml`, tags `v<version>`, pushes.
-5. Runs `gh release create` with the DMG and the notes; with `--no-notarize` the notes get an Install section with the `xattr` command.
+5. Runs `gh release create` with the DMG and the notes, which get an Install section with the `xattr` command.
 
 `--dry-run` stops after the build and prints the remaining git/GitHub commands.
 
@@ -75,7 +65,7 @@ The script:
 1. Download `SidebArc-<version>.dmg` from GitHub Releases.
 2. Open it and drag **SidebArc** onto **Applications**.
 3. Eject the disk image and launch SidebArc.
-4. Builds that aren't notarized (`--no-notarize`, `build.sh --dmg`): macOS blocks the app until the download's quarantine flag is cleared, once per new version:
+4. SidebArc isn't notarized, so macOS blocks the downloaded app until its quarantine flag is cleared, once per new version:
    ```bash
    xattr -dr com.apple.quarantine /Applications/SidebArc.app
    ```
@@ -103,4 +93,4 @@ To update, quit SidebArc and repeat with the new DMG. Data lives in `~/Library/A
 | "App bundle not found" from `create-dmg.sh` | Run `./scripts/build.sh` first |
 | Finder layout not applied | Cosmetic; the DMG still works |
 | Info.plist shows an old version | `./scripts/clean.sh && ./scripts/build.sh` |
-| Notarization fails | See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md) → Troubleshooting |
+| "SidebArc can't be opened" / "Apple could not verify…" after a download | Clear the quarantine flag (Installing, step 4) |

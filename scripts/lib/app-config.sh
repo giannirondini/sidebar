@@ -8,7 +8,6 @@
 #   INFO_PLIST      Info.plist inside APP_BUNDLE
 #   APP_EXECUTABLE  executable inside APP_BUNDLE
 #   APPLE_EVENTS_USAGE  `NSAppleEventsUsageDescription` from `[apps.<name>.plist]`
-#   ENTITLEMENTS    entitlements for hardened-runtime (production) signing
 #
 # Signing: dev_sign (self-signed LOCAL_SIGNING_IDENTITY from .signing-config, else ad-hoc).
 #
@@ -27,8 +26,6 @@ if [ -z "$APP_NAME" ] || [ -z "$BUNDLE_ID" ] || [ -z "$APPLE_EVENTS_USAGE" ]; th
     echo "❌ Could not read the app name ([apps.<name>]), 'identifier' or 'NSAppleEventsUsageDescription' from Bundler.toml" >&2
     exit 1
 fi
-
-ENTITLEMENTS="$PROJECT_ROOT/scripts/SidebArc.entitlements"
 
 APP_BUNDLE=".build/bundler/${APP_NAME}.app"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"

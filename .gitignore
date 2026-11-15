@@ -7,9 +7,6 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 
-# Notarization credentials
-.notarization-config
-
 # Local signing identity name
 .signing-config
 
