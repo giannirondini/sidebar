@@ -4,6 +4,46 @@
 
 **Date:** 2026-02-10
 **Status:** Phase 5 Complete - All Refactoring Complete ✅
+
+## Summary
+
+_Moved from CLAUDE.md › "Refactoring History" on 2026-11-15._
+
+The codebase underwent a comprehensive refactoring (2026-02-10) to eliminate code duplication and improve maintainability:
+
+**Phase 1 - Foundation (✅ Complete)**:
+- Created base classes: `BaseControl`, `BaseView`, `InlineEditableTextField`
+- Created `ThemeConstants` for centralized design system
+- Added comprehensive unit tests for all base classes
+
+**Phase 2 - Component Migration (✅ Complete)**:
+- Migrated 5 components to extend base classes
+- Replaced hardcoded values with ThemeConstants references
+- Eliminated ~520 lines of duplicate code
+
+**Phase 3 - ViewController Decomposition (✅ Complete)**:
+- Extracted `NodeListViewController` from `MainViewController` (~800 lines)
+- Extracted `SearchCoordinator` from `MainViewController` (~65 lines)
+- Reduced `MainViewController` from 1352 to 596 lines (56% reduction)
+- Created `WorkspaceManagementView` for settings (~380 lines); never wired in, removed on 2026-11-14 (Settings uses `SettingsContentViewController`)
+
+**Phase 4 - Remaining Components (✅ Complete)**:
+- Migrated `SearchBarView`, `WorkspaceSwitcherView` (removed in Phase 3a, replaced by `SpaceBarView`), `SidebarPositionSelector` to use ThemeConstants
+- Migrated nested button classes in `WorkspaceSwitcherView` to extend BaseControl
+- Eliminated ~205 additional lines of duplicate code
+
+**Phase 5 - Polish & Documentation (✅ Complete)**:
+- Added comprehensive inline documentation to all base classes
+- Enhanced ThemeConstants with detailed usage examples
+- Updated CLAUDE.md with new architecture details
+- Created component usage examples
+
+**Total Impact**:
+- **Code reduction**: ~1,145 lines eliminated (14.1% of original codebase)
+- **Zero functional regressions**: All features work as before
+- **Improved consistency**: All components use centralized design constants
+- **Better maintainability**: Base classes eliminate duplicate patterns
+- **Enhanced testability**: Clear separation of concerns with coordinator pattern
 **Approach:** Base class-driven with comprehensive testing and documentation
 
 ---

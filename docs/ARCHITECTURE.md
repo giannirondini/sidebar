@@ -183,7 +183,7 @@ click → TabFocusService.open (main actor)
 - **Design consistency** - all components use ThemeConstants for colors/fonts/spacing
 
 ### ViewController Decomposition (Phase 3)
-- **MainViewController** - Coordinator between search, Favorites, the space page, the space bar and Settings (596 lines after Phase 3; ~1000 since profiles, tab focus and the Phase 3a space UI). The space switch lives in `MainViewController+SpaceTransition` (see CLAUDE.md › "Space layout and switching")
+- **MainViewController** - Coordinator between search, Favorites, the space page, the space bar and Settings (596 lines after Phase 3; ~1000 since profiles, tab focus and the Phase 3a space UI). The space switch lives in `MainViewController+SpaceTransition` (see [SPACES.md](SPACES.md))
 - **NodeListViewController** (~1300 lines) - Collection view, drag-drop, context menus
 - **SearchCoordinator** (~65 lines) - Search/filtering logic
 - **SettingsContentViewController** - Settings page (workspace list, default browser, profiles, permissions, import). The extracted `WorkspaceManagementView` was never wired in and was removed on 2026-11-14
@@ -300,7 +300,11 @@ See [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md) for details on build process 
 
 ## Resources
 
-- [CLAUDE.md](../CLAUDE.md) - Detailed development guide
+- [CLAUDE.md](../CLAUDE.md) - Rules most tasks need (agents and contributors)
+- [INTERNALS.md](INTERNALS.md) - Data flow, mutation pattern, node tree operations, list updates
+- [PROFILES_AND_BROWSERS.md](PROFILES_AND_BROWSERS.md) - Profiles, Favorites, browser routing
+- [TAB_FOCUS.md](TAB_FOCUS.md) - Switching to open tabs
+- [SPACES.md](SPACES.md) - Space layout, space bar, transitions
 - [REFACTORING_PLAN.md](REFACTORING_PLAN.md) - Complete refactoring history
 - [COMPONENT_USAGE_GUIDE.md](COMPONENT_USAGE_GUIDE.md) - Component usage patterns
 - [BUILD_AND_CODESIGN.md](BUILD_AND_CODESIGN.md) - Build system details

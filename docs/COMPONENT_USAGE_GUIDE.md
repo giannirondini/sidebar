@@ -3,13 +3,65 @@
 This guide provides practical examples for using SidebArc's base classes and design system components.
 
 ## Table of Contents
-1. [ThemeConstants](#themeconstants)
-2. [BaseControl](#basecontrol)
-3. [BaseView](#baseview)
-4. [InlineEditableTextField](#inlineeditabletextfield)
-5. [Space Components](#space-components)
-6. [Menu Builders](#menu-builders)
-7. [Common Patterns](#common-patterns)
+1. [Overview](#overview)
+2. [ThemeConstants](#themeconstants)
+3. [BaseControl](#basecontrol)
+4. [BaseView](#baseview)
+5. [InlineEditableTextField](#inlineeditabletextfield)
+6. [Space Components](#space-components)
+7. [Menu Builders](#menu-builders)
+8. [Common Patterns](#common-patterns)
+
+---
+
+## Overview
+
+_Moved from CLAUDE.md › "UI Component Architecture (Post-Refactoring)" on 2026-11-15._
+
+**Base Classes** (located in `Components/Base/`):
+- **BaseControl** - Base class for all interactive controls with hover and pressed state management
+  - Eliminates ~40 lines of tracking area and mouse event code per subclass
+  - Provides `handleHoverStateChanged()` and `handlePressedStateChanged()` override points
+  - Used by: `IconTitleButton`, `CustomToggle`, `CustomTextButton`, `SpaceBarButton`, `PinnedTabTileView`
+- **BaseView** - Base class for custom views with hover state management (no pressed state)
+  - Simpler than BaseControl, designed for non-interactive views like rows
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
+- **InlineEditableTextField** - Reusable component for inline text editing
+  - Encapsulates commit/cancel logic, focus management, and callbacks
+  - Eliminates ~80 lines of duplicate editing code per component
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
+
+**Design System** (located in `Utilities/Theme/`):
+- **ThemeConstants** - Centralized design system constants
+  - Colors: Brand colors and semantic values (darkGray, white, settingsBackground)
+  - Opacity: Standard opacity levels (full, high, medium, low, subtle, extraSubtle, minimal)
+  - Fonts: Typography styles (bodyRegular, bodySemibold, bodyMedium, bodyBold)
+  - Spacing: Layout spacing values (tiny=4, small=6, medium=8, regular=10, large=14, extraLarge=16, huge=20)
+  - CornerRadius: Rounding values (small=6, medium=8, large=12)
+  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, buttonHeight=32, rowHeight=44), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
+  - Animation: Timing values (durationFast=0.15s, durationNormal=0.2s, durationSlow=0.3s)
+  - SpaceTransition: space-switch tuning (commit fraction, flick velocity, velocity window, rubber band, spring response and damping ratio)
+  - Replaces 50+ hardcoded "magic numbers" throughout the codebase
+
+**Component Patterns**:
+All interactive controls extend BaseControl or BaseView and use ThemeConstants for consistency:
+
+```swift
+// Example: Custom button extending BaseControl
+final class MyButton: BaseControl {
+    override func handleHoverStateChanged() {
+        layer?.backgroundColor = isHovered
+            ? ThemeConstants.Colors.darkGray.withAlphaComponent(ThemeConstants.Opacity.minimal).cgColor
+            : NSColor.clear.cgColor
+    }
+
+    override func handlePressedStateChanged() {
+        layer?.backgroundColor = isPressed
+            ? ThemeConstants.Colors.darkGray.withAlphaComponent(ThemeConstants.Opacity.subtle).cgColor
+            : NSColor.clear.cgColor
+    }
+}
+```
 
 ---
 
@@ -725,7 +777,7 @@ let cornerRadius = ThemeConstants.CornerRadius.medium
 ## Additional Resources
 
 - See [REFACTORING_PLAN.md](REFACTORING_PLAN.md) for the full refactoring history
-- See [CLAUDE.md](/CLAUDE.md) for architecture overview
+- See [ARCHITECTURE.md](ARCHITECTURE.md) and [INTERNALS.md](INTERNALS.md) for the architecture
 - Check the source code for `BaseControl`, `BaseView`, and `InlineEditableTextField` for implementation details
 - Look at existing components like `IconTitleButton`, `NodeRowView`, and `WorkspaceRowView` for real-world examples
-- For the space UI, see `SpaceBarView`, `SpaceHeaderView`, `SpaceIconView` and `SpaceMenu`; for the space switch, CLAUDE.md › "Space layout and switching"
+- For the space UI, see `SpaceBarView`, `SpaceHeaderView`, `SpaceIconView` and `SpaceMenu`; for the space switch, [SPACES.md](SPACES.md)
