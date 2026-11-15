@@ -218,6 +218,11 @@ final class WindowAttachmentService {
     /// private so the log isn't a timeline of the user's app usage.
     private func hide(_ reason: String, app: String? = nil) {
         logger.notice("Hide: \(reason, privacy: .public) \(app ?? "", privacy: .private)")
+        // Not beside that frame any more: a re-placement while SidebArc is in front
+        // (`replaceBesideLastBrowserFrame`) must not re-attach the now standalone
+        // window to it. Re-attaching always goes through `forceShow`.
+        lastBrowserFrame = nil
+        lastSidebarFrame = nil
         delegate?.attachmentServiceShouldHideWindow(self)
     }
 
@@ -287,6 +292,49 @@ final class WindowAttachmentService {
     ) -> PositionUpdateDecision {
         if ownAppActive || frontmostPid == ownPid { return .keepVisible }
         return hasBrowserWindow ? .update : .hide
+    }
+
+    /// How the sidebar window behaves now. "Attachment enabled" is not "attached":
+    /// with no browser of the set in front (SidebArc opened on its own, the browser
+    /// not running) the window stays a movable standalone one. Locking it as soon as
+    /// attachment was enabled left it unmovable until attachment was turned off.
+    enum WindowMode: Equatable {
+        case standalone
+        case attached
+    }
+
+    enum WindowModeEvent: Equatable {
+        /// The service placed the sidebar beside a browser window (`shouldPositionWindow`).
+        case placed
+        /// The service hid it: no browser window of the set in front.
+        case hidden
+        /// Attachment turned off, or Accessibility lost.
+        case disabled
+    }
+
+    struct WindowModeTransition: Equatable {
+        let mode: WindowMode
+        /// Remember the standalone frame before the first placement moves the window.
+        let captureManualFrame: Bool
+        /// Put the window back at the remembered standalone frame.
+        let restoreManualFrame: Bool
+    }
+
+    /// Only a real transition captures or restores the standalone frame: a
+    /// re-placement while attached never overwrites it, and a disable while already
+    /// standalone doesn't move a window the user has since moved.
+    nonisolated static func windowModeTransition(
+        from current: WindowMode, event: WindowModeEvent, attachmentEnabled: Bool
+    ) -> WindowModeTransition {
+        switch event {
+        case .placed where attachmentEnabled:
+            return WindowModeTransition(mode: .attached, captureManualFrame: current == .standalone, restoreManualFrame: false)
+        case .placed:
+            // A late placement after attachment was turned off: ignore it.
+            return WindowModeTransition(mode: current, captureManualFrame: false, restoreManualFrame: false)
+        case .hidden, .disabled:
+            return WindowModeTransition(mode: .standalone, captureManualFrame: false, restoreManualFrame: current == .attached)
+        }
     }
 
     private func isAttachable(_ bundleId: String?) -> Bool {

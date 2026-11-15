@@ -16,8 +16,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var agentEndpointFileURL: URL?
 
     // Attachment state
+    /// Attachment is enabled (the setting is on and the service runs). The window
+    /// is locked only while `windowMode` is `.attached`.
     private var isAttachmentMode: Bool = false
+    /// Whether the window is beside a browser window now (`windowModeTransition`).
+    private var windowMode: WindowAttachmentService.WindowMode = .standalone
+    /// The standalone frame, captured when the window is first placed beside a browser.
     private var lastManualFrame: NSRect?
+    private let attachLogger = Logger(subsystem: AppIdentity.logSubsystem, category: "attach")
 
     // Shortcut toggle state
     private var isUserHidden: Bool = false
@@ -215,8 +221,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
-        if let window, !isAttachmentMode {
-            saveWindowFrame(window)
+        if let window {
+            // While attached, the standalone frame to come back to is the remembered one.
+            let frame = windowMode == .attached ? lastManualFrame : window.frame
+            if let frame {
+                UserDefaults.standard.set(NSStringFromRect(frame), forKey: UserDefaultsKeys.mainWindowSize)
+            }
         }
         noteServer?.stop()
         if let agentEndpointFileURL {
@@ -271,13 +281,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     /// While attached, the user's resize sets the attached width (kept across launches);
     /// the sidebar is then placed flush with the browser again.
     public func windowDidEndLiveResize(_ notification: Notification) {
-        guard isAttachmentMode, let window = notification.object as? NSWindow else { return }
+        guard windowMode == .attached, let window = notification.object as? NSWindow else { return }
         UserDefaults.standard.set(Double(window.frame.width), forKey: UserDefaultsKeys.attachedSidebarWidth)
         WindowAttachmentService.shared.forceUpdate()
     }
 
     public func windowDidResize(_ notification: Notification) {
-        guard !isAttachmentMode,
+        guard windowMode == .standalone,
               let window = notification.object as? NSWindow else { return }
         saveWindowFrame(window)
     }
@@ -305,7 +315,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     private func saveWindowFrame(_ window: NSWindow) {
-        guard !isAttachmentMode else { return }
+        guard windowMode == .standalone else { return }
         let frameString = NSStringFromRect(window.frame)
         UserDefaults.standard.set(frameString, forKey: UserDefaultsKeys.mainWindowSize)
     }
@@ -415,15 +425,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         // If enabling always on top, disable attachment first
         if enabled && isAttachmentMode {
-            // Save current frame before disabling attachment
-            if let window = window {
-                lastManualFrame = window.frame
-            }
-
             WindowAttachmentService.shared.disable()
             isAttachmentMode = false
             UserDefaults.standard.set(false, forKey: UserDefaultsKeys.sidebarAttachmentEnabled)
-            updateWindowConstraints()
+            applyWindowMode(.disabled)
         }
 
         UserDefaults.standard.set(enabled, forKey: UserDefaultsKeys.alwaysOnTopEnabled)
@@ -531,14 +536,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
 
-        // Save current frame before entering attachment mode
-        if let window = window {
+        enableAttachment(browserIds: browserIds, position: position)
+    }
+
+    /// Enabling doesn't lock the window: it stays standalone until the service
+    /// places it beside a browser window. The flag is set first because `enable`
+    /// may place it synchronously (a browser of the set already in front).
+    private func enableAttachment(browserIds: [String], position: SidebarPosition) {
+        isAttachmentMode = true
+        guard WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) else {
+            isAttachmentMode = false
+            return
+        }
+    }
+
+    /// Applies an attachment transition: window constraints, and the standalone
+    /// frame captured on the first placement or restored when the window stops
+    /// following a browser. Logged under `attach`.
+    private func applyWindowMode(_ event: WindowAttachmentService.WindowModeEvent) {
+        guard let window else { return }
+        let previous = windowMode
+        let transition = WindowAttachmentService.windowModeTransition(
+            from: previous, event: event, attachmentEnabled: isAttachmentMode
+        )
+        // Before the mode flips and before any frame change: `windowDidResize`
+        // saves the frame only while standalone.
+        if transition.captureManualFrame {
             lastManualFrame = window.frame
         }
-
-        guard WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) else { return }
-        isAttachmentMode = true
+        windowMode = transition.mode
         updateWindowConstraints()
+        if transition.restoreManualFrame, let lastManualFrame {
+            window.setFrame(lastManualFrame, display: true, animate: false)
+        }
+        if previous != transition.mode {
+            attachLogger.notice("Window \(String(describing: previous), privacy: .public) → \(String(describing: transition.mode), privacy: .public) (\(String(describing: event), privacy: .public)), movable \(window.isMovable), frame \(NSStringFromRect(window.frame), privacy: .public)")
+        }
     }
 
     /// Every profile's browser and the global default: the sidebar attaches to
@@ -560,23 +593,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func updateWindowConstraints() {
         guard let window = window else { return }
 
-        if isAttachmentMode {
-            // In attachment mode: allow unlimited height, disable manual movement
+        switch windowMode {
+        case .attached:
+            // Beside a browser window: its height, placed by the service only.
             window.minSize = NSSize(width: 280, height: 100)
             window.maxSize = NSSize(width: 520, height: 10000)
             window.isMovable = false
             window.isMovableByWindowBackground = false
-        } else {
-            // Manual mode: restore original constraints, enable movement
+        case .standalone:
             window.minSize = NSSize(width: 280, height: 420)
             window.maxSize = NSSize(width: 520, height: 10000)
             window.isMovable = true
             window.isMovableByWindowBackground = true
-
-            // Restore last manual frame if available
-            if let lastFrame = lastManualFrame {
-                window.setFrame(lastFrame, display: true, animate: false)
-            }
         }
     }
 
@@ -641,12 +669,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         // If enabling and attachment is active, disable attachment
         if enabled && isAttachmentMode {
-            if let window = window {
-                lastManualFrame = window.frame
-            }
             WindowAttachmentService.shared.disable()
             isAttachmentMode = false
-            updateWindowConstraints()
+            applyWindowMode(.disabled)
         }
     }
 
@@ -664,19 +689,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             let positionString = notification.userInfo?["position"] as? String ?? "right"
             let position: SidebarPosition = positionString == "left" ? .left : .right
 
-            if let window = window {
-                lastManualFrame = window.frame
-            }
-
-            guard WindowAttachmentService.shared.enable(browserBundleIds: browserIds, position: position) else { return }
-            isAttachmentMode = true
-            updateWindowConstraints()
+            enableAttachment(browserIds: browserIds, position: position)
         } else {
             // Disable attachment
             WindowAttachmentService.shared.disable()
             isAttachmentMode = false
             isUserHidden = false
-            updateWindowConstraints()
+            applyWindowMode(.disabled)
 
             // Show window in case it was hidden
             window?.orderFront(nil)
@@ -724,7 +743,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     func attachmentServiceDidLosePermissions(_ service: WindowAttachmentService) {
         isAttachmentMode = false
-        updateWindowConstraints()
+        applyWindowMode(.disabled)
         if !isUserHidden {
             window?.orderFront(nil)
         }
@@ -732,11 +751,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     func attachmentService(_ service: WindowAttachmentService, shouldPositionWindow frame: NSRect, animated: Bool) {
         guard let window = window else { return }
+        // Don't auto-show if the user explicitly hid it via the shortcut.
+        if !window.isVisible && isUserHidden { return }
+
+        // Lock the window before it moves (the standalone frame is captured first).
+        applyWindowMode(.placed)
+        guard windowMode == .attached else { return }
 
         // Always show window if hidden, even if frame hasn't changed
         if !window.isVisible {
-            // Don't auto-show if user explicitly hid via shortcut
-            guard !isUserHidden else { return }
             window.setFrame(frame, display: true, animate: false)
             window.orderFront(nil)
             return
@@ -762,8 +785,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     func attachmentServiceShouldHideWindow(_ service: WindowAttachmentService) {
-        guard let window, window.isVisible else { return }
-        window.orderOut(nil)
+        guard let window else { return }
+        // Out of sight first, so going back to the standalone frame is never seen.
+        if window.isVisible {
+            window.orderOut(nil)
+        }
+        // Even when already hidden (the shortcut): a Dock reopen must show a
+        // movable standalone window, not a locked one at the attached place.
+        applyWindowMode(.hidden)
     }
 
     func attachmentServiceSidebarWidth(_ service: WindowAttachmentService) -> CGFloat {

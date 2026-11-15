@@ -31,7 +31,7 @@ No release has been published yet: for now, [build it from source](#building-fro
 ## Features
 
 ### Browser Integration
-- **Sidebar Attachment** - Attaches to the window of whichever browser your profiles use (or your default browser) is in front, and follows it as you move or resize it; switch from Chrome to Safari and the sidebar follows. Resize the attached sidebar and it keeps that width. If you prefer, you can still use SidebArc as a standalone window, not attached anywhere.
+- **Sidebar Attachment** - Attaches to the window of whichever browser your profiles use (or your default browser) is in front, and follows it as you move or resize it; switch from Chrome to Safari and the sidebar follows. Resize the attached sidebar and it keeps that width. While none of those browsers is in front (or none is running), SidebArc stays a normal window you can move and resize. If you prefer, you can still use SidebArc as a standalone window, not attached anywhere.
 - **Supported Browsers** - Attachment works with any browser (Chrome, Arc, Safari, Brave, Firefox, etc.).
 - **Always-on-Top Mode** - Pin the SidebArc window to stay visible on top of all apps.
 - **Switch to Open Tabs** - Clicking a favorite switches to the tab where it's already open instead of opening a duplicate (Chrome, Brave, Safari); ⌥-click a list link to do the same. Firefox and other browsers always open a new tab.
