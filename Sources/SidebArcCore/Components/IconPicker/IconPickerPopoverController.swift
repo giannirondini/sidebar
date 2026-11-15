@@ -20,6 +20,8 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     var onFaviconPathSelected: ((String) -> Void)?
 
     private var cachedFavicons: [(path: String, hostname: String, image: NSImage)] = []
+    /// The emoji the Emoji tab shows (all, or the search results).
+    private var shownEmojis: [String] = IconPickerConstants.emojis
     private var filteredFavicons: [(path: String, hostname: String, image: NSImage)] = []
 
     override func loadView() {
@@ -63,7 +65,6 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     }
 
     private func setupSearchField() {
-        searchField.placeholderString = "Search favicons…"
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.delegate = self
         searchField.sendsSearchStringImmediately = true
@@ -124,13 +125,16 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
         }
     }
 
-    private func setSearchFieldVisible(_ visible: Bool) {
+    /// Shows the search field with `placeholder` (nil hides it); a tab change always
+    /// starts with an empty search.
+    private func setSearchField(placeholder: String?) {
+        let visible = placeholder != nil
+        searchField.stringValue = ""
+        searchField.placeholderString = placeholder ?? ""
         searchField.isHidden = !visible
-        gridTopToSegmentConstraint.isActive = !visible
-        gridTopToSearchConstraint.isActive = visible
-        if !visible {
-            searchField.stringValue = ""
-        }
+        // Deactivate first, so the two grid-top constraints never conflict.
+        (visible ? gridTopToSegmentConstraint : gridTopToSearchConstraint).isActive = false
+        (visible ? gridTopToSearchConstraint : gridTopToSegmentConstraint).isActive = true
     }
 
     private func loadCachedFavicons() {
@@ -159,13 +163,13 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     private func showTab(_ index: Int) {
         switch index {
         case 0:
-            setSearchFieldVisible(false)
+            setSearchField(placeholder: "Search emoji…")
             showEmojiTab()
         case 1:
-            setSearchFieldVisible(false)
+            setSearchField(placeholder: nil)
             showSFSymbolTab()
         case 2:
-            setSearchFieldVisible(true)
+            setSearchField(placeholder: "Search favicons…")
             filterAndShowFavicons()
         default:
             break
@@ -173,11 +177,12 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     }
 
     private func showEmojiTab() {
-        let items = IconPickerConstants.emojis.map { IconPickerItemView.Content.emoji($0) }
+        shownEmojis = IconPickerConstants.emojiSearch(searchField.stringValue)
+        let items = shownEmojis.map { IconPickerItemView.Content.emoji($0) }
         gridView.setItems(items) { [weak self] index in
-            let emoji = IconPickerConstants.emojis[index]
-            self?.onIconSelected?(.emoji(emoji))
-            self?.dismissPopover()
+            guard let self, index < self.shownEmojis.count else { return }
+            self.onIconSelected?(.emoji(self.shownEmojis[index]))
+            self.dismissPopover()
         }
     }
 
@@ -210,8 +215,11 @@ final class IconPickerPopoverController: NSViewController, NSSearchFieldDelegate
     // MARK: - NSSearchFieldDelegate
 
     func controlTextDidChange(_ obj: Notification) {
-        guard segmentedControl.selectedSegment == 2 else { return }
-        filterAndShowFavicons()
+        switch segmentedControl.selectedSegment {
+        case 0: showEmojiTab()
+        case 2: filterAndShowFavicons()
+        default: break
+        }
     }
 
     @objc private func restoreTapped() {
