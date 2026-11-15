@@ -58,8 +58,7 @@ final class SpacePageStage: NSView {
         layer?.removeAllAnimations()
         layer?.opacity = 1
         setContents(of: outgoing, to: image)
-        outgoing.frame = bounds
-        outgoing.transform = CATransform3DIdentity
+        place(outgoing, at: 0)
         outgoing.opacity = 1
         setIncoming(nil, baseX: 0)
         isHidden = false
@@ -68,7 +67,7 @@ final class SpacePageStage: NSView {
     /// The incoming page and where it sits when the offset is 0 (one page to the side).
     func setIncoming(_ image: NSImage?, baseX: CGFloat) {
         setContents(of: incoming, to: image)
-        incoming.frame = bounds.offsetBy(dx: baseX, dy: 0)
+        place(incoming, at: baseX)
         incoming.opacity = 1
         incoming.isHidden = image == nil
     }
@@ -111,6 +110,14 @@ final class SpacePageStage: NSView {
         removeAllPageAnimations()
         outgoing.contents = nil
         incoming.contents = nil
+    }
+
+    /// Puts a page at `x` with no offset. The transform is cleared first: setting a
+    /// layer's `frame` while it is transformed (by the previous transition) silently
+    /// shifts it by the inverse, and every page after the first landed off-screen.
+    private func place(_ page: CALayer, at x: CGFloat) {
+        page.transform = CATransform3DIdentity
+        page.frame = bounds.offsetBy(dx: x, dy: 0)
     }
 
     private func setContents(of page: CALayer, to image: NSImage?) {

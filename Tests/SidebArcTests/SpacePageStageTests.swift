@@ -60,6 +60,27 @@ import Testing
         window.orderOut(nil)
     }
 
+    /// Regression: the stage is reused, and each page used to be placed (by `frame`)
+    /// while still transformed by the previous switch, which shifted it by a page.
+    /// Every switch after the first then slid its pages off-screen.
+    @Test func consecutiveTransitionsPlacePagesFromScratch() {
+        let width = stage.bounds.width
+        stage.begin(outgoing: image())
+        stage.setIncoming(image(), baseX: width)
+        stage.setOffset(-width)                       // first switch lands: next page at 0
+
+        stage.begin(outgoing: image())               // second switch, the other way
+        stage.setIncoming(image(), baseX: -width)
+        stage.setOffset(0)
+        #expect(stage.outgoing.frame.minX == 0)
+        #expect(stage.incoming.frame.minX == -width)
+
+        stage.setOffset(width)                        // lands: the incoming page is in place
+        #expect(stage.incoming.frame.minX == 0)
+        #expect(stage.outgoing.frame.minX == width)
+        window.orderOut(nil)
+    }
+
     // Core Animation doesn't run animations to completion under `swift test`, so the
     // fade's completion is tested through what it calls (`hideNow`) and its guard.
 
