@@ -46,11 +46,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.isReleasedWhenClosed = false
-        window.backgroundColor = model.currentWorkspace.backgroundColor
+        // The space colour is painted once, by MainViewController over the blur.
+        window.backgroundColor = .clear
         window.minSize = NSSize(width: 280, height: 420)
         window.maxSize = NSSize(width: 520, height: 10000) // Unlimited height for attachment mode
         window.collectionBehavior = [.moveToActiveSpace]
-        window.contentViewController = mainViewController
+        window.contentViewController = SidebarBackdropViewController(content: mainViewController)
 
         // Restore saved frame AFTER content view controller is set
         let restoredFrame = applySavedWindowFrame(to: window)

@@ -153,9 +153,13 @@ When moving nodes, the system:
 
 ## Workspace Colors
 
-WorkspaceColorId enum defines 8 color themes, shown as Blush, Apricot, Butter, Leaf, Mint, Sky, Periwinkle, Lavender (the cases are `ember`, `ruby`, `coral`, `tangerine`, `moss`, `ocean`, `indigo`, `graphite`; `settingsBackground` is Settings' colour, not offered for spaces). Each color affects:
-- Window background color (color at 0.92 alpha)
-- View layer background color
+A space has a preset colour (`WorkspaceColorId`, 16 cases) and an optional custom colour (`Workspace.customColor: SpaceColor?`, sRGB + alpha) that wins while set; picking a preset clears it.
+
+- **Presets:** Blush, Apricot, Butter, Leaf, Mint, Sky, Periwinkle, Lavender (the cases are `ember`, `ruby`, `coral`, `tangerine`, `moss`, `ocean`, `indigo`, `graphite`), then Rose, Peach, Sand, Sage, Seafoam, Cornflower, Orchid, Stone (raw value = name). `settingsBackground` is Settings' colour, not offered for spaces. Unknown names decode as the default (`ember`), so a colour added later can't make `data.json` unreadable.
+- **Custom colour:** Change Color ▸ Custom Color… opens the shared colour panel with its opacity slider (`SpaceColorPanel`); drags are applied at most every `ThemeConstants.Animation.colorPreviewInterval`, each a normal saved mutation, and the last value always lands.
+- **Reading colours:** `Workspace.color` (opaque: space bar, header, dots, swatches) and `Workspace.backgroundColor` (custom colour with its opacity, or the preset at `WorkspaceColorId.presetBackgroundAlpha` = 1). Don't read `colorId.color` for a space directly.
+- **Painting:** the colour is painted **once**, on `MainViewController.view.layer` (the space transition animates that layer). The window background is clear, and the window root is `SidebarBackdropViewController`: a behind-window blur (`NSVisualEffectView`, kept active when the sidebar isn't key) under the main view, so an opacity below 100% looks frosted. An opaque colour hides the blur. Painting the colour on the window too would stack the opacity (verified: 0.5 + 0.5 shows as 0.75; the old 0.92 + 0.92 as 0.99).
+- **Limit (accepted):** text and icons stay dark grey whatever the colour, so very dark custom colours make the list hard to read.
 
 ## Important Patterns
 

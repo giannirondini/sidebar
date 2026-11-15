@@ -246,7 +246,9 @@ final class NodeListViewController: NSViewController {
         let canScrollDown = visibleRect.origin.y + visibleRect.height < contentHeight
 
         let baseColor = workspaceBackgroundColor
-        let shadowOpacity = ThemeConstants.Opacity.high
+        // Scaled by the background's opacity, so the fade over a translucent space
+        // colour doesn't show as a denser band.
+        let shadowOpacity = ThemeConstants.Opacity.high * baseColor.alphaComponent
 
         if canScrollUp {
             let topGradient = CAGradientLayer()

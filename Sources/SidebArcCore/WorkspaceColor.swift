@@ -78,8 +78,10 @@ enum WorkspaceColorId: String, Codable {
         return color.withAlphaComponent(Self.presetBackgroundAlpha)
     }
 
-    /// Opacity of the sidebar background for a preset colour.
-    static let presetBackgroundAlpha: CGFloat = 0.92
+    /// Opacity of the sidebar background for a preset colour: opaque, as presets
+    /// always looked (0.92 was painted twice, which showed as 0.99). Lower it, or pick
+    /// a custom colour, for the frosted look.
+    static let presetBackgroundAlpha: CGFloat = 1.0
 
     var textColor: NSColor {
         NSColor.white

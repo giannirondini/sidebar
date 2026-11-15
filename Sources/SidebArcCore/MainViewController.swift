@@ -508,7 +508,6 @@ final class MainViewController: NSViewController {
 
         // A space transition animates the colour itself and lands on this value.
         view.layer?.backgroundColor = newColor.cgColor
-        view.window?.backgroundColor = newColor
     }
 
     private func showSettingsContent() {
@@ -525,7 +524,6 @@ final class MainViewController: NSViewController {
 
         let settingsColor = ThemeConstants.Colors.settingsBackground
         view.layer?.backgroundColor = settingsColor.cgColor
-        view.window?.backgroundColor = settingsColor
     }
 
     private func showWorkspaceContent() {
