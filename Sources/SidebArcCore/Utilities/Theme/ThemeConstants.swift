@@ -317,6 +317,10 @@ struct ThemeConstants {
         /// Slow animation duration (0.3s) - Deliberate, noticeable animations
         static let durationSlow: TimeInterval = 0.3
 
+        /// How often a colour dragged in the colour panel is applied (and saved) while
+        /// the drag goes on (0.15s); the last value is always applied.
+        static let colorPreviewInterval: TimeInterval = 0.15
+
         /// Standard easing function for smooth, natural motion.
         /// Uses ease-in-ease-out timing (slow start, fast middle, slow end).
         nonisolated(unsafe) static let timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)

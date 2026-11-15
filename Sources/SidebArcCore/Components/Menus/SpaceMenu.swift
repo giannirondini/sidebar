@@ -8,6 +8,8 @@ enum SpaceMenu {
         var rename: () -> Void
         var changeIcon: () -> Void
         var setColor: (WorkspaceColorId) -> Void
+        /// "Custom Color…": opens the colour panel for this space.
+        var customColor: () -> Void
         /// `nil` when the space is already first.
         var moveLeft: (() -> Void)?
         /// `nil` when the space is already last.
@@ -36,17 +38,7 @@ enum SpaceMenu {
         menu.addItem(ClosureMenuItem(title: "Rename Space…", action: actions.rename))
         menu.addItem(ClosureMenuItem(title: "Change Icon…", action: actions.changeIcon))
 
-        let colorItem = NSMenuItem(title: "Change Color", action: nil, keyEquivalent: "")
-        let colorSubmenu = NSMenu()
-        for colorId in WorkspaceColorId.allCases {
-            let item = ClosureMenuItem(title: colorId.name, state: colorId == workspace.colorId ? .on : .off) {
-                actions.setColor(colorId)
-            }
-            item.image = colorSwatch(colorId.color)
-            colorSubmenu.addItem(item)
-        }
-        colorItem.submenu = colorSubmenu
-        menu.addItem(colorItem)
+        menu.addItem(colorItem(for: workspace, setColor: actions.setColor, customColor: actions.customColor))
 
         menu.addItem(profileItem)
 
@@ -66,6 +58,35 @@ enum SpaceMenu {
         menu.addItem(deleteItem)
 
         return menu
+    }
+
+    /// "Change Color ▸": the presets (checked when no custom colour is set), then
+    /// "Custom Color…" (checked, with its swatch, when one is). Shared by the space
+    /// menu and Settings › Spaces.
+    static func colorItem(
+        for workspace: Workspace,
+        setColor: @escaping (WorkspaceColorId) -> Void,
+        customColor: @escaping () -> Void
+    ) -> NSMenuItem {
+        let submenu = NSMenu()
+        for colorId in WorkspaceColorId.allCases {
+            let isCurrent = workspace.customColor == nil && colorId == workspace.colorId
+            let item = ClosureMenuItem(title: colorId.name, state: isCurrent ? .on : .off) {
+                setColor(colorId)
+            }
+            item.image = colorSwatch(colorId.color)
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        let custom = ClosureMenuItem(title: "Custom Color…", state: workspace.customColor != nil ? .on : .off, action: customColor)
+        if let color = workspace.customColor {
+            custom.image = colorSwatch(color.opaqueColor)
+        }
+        submenu.addItem(custom)
+
+        let item = NSMenuItem(title: "Change Color", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
     }
 
     private static func colorSwatch(_ color: NSColor) -> NSImage {

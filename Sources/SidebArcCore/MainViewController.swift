@@ -559,6 +559,11 @@ final class MainViewController: NSViewController {
             setColor: { [weak self] colorId in
                 self?.model.updateWorkspaceColor(id: workspaceId, colorId: colorId)
             },
+            customColor: { [weak self] in
+                SpaceColorPanel.shared.edit(workspace) { [weak self] id, color in
+                    self?.model.setWorkspaceCustomColor(id: id, color: color)
+                }
+            },
             moveLeft: index > 0 ? { [weak self] in
                 self?.model.moveWorkspace(id: workspaceId, direction: .left)
             } : nil,

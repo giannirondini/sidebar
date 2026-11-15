@@ -21,16 +21,17 @@ import Testing
             rename: { recorder.calls.append("rename") },
             changeIcon: { recorder.calls.append("icon") },
             setColor: { recorder.calls.append("color:\($0.rawValue)") },
+            customColor: { recorder.calls.append("custom") },
             moveLeft: canMoveLeft ? { recorder.calls.append("left") } : nil,
             moveRight: canMoveRight ? { recorder.calls.append("right") } : nil,
             delete: { recorder.calls.append("delete") }
         )
     }
 
-    private func build(_ recorder: Recorder, canDelete: Bool = true, canMoveLeft: Bool = true, canMoveRight: Bool = true) -> NSMenu {
+    private func build(_ recorder: Recorder, workspace: Workspace? = nil, canDelete: Bool = true, canMoveLeft: Bool = true, canMoveRight: Bool = true) -> NSMenu {
         let profileItem = NSMenuItem(title: "Profile", action: nil, keyEquivalent: "")
         let menu = SpaceMenu.build(
-            workspace: workspace,
+            workspace: workspace ?? self.workspace,
             canDelete: canDelete,
             profileItem: profileItem,
             actions: actions(recorder, canMoveLeft: canMoveLeft, canMoveRight: canMoveRight)
@@ -69,7 +70,25 @@ import Testing
 
         let mint = try index(of: WorkspaceColorId.moss.name, in: submenu)
         submenu.performActionForItem(at: mint)
-        #expect(recorder.calls == ["color:\(WorkspaceColorId.moss.rawValue)"])
+        let custom = try index(of: "Custom Color…", in: submenu)
+        #expect(submenu.items[custom].state == .off)
+        submenu.performActionForItem(at: custom)
+        #expect(recorder.calls == ["color:\(WorkspaceColorId.moss.rawValue)", "custom"])
+    }
+
+    @Test func colorSubmenuListsEveryPresetThenCustom() throws {
+        let menu = build(Recorder())
+        let submenu = try #require(menu.items[try index(of: "Change Color", in: menu)].submenu)
+        #expect(submenu.items.map(\.title) == WorkspaceColorId.allCases.map(\.name) + ["", "Custom Color…"])
+    }
+
+    @Test func customColorIsCheckedInsteadOfThePreset() throws {
+        var custom = workspace
+        custom.customColor = SpaceColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 0.5)
+        let menu = build(Recorder(), workspace: custom)
+        let submenu = try #require(menu.items[try index(of: "Change Color", in: menu)].submenu)
+        #expect(submenu.items.filter { $0.state == .on }.map(\.title) == ["Custom Color…"])
+        #expect(submenu.items[try index(of: "Custom Color…", in: submenu)].image != nil)
     }
 
     @Test func moveItemsOnlyWhenPossible() {

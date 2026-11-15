@@ -1295,33 +1295,20 @@ final class SettingsContentViewController: NSViewController {
         renameItem.target = self
         menu.addItem(renameItem)
 
-        // Change Color submenu
-        let colorSubmenu = NSMenu()
-        for colorId in WorkspaceColorId.allCases {
-            let item = NSMenuItem(title: colorId.name, action: #selector(changeWorkspaceColor(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = colorId
-
-            // Add checkmark if current color
-            if workspace.colorId == colorId {
-                item.state = .on
+        // Change Color submenu (shared with the space menu)
+        menu.addItem(SpaceMenu.colorItem(
+            for: workspace,
+            setColor: { [weak self] colorId in
+                self?.appModel?.updateWorkspaceColor(id: workspaceId, colorId: colorId)
+                self?.reloadWorkspaces()
+            },
+            customColor: { [weak self] in
+                SpaceColorPanel.shared.edit(workspace) { [weak self] id, color in
+                    self?.appModel?.setWorkspaceCustomColor(id: id, color: color)
+                    self?.reloadWorkspaces()
+                }
             }
-
-            // Add color indicator
-            let colorCircle = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
-                colorId.color.setFill()
-                let path = NSBezierPath(ovalIn: rect)
-                path.fill()
-                return true
-            }
-            item.image = colorCircle
-
-            colorSubmenu.addItem(item)
-        }
-
-        let colorItem = NSMenuItem(title: "Change Color", action: nil, keyEquivalent: "")
-        colorItem.submenu = colorSubmenu
-        menu.addItem(colorItem)
+        ))
 
         menu.addItem(profileMenuItem(for: workspace))
 
@@ -1348,15 +1335,6 @@ final class SettingsContentViewController: NSViewController {
                 item.beginInlineRename()
             }
         }
-    }
-
-    @objc private func changeWorkspaceColor(_ sender: NSMenuItem) {
-        guard let workspaceId = contextWorkspaceId else { return }
-        guard let colorId = sender.representedObject as? WorkspaceColorId else { return }
-        guard let appModel = appModel else { return }
-
-        appModel.updateWorkspaceColor(id: workspaceId, colorId: colorId)
-        reloadWorkspaces()
     }
 
     @objc private func deleteContextWorkspace() {
