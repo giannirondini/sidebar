@@ -11,5 +11,8 @@ DerivedData/
 # Notarization credentials
 .notarization-config
 
+# Local signing identity name
+.signing-config
+
 # Misc
 misc/

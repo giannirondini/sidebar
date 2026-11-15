@@ -2,8 +2,9 @@
 # Build the app as a macOS app bundle. Names and ids come from Bundler.toml.
 #
 # Usage:
-#   ./scripts/build.sh                     # Build with ad-hoc signing (development)
-#   ./scripts/build.sh --dmg               # Build with ad-hoc signing and create DMG
+#   ./scripts/build.sh                     # Build, signed with the self-signed identity in
+#                                          # .signing-config (ad-hoc if there is none)
+#   ./scripts/build.sh --dmg               # Same, and create a DMG (not notarized)
 #   ./scripts/build.sh --production        # Build with Developer ID signing (production)
 #   ./scripts/build.sh --production --dmg  # Build and create notarized DMG
 
@@ -91,8 +92,8 @@ if [ "$PRODUCTION" = true ]; then
 
     echo "  ✓ Signed with Developer ID (hardened runtime, Apple Events entitlement)"
 else
-    adhoc_sign
-    echo "  ✓ Signed with ad-hoc signature (development only; requirement pinned to the bundle id)"
+    dev_sign
+    echo "  ✓ Signed: $SIGNED_WITH"
 fi
 
 echo ""

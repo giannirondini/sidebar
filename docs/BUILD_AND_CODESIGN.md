@@ -38,7 +38,7 @@ icon = 'Resources/AppIcon.png'
 ### `scripts/build.sh`
 
 ```bash
-./scripts/build.sh                     # release build, ad-hoc signed
+./scripts/build.sh                     # release build, self-signed (.signing-config) or ad-hoc
 ./scripts/build.sh --dmg               # + DMG
 ./scripts/build.sh --production        # Developer ID signing, hardened runtime
 ./scripts/build.sh --production --dmg  # + notarized DMG
@@ -51,14 +51,14 @@ Steps:
 3. `mint run swift-bundler bundle -c release`.
 4. **Unwraps the nested resource bundle** (`unwrap_nested_resource_bundles`). Swift 6.4's default `swiftbuild` build system already emits the SwiftPM resource bundle as a full macOS bundle, and swift-bundler v3 wraps it again (`…/Contents/Resources/Contents/Resources/NoteEditor`). Without this step the note editor is not found at runtime. `--build-system native` is not a way out: it is deprecated, and its warning on stdout breaks swift-bundler's `--show-bin-path` parsing.
 5. Sets `CFBundleIdentifier`, `CFBundleShortVersionString`, `CFBundleVersion` and `NSAppleEventsUsageDescription` in Info.plist (`patch_info_plist`; swift-bundler doesn't always merge `[apps.SidebArc.plist]`). Without the usage string macOS denies Apple Events without a prompt, so "switch to open tabs" never works.
-6. Code signs: ad-hoc with the requirement pinned to the bundle id (`adhoc_sign`, see below), or Developer ID with `--production` (hardened runtime + `scripts/SidebArc.entitlements`).
+6. Code signs (`dev_sign`, see below): with the self-signed identity named in `.signing-config`, else ad-hoc with the requirement pinned to the bundle id; or Developer ID with `--production` (hardened runtime + `scripts/SidebArc.entitlements`).
 7. Prints the bundle id, version and signing identifier; `--dmg` then calls `scripts/create-dmg.sh`.
 
 **Output**: `.build/bundler/SidebArc.app` (executable `Contents/MacOS/SidebArc`).
 
 ### `scripts/run.sh`
 
-Debug build, the same unwrap and Info.plist steps (`patch_info_plist`), ad-hoc signing (`adhoc_sign`), then `open`.
+Debug build, the same unwrap and Info.plist steps (`patch_info_plist`), the same signing (`dev_sign`), then `open`.
 
 ### `scripts/verify-build.sh`
 
@@ -70,7 +70,7 @@ Fails unless all of these hold:
 
 - Info.plist is valid; `CFBundleIdentifier` equals the `Bundler.toml` identifier; `CFBundleExecutable` equals the app name.
 - `NSAppleEventsUsageDescription` is in Info.plist.
-- The code signature identifier equals the bundle id, and the signature verifies. It also prints the designated requirement.
+- The code signature identifier equals the bundle id, and the signature verifies. It also prints who signed it (ad-hoc or the certificate) and the designated requirement.
 - Under the hardened runtime (`--production`), the `com.apple.security.automation.apple-events` entitlement is present.
 - `Contents/MacOS/<app name>` exists.
 - The note editor is at `Contents/Resources/*.bundle/Contents/Resources/NoteEditor/index.html`. The bundle is matched by content, not name, the same rule as `NoteServer.resolveBundledResourcesURL()`. A missing editor once crashed the app at launch, and a double-wrapped bundle silently disables notes.
@@ -83,7 +83,34 @@ macOS needs a valid signature whose identifier matches `CFBundleIdentifier` for:
 - **Accessibility** (window attachment) and **Automation** (switching to open tabs): TCC stores each grant with the app's designated requirement.
 - **Gatekeeper** when the app runs outside the App Store.
 
-### Ad-hoc (development)
+Without notarization, Gatekeeper blocks a **downloaded** app whatever its signature (ad-hoc or self-signed) until the quarantine flag is cleared (`xattr -dr com.apple.quarantine /Applications/SidebArc.app`). Only Developer ID + notarization avoids that. A local build is never quarantined.
+
+| Signature | Grants survive rebuilds/releases | Another app can claim the grants | Setup |
+|---|---|---|---|
+| Self-signed identity (recommended) | Yes | No | Once, on the Mac that builds |
+| Ad-hoc (fallback) | Yes | Yes, any binary with the bundle id on that Mac | None |
+| Developer ID | Yes | No | Paid Apple Developer account |
+
+`dev_sign` (`scripts/lib/app-config.sh`, used by `build.sh` and `run.sh`) uses `LOCAL_SIGNING_IDENTITY` from the environment or `.signing-config`, and falls back to ad-hoc when it's unset. A configured identity that isn't in the keychain stops the build: a silent ad-hoc fallback would change the requirement.
+
+### Self-signed identity
+
+codesign's default requirement for a certificate is the bundle id **and** the certificate's hash: `identifier "io.github.giannirondini.sidebarc" and certificate leaf = H"…"`. The certificate travels inside the signature, so other Macs (e.g. one that installs the DMG) need nothing installed, and the certificate doesn't have to be trusted.
+
+Setup, once, on the Mac that builds:
+
+1. Keychain Access › Keychain Access › Certificate Assistant › **Create a Certificate…**: Name `SidebArc Local Signing`, Identity Type **Self-Signed Root**, Certificate Type **Code Signing** › Create. Leave its trust settings alone.
+2. `cp .signing-config.template .signing-config` (git-ignored) and check the name. `security find-identity -p codesigning` lists it as `CSSMERR_TP_NOT_TRUSTED`, which is expected (`-v` hides it).
+3. Build. The first signature asks to let `codesign` use the key: **Always Allow**.
+4. `./scripts/verify-build.sh` shows `Signed by: SidebArc Local Signing` and the requirement with `certificate leaf`.
+5. **Once per Mac, re-grant.** TCC keeps the requirement that applied when a permission was granted, so grants made for an ad-hoc build keep matching any binary with the bundle id. Reset them and grant again so TCC stores the certificate requirement:
+   ```bash
+   tccutil reset Accessibility io.github.giannirondini.sidebarc
+   tccutil reset AppleEvents io.github.giannirondini.sidebarc
+   ```
+6. **Back it up.** Keychain Access › My Certificates › the certificate › Export… as `.p12` (certificate + private key). A new certificate has a new hash, so every Mac would have to re-grant once.
+
+### Ad-hoc (fallback)
 
 ```bash
 codesign --force --deep --sign - \
@@ -91,9 +118,9 @@ codesign --force --deep --sign - \
   .build/bundler/SidebArc.app
 ```
 
-By default an ad-hoc signature's designated requirement is the build's `cdhash`, which changes on every build, so TCC treated each rebuild as a new app and dropped its Accessibility and Automation grants. `adhoc_sign` (`scripts/lib/app-config.sh`) pins the requirement to the bundle id so grants should survive rebuilds; `codesign -d -r- .build/bundler/SidebArc.app` shows `designated => identifier "io.github.giannirondini.sidebarc"`. Development only: on this Mac any binary signed with that identifier matches the grants. If a grant still doesn't stick, reset it (below).
+By default an ad-hoc signature's designated requirement is the build's `cdhash`, which changes on every build, so TCC treated each rebuild as a new app and dropped its Accessibility and Automation grants. `adhoc_sign` (`scripts/lib/app-config.sh`) pins the requirement to the bundle id so grants survive rebuilds; `codesign -d -r- .build/bundler/SidebArc.app` shows `designated => identifier "io.github.giannirondini.sidebarc"`. On that Mac any binary signed with that identifier matches the grants; use a self-signed identity to close that. If a grant still doesn't stick, reset it (below).
 
-Ad-hoc builds have no hardened runtime, so they need no entitlements.
+Ad-hoc and self-signed builds have no hardened runtime, so they need no entitlements.
 
 ### Developer ID (distribution)
 

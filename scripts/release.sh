@@ -3,30 +3,45 @@
 # Names come from Bundler.toml (see scripts/lib/app-config.sh).
 #
 # Usage:
-#   ./scripts/release.sh <version>        # Full release: build, tag, push, create GitHub release
-#   ./scripts/release.sh <version> --dry-run  # Build and sign only, skip git/GitHub operations
+#   ./scripts/release.sh <version> [--dry-run] [--no-notarize]
+#
+#   (default)      Developer ID signing + notarization (.notarization-config)
+#   --no-notarize  Signed with the self-signed identity (.signing-config), not notarized.
+#                  Users clear the quarantine flag once per download (xattr); the release
+#                  notes say how.
+#   --dry-run      Build and sign only, skip git/GitHub operations
 #
 # Example:
 #   ./scripts/release.sh 0.2.0
-#   ./scripts/release.sh 0.2.0 --dry-run
+#   ./scripts/release.sh 0.2.0 --no-notarize --dry-run
 
 set -e
 
 # Parse arguments
-if [ -z "$1" ]; then
-    echo "Usage: $0 <version> [--dry-run]"
+usage() {
+    echo "Usage: $0 <version> [--dry-run] [--no-notarize]"
     echo ""
     echo "Examples:"
-    echo "  $0 0.2.0           # Full release"
-    echo "  $0 0.2.0 --dry-run # Build only, skip git/GitHub"
+    echo "  $0 0.2.0                          # Full release (Developer ID, notarized)"
+    echo "  $0 0.2.0 --no-notarize            # Full release, self-signed, not notarized"
+    echo "  $0 0.2.0 --no-notarize --dry-run  # Build only, skip git/GitHub"
     exit 1
+}
+
+if [ -z "$1" ]; then
+    usage
 fi
 
 NEW_VERSION="$1"
 DRY_RUN=false
-if [ "$2" = "--dry-run" ]; then
-    DRY_RUN=true
-fi
+NOTARIZE=true
+for arg in "${@:2}"; do
+    case $arg in
+        --dry-run) DRY_RUN=true ;;
+        --no-notarize) NOTARIZE=false ;;
+        *) echo "Unknown argument: $arg"; usage ;;
+    esac
+done
 
 # Validate version format (semver: X.Y.Z or X.Y.Z-suffix)
 if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
@@ -39,7 +54,22 @@ fi
 cd "$(dirname "$0")/.."
 source scripts/lib/app-config.sh
 
+# A release without notarization must be signed with the self-signed identity: an
+# ad-hoc release would let any app with the bundle id claim the users' grants, and a
+# different identity between releases would reset them.
+if [ "$NOTARIZE" = false ]; then
+    load_signing_config
+    if [ -z "$LOCAL_SIGNING_IDENTITY" ]; then
+        echo "❌ --no-notarize needs LOCAL_SIGNING_IDENTITY (.signing-config)"
+        echo "   See docs/BUILD_AND_CODESIGN.md › Self-signed identity"
+        exit 1
+    fi
+fi
+
 echo "🚀 Releasing $APP_NAME v${NEW_VERSION}"
+if [ "$NOTARIZE" = false ]; then
+    echo "   (not notarized — signed with \"$LOCAL_SIGNING_IDENTITY\")"
+fi
 if [ "$DRY_RUN" = true ]; then
     echo "   (dry-run mode — git/GitHub operations will be skipped)"
 fi
@@ -129,10 +159,15 @@ echo "$NEW_VERSION" > VERSION
 echo "  ✓ VERSION file updated"
 echo ""
 
-# Step 2: Build production DMG (signed and notarized)
-echo "📦 Step 2: Building production DMG..."
+# Step 2: Build the DMG
 echo "────────────────────────────────────────"
-./scripts/build.sh --production --dmg
+if [ "$NOTARIZE" = true ]; then
+    echo "📦 Step 2: Building production DMG (Developer ID, notarized)..."
+    ./scripts/build.sh --production --dmg
+else
+    echo "📦 Step 2: Building DMG (self-signed, not notarized)..."
+    ./scripts/build.sh --dmg
+fi
 echo "────────────────────────────────────────"
 echo ""
 
@@ -185,6 +220,18 @@ if [ -n "$RELEASE_DESCRIPTION" ]; then
 ${RELEASE_DESCRIPTION}"
 else
     GH_RELEASE_NOTES="## $APP_NAME v${NEW_VERSION}"
+fi
+if [ "$NOTARIZE" = false ]; then
+    GH_RELEASE_NOTES="${GH_RELEASE_NOTES}
+
+### Install
+This build isn't notarized by Apple, so macOS blocks it until the download's quarantine flag is cleared. After dragging **${APP_NAME}.app** to Applications, run once:
+
+\`\`\`bash
+xattr -dr com.apple.quarantine /Applications/${APP_NAME}.app
+\`\`\`
+
+Accessibility and Automation permissions carry over from the previous release."
 fi
 gh release create "v${NEW_VERSION}" "$DMG_PATH" \
     --title "v${NEW_VERSION}" \

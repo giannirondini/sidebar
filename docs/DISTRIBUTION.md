@@ -25,8 +25,8 @@ echo "1.1.0" > VERSION
 
 | Build | Command | Signing | Notarized | User experience |
 |---|---|---|---|---|
-| Development | `./scripts/build.sh` | Ad-hoc | No | Gatekeeper warning |
-| Development DMG | `./scripts/build.sh --dmg` | Ad-hoc | No | Gatekeeper warning |
+| Development | `./scripts/build.sh` | Self-signed (`.signing-config`), else ad-hoc | No | Runs locally; a downloaded copy is blocked until `xattr` |
+| DMG | `./scripts/build.sh --dmg` | Self-signed, else ad-hoc | No | Blocked until `xattr` |
 | Production | `./scripts/build.sh --production` | Developer ID | No | Click-through warning |
 | Production DMG | `./scripts/build.sh --production --dmg` | Developer ID | Yes | No warning |
 
@@ -55,17 +55,18 @@ SidebArc <version>/
 ## Releasing
 
 ```bash
-./scripts/release.sh 1.1.0             # full release
-./scripts/release.sh 1.1.0 --dry-run   # build and sign only, no git/GitHub
+./scripts/release.sh 1.1.0                          # Developer ID, notarized
+./scripts/release.sh 1.1.0 --no-notarize            # self-signed, not notarized
+./scripts/release.sh 1.1.0 --no-notarize --dry-run  # build and sign only, no git/GitHub
 ```
 
 The script:
 
 1. Checks the working tree is clean (except `VERSION` and `Bundler.toml`), that `gh` is installed, the branch, and that the tag doesn't exist.
 2. Opens your editor with the commits since the previous tag, for the release notes.
-3. Writes `VERSION` and runs `./scripts/build.sh --production --dmg`.
+3. Writes `VERSION` and runs `./scripts/build.sh --production --dmg`, or `./scripts/build.sh --dmg` with `--no-notarize`. `--no-notarize` requires the self-signed identity (`.signing-config`): an ad-hoc release would let any app with the bundle id claim the users' grants, and another identity would reset them.
 4. Commits `VERSION` and `Bundler.toml`, tags `v<version>`, pushes.
-5. Runs `gh release create` with the DMG and the notes.
+5. Runs `gh release create` with the DMG and the notes; with `--no-notarize` the notes get an Install section with the `xattr` command.
 
 `--dry-run` stops after the build and prints the remaining git/GitHub commands.
 
@@ -74,7 +75,11 @@ The script:
 1. Download `SidebArc-<version>.dmg` from GitHub Releases.
 2. Open it and drag **SidebArc** onto **Applications**.
 3. Eject the disk image and launch SidebArc.
-4. Unnotarized (development) builds: macOS warns on first launch; right-click → Open, or allow it in System Settings → Privacy & Security.
+4. Builds that aren't notarized (`--no-notarize`, `build.sh --dmg`): macOS blocks the app until the download's quarantine flag is cleared, once per new version:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/SidebArc.app
+   ```
+   (Or System Settings → Privacy & Security → Open Anyway.) Accessibility and Automation grants carry over between releases signed with the same identity.
 
 To update, quit SidebArc and repeat with the new DMG. Data lives in `~/Library/Application Support/io.github.giannirondini.sidebarc/` and is kept across updates.
 

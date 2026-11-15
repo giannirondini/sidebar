@@ -86,7 +86,14 @@ fi
 echo "   Format: $SIGNATURE_FORMAT"
 echo "   Signature Type: $SIGNATURE_TYPE"
 echo "   Info.plist entries: $INFO_PLIST_ENTRIES"
-# Ad-hoc builds pin it to the bundle id so privacy grants survive rebuilds (adhoc_sign).
+SIGNING_AUTHORITY=$(echo "$CODESIGN_OUTPUT" | grep -m1 "^Authority=" | cut -d= -f2-)
+# Ad-hoc builds pin the requirement to the bundle id so privacy grants survive rebuilds;
+# a self-signed identity adds the certificate's hash, so no other app can claim them.
+if [ "$SIGNATURE_TYPE" = "adhoc" ]; then
+    echo "   Signed: ad-hoc (any app with this bundle id would match the grants; see docs/BUILD_AND_CODESIGN.md › Self-signed identity)"
+else
+    echo "   Signed by: ${SIGNING_AUTHORITY:-unknown}"
+fi
 echo "   Designated requirement: $(codesign -d -r- "$APP_PATH" 2>&1 | sed -n 's/^designated => //p')"
 
 # Under the hardened runtime, Apple Events need the entitlement or they fail silently.

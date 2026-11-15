@@ -10,6 +10,8 @@
 #   APPLE_EVENTS_USAGE  `NSAppleEventsUsageDescription` from `[apps.<name>.plist]`
 #   ENTITLEMENTS    entitlements for hardened-runtime (production) signing
 #
+# Signing: dev_sign (self-signed LOCAL_SIGNING_IDENTITY from .signing-config, else ad-hoc).
+#
 # Swift mirrors APP_NAME and BUNDLE_ID in `AppIdentity` (Constants.swift);
 # AppIdentityTests fails if they drift.
 
@@ -86,13 +88,53 @@ patch_info_plist() {
     plist_set "$INFO_PLIST" NSAppleEventsUsageDescription "$APPLE_EVENTS_USAGE"
 }
 
-# Ad-hoc (development) signature. The default ad-hoc designated requirement is the
-# build's cdhash, which changes on every build, so macOS treats each rebuild as a new
-# app and drops its privacy grants (Automation, Accessibility). Pinning the requirement
-# to the bundle id keeps them across rebuilds. Development only: on this Mac any
-# binary with that identifier would match the grants.
+# Ad-hoc signature, the fallback when no local identity is configured. The default
+# ad-hoc designated requirement is the build's cdhash, which changes on every build,
+# so macOS treats each rebuild as a new app and drops its privacy grants (Automation,
+# Accessibility). Pinning the requirement to the bundle id keeps them across rebuilds,
+# but on that Mac any binary with that identifier would match the grants.
 adhoc_sign() {
     codesign --force --deep --sign - \
         -r="designated => identifier \"$BUNDLE_ID\"" \
         "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+}
+
+# LOCAL_SIGNING_IDENTITY: the name of a self-signed code-signing certificate in the
+# login keychain (docs/BUILD_AND_CODESIGN.md). The environment wins over the
+# git-ignored .signing-config. Empty = ad-hoc.
+load_signing_config() {
+    if [ -z "${LOCAL_SIGNING_IDENTITY:-}" ] && [ -f "$PROJECT_ROOT/.signing-config" ]; then
+        source "$PROJECT_ROOT/.signing-config"
+    fi
+    LOCAL_SIGNING_IDENTITY="${LOCAL_SIGNING_IDENTITY:-}"
+}
+
+# Signs with the local identity when one is configured, otherwise ad-hoc. A
+# self-signed signature gets codesign's default requirement (bundle id + the
+# certificate's hash), so grants survive rebuilds and releases and no other app can
+# claim them. A configured identity that can't be found is an error, not a silent
+# ad-hoc fallback, which would reset the grants. Sets SIGNED_WITH for messages.
+dev_sign() {
+    load_signing_config
+    if [ -z "$LOCAL_SIGNING_IDENTITY" ]; then
+        adhoc_sign
+        SIGNED_WITH="ad-hoc (requirement pinned to the bundle id)"
+        return
+    fi
+    # Not `find-identity -v`: an untrusted self-signed certificate signs fine but
+    # isn't listed as valid.
+    if ! security find-identity -p codesigning | grep -qF "\"$LOCAL_SIGNING_IDENTITY\""; then
+        echo "❌ Signing identity \"$LOCAL_SIGNING_IDENTITY\" not found in the keychain" >&2
+        echo "   Create it (docs/BUILD_AND_CODESIGN.md › Self-signed identity), or unset" >&2
+        echo "   LOCAL_SIGNING_IDENTITY / remove .signing-config to sign ad-hoc." >&2
+        exit 1
+    fi
+    codesign --force --deep --timestamp=none \
+        --sign "$LOCAL_SIGNING_IDENTITY" \
+        "$APP_BUNDLE" 2>&1 | grep -v "replacing existing signature" || true
+    if ! codesign -dvv "$APP_BUNDLE" 2>&1 | grep -qF "Authority=$LOCAL_SIGNING_IDENTITY"; then
+        echo "❌ Signing with \"$LOCAL_SIGNING_IDENTITY\" failed (see the codesign output above)" >&2
+        exit 1
+    fi
+    SIGNED_WITH="self-signed identity \"$LOCAL_SIGNING_IDENTITY\""
 }
