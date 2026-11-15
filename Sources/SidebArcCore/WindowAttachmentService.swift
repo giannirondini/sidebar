@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import os
 @preconcurrency import ApplicationServices
 
 @MainActor
@@ -20,6 +21,8 @@ protocol WindowAttachmentServiceDelegate: AnyObject {
 @MainActor
 final class WindowAttachmentService {
     static let shared = WindowAttachmentService()
+    /// `/usr/bin/log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "attach"'`
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "attach")
 
     weak var delegate: WindowAttachmentServiceDelegate?
 
@@ -63,12 +66,12 @@ final class WindowAttachmentService {
 
     func enable(browserBundleIds: [String], position: SidebarPosition) {
         guard checkAccessibilityPermissions() else {
-            print("WindowAttachmentService: Accessibility permissions not granted")
+            logger.notice("Accessibility not granted")
             requestAccessibilityPermissions()
             return
         }
 
-        print("WindowAttachmentService: Enabling attachment to \(browserBundleIds), position: \(position)")
+        logger.notice("Enabled for \(browserBundleIds, privacy: .public), position \(position.rawValue, privacy: .public)")
 
         self.browserBundleIds = Set(browserBundleIds.map { $0.lowercased() })
         self.sidebarPosition = position
@@ -101,7 +104,7 @@ final class WindowAttachmentService {
     }
 
     func disable() {
-        print("WindowAttachmentService: Disabling attachment")
+        logger.notice("Disabled")
 
         isEnabled = false
         cleanupObservers()
@@ -131,6 +134,12 @@ final class WindowAttachmentService {
     }
 
     // MARK: - Browser Window Discovery
+
+    /// Hides the sidebar, logging why (the reason helps with flicker reports).
+    private func hide(_ reason: String) {
+        logger.notice("Hide: \(reason, privacy: .public)")
+        delegate?.attachmentServiceShouldHideWindow(self)
+    }
 
     // MARK: - Decisions (pure, tested)
 
@@ -364,13 +373,13 @@ final class WindowAttachmentService {
 
         // Find the frontmost browser window
         guard let windowElement = findFrontmostBrowserWindow() else {
-            delegate?.attachmentServiceShouldHideWindow(self)
+            hide("position update: no frontmost browser window")
             return
         }
 
         // Get the browser window frame
         guard let browserFrame = getWindowFrame(windowElement) else {
-            delegate?.attachmentServiceShouldHideWindow(self)
+            hide("position update: no browser window frame")
             return
         }
 
@@ -384,7 +393,7 @@ final class WindowAttachmentService {
         // Calculate new SidebArc frame
         guard let newFrame = calculateSidebarFrame(browserFrame: browserFrame, sidebarWidth: sidebarWidth) else {
             // Invalid frame (browser too narrow, not enough space, etc.)
-            delegate?.attachmentServiceShouldHideWindow(self)
+            hide("position update: no room beside the browser window")
             return
         }
 
@@ -393,6 +402,9 @@ final class WindowAttachmentService {
         lastSidebarFrame = newFrame
 
         // Only update if frame changed or if we're forcing show (e.g., app switch)
+        if forceShow {
+            logger.notice("Show beside \(self.attachedBundleId ?? "?", privacy: .public) pid \(self.browserApp?.processIdentifier ?? 0)")
+        }
         if frameChanged || calculatedFrameChanged || forceShow {
             // Notify delegate to position window with smooth animation
             delegate?.attachmentService(self, shouldPositionWindow: newFrame, animated: true)
@@ -405,13 +417,12 @@ final class WindowAttachmentService {
     /// the previously followed browser when it is a different one.
     private func attachToBrowser() {
         guard !browserBundleIds.isEmpty else {
-            print("WindowAttachmentService: No browsers configured")
+            logger.notice("No browsers configured")
             return
         }
 
         guard let frontmost = BrowserManager.frontmostApp() else {
-            print("WindowAttachmentService: Could not determine frontmost app")
-            delegate?.attachmentServiceShouldHideWindow(self)
+            hide("no frontmost app")
             return
         }
 
@@ -422,8 +433,7 @@ final class WindowAttachmentService {
         }
 
         guard isAttachable(frontmost.bundleIdentifier), let frontmostId = frontmost.bundleIdentifier?.lowercased() else {
-            print("WindowAttachmentService: No attachable browser active")
-            delegate?.attachmentServiceShouldHideWindow(self)
+            hide("frontmost \(frontmost.bundleIdentifier ?? "?") (pid \(frontmost.processIdentifier)) is not a browser of the set")
             return
         }
 
@@ -438,8 +448,7 @@ final class WindowAttachmentService {
 
         // Find browser window
         guard let windowElement = findFrontmostBrowserWindow(activeApp: frontmost) else {
-            print("WindowAttachmentService: No browser window found")
-            delegate?.attachmentServiceShouldHideWindow(self)
+            hide("no window found for \(frontmost.bundleIdentifier ?? "?") pid \(frontmost.processIdentifier) (active \(frontmost.isActive), launched \(frontmost.isFinishedLaunching))")
             return
         }
 
@@ -455,7 +464,7 @@ final class WindowAttachmentService {
             return
         }
 
-        print("WindowAttachmentService: New window detected, setting up observers")
+        logger.debug("New browser window, observing it")
 
         // Different window - cleanup old window observers and setup new ones
         cleanupObservers()
@@ -486,7 +495,7 @@ final class WindowAttachmentService {
                 if notificationName == (kAXMovedNotification as String) || notificationName == (kAXResizedNotification as String) {
                     service.schedulePositionUpdate()
                 } else if notificationName == (kAXUIElementDestroyedNotification as String) {
-                    service.delegate?.attachmentServiceShouldHideWindow(service)
+                    service.hide("browser window closed")
                     service.cleanupObservers()
                 }
             }
@@ -589,18 +598,17 @@ final class WindowAttachmentService {
                     browsers: self.browserBundleIds
                 ) {
                 case .attach:
-                    print("WindowAttachmentService: Browser \(bundleId ?? "?") activated, attaching")
+                    self.logger.notice("Activated \(bundleId ?? "?", privacy: .public) pid \(app.processIdentifier): attach")
                     self.lastFrontmostBundleId = bundleId
                     self.attachToBrowser()
                 case .keepVisible:
                     // Clicking between the browser and the sidebar.
-                    print("WindowAttachmentService: \(AppIdentity.displayName) activated after a browser - keeping visible")
+                    self.logger.notice("Activated SidebArc after a browser: keep visible")
                 case .hide:
-                    print("WindowAttachmentService: Non-browser app activated - hiding")
                     if bundleId != ownBundleId {
                         self.lastFrontmostBundleId = bundleId
                     }
-                    self.delegate?.attachmentServiceShouldHideWindow(self)
+                    self.hide("activated \(bundleId ?? "?") pid \(app.processIdentifier), not a browser of the set")
                 }
             }
         }
@@ -625,7 +633,7 @@ final class WindowAttachmentService {
                         return
                     }
                     // Followed browser quit - hide and clean up
-                    self.delegate?.attachmentServiceShouldHideWindow(self)
+                    self.hide("followed browser \(attached) quit")
                     self.detachFromBrowser()
                 }
             }
