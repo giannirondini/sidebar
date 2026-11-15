@@ -4,7 +4,7 @@ This document describes how Chrome exports bookmarks, the Netscape Bookmark HTML
 
 ## Overview
 
-Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file via the Bookmark Manager. Unlike Arc, which stores bookmarks in a JSON file at a known path, Chrome has no stable file-system path that can be read directly — the user must manually export. SidebArc provides a file picker for the user to select the exported HTML file, then parses it into an SidebArc workspace.
+Chrome (and all Chromium-based browsers) can export bookmarks as an HTML file via the Bookmark Manager. Unlike Arc, which stores bookmarks in a JSON file at a known path, Chrome has no stable file-system path that can be read directly — the user must manually export. Settings › **Import from Chrome** opens a file picker (`.html` only); the file is parsed off the main thread and added as one new **space**, "Imported Bookmarks", in the current space's profile. Favorites are not touched.
 
 ## The Netscape Bookmark File Format
 
@@ -81,7 +81,7 @@ Chrome always exports with these top-level folders:
 | `Other bookmarks` | "Other Bookmarks" section | not set |
 | `Mobile bookmarks` | Synced mobile bookmarks | not set |
 
-These are structural containers, not user-created folders. The importer **flattens** them — their children are merged into the root level of the SidebArc workspace.
+These are structural containers, not user-created folders. The importer **flattens** them — their children are merged into the root level of the new space.
 
 ## How to Export from Chrome
 
@@ -217,25 +217,17 @@ This ensures the user doesn't see Chrome's internal folder structure in SidebArc
 
 ### Phase 5: Apply to SidebArc
 
-1. **Create workspace** named "Imported Bookmarks" with `.ember` color:
-   ```swift
-   _ = appModel.createWorkspace(name: "Imported Bookmarks", colorId: .ember)
-   ```
+`SettingsContentViewController.applyChromeImport`:
 
-2. **Add nodes recursively** using the same `addNodeToWorkspace` helper used by Arc import:
-   ```swift
-   for node in result.workspace.nodes {
-       addNodeToWorkspace(node, parentId: nil, appModel: appModel)
-   }
-   ```
-
-3. **Stay on Settings**: Unlike Arc import (which restores the previously selected workspace), Chrome import does not call `selectWorkspace`. The new workspace is internally selected by `createWorkspace`; when the user navigates away from Settings, they see the imported workspace.
+1. **Create the space** "Imported Bookmarks" (`.ember`) with `AppModel.createWorkspace`, which puts it in the current space's profile and selects it.
+2. **Add the nodes** recursively (`addNodeToWorkspace`): `addFolder(name:parentId:isExpanded: false)` for folders and `addLink(urlString:title:parentId:)` for links, so each node is its own `AppModel` mutation (and save).
+3. **Stay on Settings**: it doesn't call `selectWorkspace` (that would close Settings). Leaving Settings shows the new space. Arc import, by contrast, leaves the selection unchanged.
 
 ## Data Mapping
 
 | Chrome HTML Element | SidebArc Concept | Notes |
 |---------------------|-----------------|-------|
-| `<H3>` folder header | Folder node | Name extracted from inner text |
+| `<H3>` folder header | Folder node | Name extracted from inner text; imported collapsed |
 | `<A HREF>` link | Link node | URL from HREF attribute, title from inner text |
 | `<DL>...</DL>` block | Folder children | Nesting depth preserved |
 | Bookmarks bar folder | (flattened) | Children merged into root |
@@ -309,7 +301,7 @@ The line-by-line regex approach is simple, fast, and robust for this specific fo
 
 ### Output: SidebArc Structure
 ```
-Workspace: "Imported Bookmarks" (color: ember)
+Space: "Imported Bookmarks" (color: ember)
 ├── Link: "GitHub" (https://github.com)
 ├── Folder: "Development"
 │   └── Link: "Stack Overflow" (https://stackoverflow.com)
@@ -330,10 +322,11 @@ Workspace: "Imported Bookmarks" (color: ember)
 | Source | Fixed path (`~/Library/.../StorableSidebar.json`) | User-selected HTML file |
 | Format | JSON | Netscape Bookmark HTML |
 | Parser | JSONDecoder + Codable models | Line-by-line regex scanner |
-| Workspaces | Multiple (one per Arc space) | Single ("Imported Bookmarks") |
-| Top-level folders | N/A (Arc spaces are workspaces) | Flattened into root |
+| Spaces | Multiple (one per Arc space, in the Arc profile's profile) | Single ("Imported Bookmarks", current profile) |
+| Top-level folders | N/A (Arc spaces become spaces) | Flattened into root |
+| Favorites | Per Arc profile (`topAppsContainerIDs`) | None |
 | File picker | No (reads from known path) | Yes (NSOpenPanel, .html filter) |
-| Post-import | Restores previous workspace | Selects new workspace, stays on Settings |
+| Post-import | Selection unchanged; one `AppModel` mutation | Selects the new space, stays on Settings; one mutation per node |
 | Color assignment | Cyclic (ember, ruby, coral, ...) | Always `.ember` |
 
 ## Edge Cases Handled
@@ -354,7 +347,7 @@ Folder nesting of arbitrary depth is fully preserved. The stack-based parser nat
 Folders and links at the same level are preserved in file order. A sequence of link-folder-link produces exactly that order in the output.
 
 ### 6. Non-Chrome Browsers
-Since all Chromium browsers (Brave, Edge, Vivaldi, Opera) and Firefox export the same Netscape format, the importer works for any of them. The "Chrome" branding in the UI is for clarity, but the parser is format-agnostic.
+All Chromium browsers (Brave, Edge, Vivaldi, Opera), Firefox and Safari export the same Netscape format, so the parser reads their files too. Only the four folder names above are flattened (exact, case-sensitive match); other browsers' top-level folders (Firefox's "Bookmarks Toolbar", for example) are imported as ordinary folders.
 
 ### 7. Case Variations
 All regex patterns use `.caseInsensitive` to handle `<DL>` vs `<dl>`, `<DT>` vs `<dt>`, etc. Some browsers output lowercase HTML.
@@ -364,7 +357,7 @@ All regex patterns use `.caseInsensitive` to handle `<DL>` vs `<dl>`, `<DT>` vs 
 Favicons are NOT extracted from the HTML file's `ICON` or `ICON_URI` attributes. Instead:
 
 1. Links are created with `faviconPath: nil`
-2. When displayed in the UI, `NodeCollectionViewItem` automatically requests favicons from `FaviconService`
+2. When shown, the list (`NodeListViewController`) requests favicons from `FaviconService`
 3. `FaviconService` fetches fresh favicons asynchronously from each site
 4. Favicons are cached in `~/Library/Application Support/io.github.giannirondini.sidebarc/Icons/`
 
@@ -407,7 +400,7 @@ func createBookmarksHTML(body: String) -> String {
 }
 ```
 
-### Test Cases (14 total)
+### Test Cases (`ChromeImportTests`, 15)
 
 | Test | What It Verifies |
 |------|-----------------|
@@ -420,10 +413,11 @@ func createBookmarksHTML(body: String) -> String {
 | HTML entities decoded | `&amp;`, `&#39;`, etc. in titles |
 | Order preserved | Links appear in file order |
 | Empty title | Falls back to "Untitled" |
-| Workspace properties | Name is "Imported Bookmarks", colorId is `.ember` |
+| Space properties | Name is "Imported Bookmarks", colorId is `.ember` |
 | File not found | Returns `.fileNotFound` |
 | Invalid URLs skipped | `javascript:`, `chrome://`, empty URLs |
 | HTML entities in folder names | Entity decoding applies to `<H3>` content too |
+| Entities not double-decoded | `&amp;lt;` stays `&lt;` (`&amp;` is decoded last) |
 | Mixed content | Folders and links at same level, correct order |
 
 ## References
@@ -434,6 +428,7 @@ func createBookmarksHTML(body: String) -> String {
 - **ChromeImportTests.swift** — Unit tests
 - **Models.swift** — `Node`, `Folder`, `Link` data models
 - **ArcImportService.swift** — `ImportWorkspace` struct (shared between importers)
+- **AppModel.swift** — `createWorkspace`, `addFolder`, `addLink`
 
 ### External References
 - [Netscape Bookmark File Format (Microsoft)](https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa753582(v=vs.85))
@@ -446,7 +441,7 @@ The Netscape Bookmark HTML format is exported by all major browsers. The parser 
 
 | Browser | Export Location | Tested |
 |---------|----------------|--------|
-| Google Chrome | Bookmark Manager → Export | Yes |
+| Google Chrome | Bookmark Manager → Export | Yes (upstream) |
 | Brave | Bookmark Manager → Export | Expected (same Chromium base) |
 | Microsoft Edge | Favorites → Export | Expected (same Chromium base) |
 | Vivaldi | Bookmarks → Export | Expected (same Chromium base) |
