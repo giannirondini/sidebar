@@ -6,6 +6,7 @@ final class AppModel {
     let noteStorage: NoteStorage
     private(set) var state: AppState
     var onChange: (() -> Void)?
+    var onSaveFailure: (() -> Void)?
     /// Whether the Settings page is shown instead of the current space. Runtime
     /// state only: not saved, so the app always starts on a space. The selected
     /// space is kept while Settings is shown, and closing Settings returns to it.
@@ -234,8 +235,10 @@ final class AppModel {
 
     /// Replaces all data with a validated export (`DataTransfer.readPackage`), in one
     /// mutation. Order: back up the raw current data in `Backups/pre-import-<ts>/`
-    /// (nothing changes if that fails), copy the export's notes and icons in, point icon paths at this
-    /// Mac's `Icons/`, then replace the state. Selects the export's selected space
+    /// (nothing changes if that fails), stage and copy the export's notes and icons,
+    /// point icon paths at this Mac's `Icons/`, then replace the state. A later
+    /// copy or save failure reports the backup because some files may have changed.
+    /// Selects the export's selected space
     /// (or the first). Returns the backup.
     @discardableResult
     func applyDataImport(_ package: DataTransfer.Package) throws -> URL {
@@ -249,7 +252,11 @@ final class AppModel {
         } catch {
             throw DataTransfer.TransferError.fileOperationFailed("Backing up the current data failed: \(error.localizedDescription)")
         }
-        try DataTransfer.copyFiles(from: package, into: store)
+        do {
+            try DataTransfer.copyFiles(from: package, into: store)
+        } catch {
+            throw DataTransfer.TransferError.fileOperationFailed("Import could not copy all files. Some notes or icons may have changed. The previous data is in \(backup.path). \(error.localizedDescription)")
+        }
         var next = DataTransfer.remapIconPaths(in: package.state, iconsDirectory: store.iconsDirectory()).repaired()
         if next.workspaces.isEmpty {
             next.workspaces = [Workspace(id: UUID(), name: "Inbox", colorId: .defaultColor(), items: [], profileId: next.profiles[0].id)]
@@ -257,11 +264,14 @@ final class AppModel {
         if !next.workspaces.contains(where: { $0.id == next.selectedWorkspaceId }) {
             next.selectedWorkspaceId = next.workspaces[0].id
         }
+        guard store.save(next) else {
+            throw DataTransfer.TransferError.fileOperationFailed("Import could not save the new library. Some notes or icons may have changed. The previous data is in \(backup.path).")
+        }
         if let selected = next.selectedWorkspaceId {
             UserDefaults.standard.set(selected.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
         }
         state = next
-        persist()
+        onChange?()
         logger.info("Imported data from an export; previous data backed up to \(backup.lastPathComponent, privacy: .public)")
         return backup
     }
@@ -373,15 +383,22 @@ final class AppModel {
     }
 
     func deleteWorkspace(id: UUID) {
-        guard state.workspaces.count > 1 else { return }
-        state.workspaces.removeAll { $0.id == id }
+        guard state.workspaces.count > 1,
+              let index = state.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let previous = state
+        let removed = state.workspaces.remove(at: index)
         if state.selectedWorkspaceId == id {
             state.selectedWorkspaceId = state.workspaces.first?.id
+        }
+        if persist(notify: false) {
             if let newId = state.selectedWorkspaceId {
                 UserDefaults.standard.set(newId.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
             }
+            removed.items.forEach { cleanupFiles(for: $0) }
+        } else {
+            state = previous
         }
-        persist()
+        onChange?()
     }
 
     func moveWorkspace(id: UUID, direction: WorkspaceMoveDirection) {
@@ -485,15 +502,20 @@ final class AppModel {
         }
     }
 
-    func deleteNode(id: UUID) {
-        guard let wsId = workspaceIdContaining(nodeId: id) else { return }
-        var removed: Node?
-        updateWorkspace(id: wsId) { workspace in
-            removed = removeNode(id: id, nodes: &workspace.items)
-        }
-        if let node = removed {
+    @discardableResult
+    func deleteNode(id: UUID) -> Bool {
+        guard let wsId = workspaceIdContaining(nodeId: id) else { return false }
+        let previous = state
+        guard let index = state.workspaces.firstIndex(where: { $0.id == wsId }),
+              let node = removeNode(id: id, nodes: &state.workspaces[index].items) else { return false }
+        let saved = persist(notify: false)
+        if saved {
             cleanupFiles(for: node)
+        } else {
+            state = previous
         }
+        onChange?()
+        return saved
     }
 
     private func cleanupFiles(for node: Node) {
@@ -511,11 +533,15 @@ final class AppModel {
         }
     }
 
-    func moveNode(id: UUID, toParentId: UUID?, index: Int) {
+    @discardableResult
+    func moveNode(id: UUID, toParentId: UUID?, index: Int) -> Bool {
         guard let sourceWsId = workspaceIdContaining(nodeId: id),
               let sourceWs = state.workspaces.first(where: { $0.id == sourceWsId }),
-              let location = findNodeLocation(id: id, nodes: sourceWs.items) else { return }
-        if let toParentId, isDescendant(nodeId: toParentId, ofAncestor: id, in: sourceWs.items) { return }
+              let location = findNodeLocation(id: id, nodes: sourceWs.items) else { return false }
+        if let toParentId {
+            guard case .folder? = findNode(id: toParentId, in: sourceWs.items),
+                  !isDescendant(nodeId: toParentId, ofAncestor: id, in: sourceWs.items) else { return false }
+        }
 
         updateWorkspace(id: sourceWsId) { workspace in
             guard let removedNode = removeNode(id: id, nodes: &workspace.items) else { return }
@@ -524,9 +550,9 @@ final class AppModel {
             if location.parentId == toParentId, location.index < targetIndex {
                 targetIndex -= 1
             }
-
             insertNode(removedNode, parentId: toParentId, index: targetIndex, nodes: &workspace.items)
         }
+        return true
     }
 
     func moveNodeToWorkspace(id: UUID, workspaceId: UUID) {
@@ -543,21 +569,16 @@ final class AppModel {
             }
             return
         }
-        if let parentId,
-           let destWs = state.workspaces.first(where: { $0.id == workspaceId }),
-           findNodeLocation(id: parentId, nodes: destWs.items) == nil {
-            return
+        if let parentId {
+            guard let destWs = state.workspaces.first(where: { $0.id == workspaceId }),
+                  case .folder? = findNode(id: parentId, in: destWs.items) else { return }
         }
 
-        var removedNode: Node?
-        updateWorkspace(id: sourceWsId, notify: false) { workspace in
-            removedNode = removeNode(id: id, nodes: &workspace.items)
-        }
-        guard let node = removedNode else { return }
-
-        updateWorkspace(id: workspaceId) { workspace in
-            insertNode(node, parentId: parentId, index: index, nodes: &workspace.items)
-        }
+        guard let sourceIndex = state.workspaces.firstIndex(where: { $0.id == sourceWsId }),
+              let destIndex = state.workspaces.firstIndex(where: { $0.id == workspaceId }),
+              let node = removeNode(id: id, nodes: &state.workspaces[sourceIndex].items) else { return }
+        insertNode(node, parentId: parentId, index: index, nodes: &state.workspaces[destIndex].items)
+        persist()
     }
 
     func setFolderExpanded(id: UUID, isExpanded: Bool) {
@@ -831,6 +852,11 @@ final class AppModel {
         findNodeLocation(id: nodeId, nodes: currentWorkspace.items)
     }
 
+    func location(of nodeId: UUID, in workspaceId: UUID) -> NodeLocation? {
+        guard let workspace = state.workspaces.first(where: { $0.id == workspaceId }) else { return nil }
+        return findNodeLocation(id: nodeId, nodes: workspace.items)
+    }
+
     func nodeById(_ id: UUID) -> Node? {
         nodeById(id, nodes: currentWorkspace.items)
     }
@@ -864,20 +890,19 @@ final class AppModel {
     func moveNodesToWorkspace(nodeIds: [UUID], toWorkspaceId: UUID) {
         guard toWorkspaceId != currentWorkspace.id else { return }
         guard !nodeIds.isEmpty else { return }
+        guard state.workspaces.contains(where: { $0.id == toWorkspaceId }) else { return }
 
+        guard let sourceIndex = state.workspaces.firstIndex(where: { $0.id == currentWorkspace.id }),
+              let destIndex = state.workspaces.firstIndex(where: { $0.id == toWorkspaceId }) else { return }
         var nodesToMove: [Node] = []
-
-        updateWorkspace(id: currentWorkspace.id, notify: false) { workspace in
-            for nodeId in nodeIds {
-                if let removed = removeNode(id: nodeId, nodes: &workspace.items) {
-                    nodesToMove.append(removed)
-                }
+        for nodeId in nodeIds {
+            if let removed = removeNode(id: nodeId, nodes: &state.workspaces[sourceIndex].items) {
+                nodesToMove.append(removed)
             }
         }
-
-        updateWorkspace(id: toWorkspaceId) { workspace in
-            workspace.items.append(contentsOf: nodesToMove)
-        }
+        guard !nodesToMove.isEmpty else { return }
+        state.workspaces[destIndex].items.append(contentsOf: nodesToMove)
+        persist()
     }
 
     @discardableResult
@@ -948,11 +973,14 @@ final class AppModel {
         }
     }
 
-    private func persist(notify: Bool = true) {
-        store.save(state)
+    @discardableResult
+    private func persist(notify: Bool = true) -> Bool {
+        let saved = store.save(state)
+        if !saved { onSaveFailure?() }
         if notify {
             onChange?()
         }
+        return saved
     }
 
     private func insertNode(_ node: Node, parentId: UUID?, index: Int?, nodes: inout [Node]) {

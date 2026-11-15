@@ -176,7 +176,7 @@ final class WindowAttachmentService {
 
     /// Hides the sidebar, logging why (the reason helps with flicker reports).
     private func hide(_ reason: String) {
-        logger.notice("Hide: \(reason, privacy: .public)")
+        logger.debug("Hide: \(reason, privacy: .private)")
         delegate?.attachmentServiceShouldHideWindow(self)
     }
 

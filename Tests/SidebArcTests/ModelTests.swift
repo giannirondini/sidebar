@@ -9,6 +9,55 @@ import Testing
         return DataStore(baseDirectory: temp)
     }
 
+    @Test func invalidMoveDestinationsPreserveNodes() throws {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        let folder = model.addFolder(name: "Folder", parentId: nil)
+        let link = model.addLink(urlString: "https://example.com", title: "Link", parentId: folder)
+        let otherLink = model.addLink(urlString: "https://example.org", title: "Other", parentId: nil)
+        let before = try Data(contentsOf: store.dataFileURL)
+        #expect(!model.moveNode(id: link, toParentId: UUID(), index: 0))
+        #expect(!model.moveNode(id: link, toParentId: otherLink, index: 0))
+        model.moveNodesToWorkspace(nodeIds: [folder], toWorkspaceId: UUID())
+        #expect(model.nodeAcrossWorkspaces(id: link) != nil)
+        #expect(try Data(contentsOf: store.dataFileURL) == before)
+    }
+
+    @Test(arguments: [false, true])
+    func deletionDoesNotRemoveNotesWhenSaveFails(deleteSpace: Bool) throws {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        let workspace = model.createWorkspace(name: "Disposable", colorId: .moss)
+        let folder = model.addFolder(name: "Folder", parentId: nil)
+        let note = model.addNote(title: "Note", parentId: folder, content: "important")
+        let before = model.state
+        let fm = FileManager.default
+        try fm.removeItem(at: store.dataFileURL)
+        try fm.createDirectory(at: store.dataFileURL, withIntermediateDirectories: false)
+        var failures = 0
+        model.onSaveFailure = { failures += 1 }
+        if deleteSpace {
+            model.deleteWorkspace(id: workspace)
+        } else {
+            model.deleteNode(id: folder)
+        }
+        #expect(failures == 1)
+        #expect(deeplyEqual(model.state, before))
+        #expect(model.noteStorage.read(id: note) == "important")
+    }
+
+    @Test func deletingWorkspaceRemovesNestedNotesAfterSave() {
+        let store = makeStore()
+        let model = AppModel(store: store)
+        let workspace = model.createWorkspace(name: "Disposable", colorId: .moss)
+        let folder = model.addFolder(name: "Folder", parentId: nil)
+        let note = model.addNote(title: "Note", parentId: folder, content: "private")
+        model.deleteWorkspace(id: workspace)
+        #expect(!FileManager.default.fileExists(atPath: store.noteFileURL(for: note).path))
+        #expect(!model.workspaces.contains(where: { $0.id == workspace }))
+        expectPersisted(model, in: store)
+    }
+
     /// One profile holding every given workspace.
     private func makeState(_ workspaces: (UUID) -> [Workspace], favorites: [Link] = []) -> AppState {
         let profile = Profile(name: "Default", favorites: favorites)

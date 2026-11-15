@@ -73,8 +73,9 @@ final class DataStore {
                 // Persist right away so profile ids are stable across launches, but only
                 // once a copy of the v1 file is safe outside the rotating backups.
                 if writePreMigrationCopy(data, fromVersion: version) {
-                    save(decoded)
-                    logger.info("Migrated data.json from schema v\(version) to v2")
+                    if save(decoded) {
+                        logger.info("Migrated data.json from schema v\(version) to v2")
+                    }
                 }
                 return decoded
             }
@@ -125,14 +126,15 @@ final class DataStore {
     /// The `data.json` this store reads and writes.
     var dataFileURL: URL { dataURL }
 
-    func save(_ state: AppState) {
+    @discardableResult
+    func save(_ state: AppState) -> Bool {
         guard loadIssue == nil else {
             logger.error("Refusing to overwrite unreadable data.json")
-            return
+            return false
         }
         guard state.schemaVersion == AppState.currentSchemaVersion else {
             logger.error("Refusing to save state with unsupported schema v\(state.schemaVersion)")
-            return
+            return false
         }
         backupDataFileIfNeeded()
         ensureDirectories()
@@ -141,8 +143,10 @@ final class DataStore {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(state)
             try data.write(to: dataURL, options: [.atomic])
+            return true
         } catch {
             logger.error("Failed to save data.json: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 

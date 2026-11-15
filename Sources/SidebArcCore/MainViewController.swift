@@ -592,9 +592,10 @@ final class MainViewController: NSViewController {
         let alert = NSAlert()
         alert.messageText = "Delete Space"
         alert.informativeText = "This will delete the space and everything inside it."
-        alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
+        alert.addButton(withTitle: "Delete")
+        alert.buttons.last?.hasDestructiveAction = true
+        if alert.runModal() == .alertSecondButtonReturn {
             model.deleteWorkspace(id: id)
         }
     }

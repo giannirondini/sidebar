@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import JavaScriptCore
 import Testing
 @testable import SidebArcCore
@@ -119,6 +120,86 @@ import Testing
         #expect(context.evaluateScript("editor.contenteditable").toString() == "false")
     }
 
+    @Test func editorFlushesPendingEditsWithRevisionOnPageHide() throws {
+        let resources = try #require(NoteServer.resolveBundledResourcesURL())
+        let script = try String(contentsOf: resources.appendingPathComponent("NoteEditor/editor.js"), encoding: .utf8)
+        let context = try #require(JSContext())
+        context.evaluateScript("""
+            var handlers = {}, calls = [];
+            var editor = { innerText: "", classList: { toggle: function() {} },
+                setAttribute: function() {}, addEventListener: function(k, f) { handlers[k] = f; } };
+            Object.defineProperty(editor, "textContent", { set: function(s) { editor.innerText = s; } });
+            var generic = { textContent: "", classList: { add: function(){}, remove: function(){} },
+                setAttribute: function(){}, addEventListener: function(){} };
+            var document = {
+                body: { classList: { add: function(){} } },
+                getElementById: function(id) { return id === "editor" ? editor : generic; },
+                querySelectorAll: function() { return []; }, addEventListener: function(){}
+            };
+            var window = { location: { search: "?id=123" }, sidebArcAuthToken: "secret",
+                addEventListener: function(k, f) { handlers[k] = f; } };
+            var navigator = { platform: "Mac" };
+            var crypto = { randomUUID: function() { return "00000000-0000-0000-0000-000000000001"; } };
+            function Blob(parts) { this.size = parts[0].length; }
+            function URLSearchParams() { this.get = function() { return "123"; }; }
+            function setInterval() { return 1; } function clearInterval() {}
+            var scheduledSave;
+            function setTimeout(f) { scheduledSave = f; return 1; } function clearTimeout() {}
+            function fetch(path, options) {
+                calls.push(options);
+                return Promise.resolve({ ok: true, status: 200, json: function() {
+                    return Promise.resolve({ content: "original", revision: "rev", title: "Test" });
+                } });
+            }
+            """)
+        context.evaluateScript(script)
+        #expect(context.exception == nil)
+        context.evaluateScript("editor.innerText = 'edited'; handlers.input(); handlers.pagehide();")
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("calls.length").toInt32() == 2)
+        #expect(context.evaluateScript("calls[1].keepalive").toBool())
+        #expect(context.evaluateScript("JSON.parse(calls[1].body).content").toString() == "edited")
+        #expect(context.evaluateScript("JSON.parse(calls[1].body).revision").toString() == "rev")
+        context.evaluateScript("editor.innerText = 'a'.repeat(70000); handlers.input(); scheduledSave();")
+        #expect(context.exception == nil)
+        #expect(!context.evaluateScript("calls[2].keepalive").toBool())
+    }
+
+    @Test func cliAcceptsDashContentAndUsesTypedDeletes() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("skills/sidebarc/scripts/sidebarc.js"), encoding: .utf8)
+        let script = source.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
+        let context = try #require(JSContext())
+        context.evaluateScript("""
+            var stderr = "";
+            var process = { argv: ["node", "cli", "help"], stdout: { write: function(){} },
+                stderr: { write: function(s){ stderr = s; } }, exit: function(){ throw new Error("exit"); } };
+            function require(name) {
+                if (name === "fs") return { readFileSync: function() {
+                    return JSON.stringify({ host: "127.0.0.1", port: 1234, token: "a".repeat(64) });
+                } };
+                if (name === "os") return { homedir: function() { return "/tmp"; } };
+                return { join: function() { return "/tmp/endpoint"; } };
+            }
+            var requestedURL = "";
+            function fetch(url) {
+                requestedURL = url;
+                return Promise.resolve({ ok: true, text: function() { return Promise.resolve('{"ok":true}'); } });
+            }
+            """)
+        context.evaluateScript(script)
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("parseArgs(['--content', '---']).flags.content").toString() == "---")
+        context.evaluateScript("COMMANDS['links:delete']({ positional: ['id'], flags: {} });")
+        #expect(context.exception == nil)
+        #expect(context.evaluateScript("requestedURL").toString().hasSuffix("/api/nodes/id?type=link"))
+        context.evaluateScript("""
+            fetch = function() { return Promise.reject({ message: "offline", cause: { code: "ECONNREFUSED" } }); };
+            request("GET", "/api/state").catch(function() {});
+            """)
+        #expect(context.evaluateScript("JSON.parse(stderr).code").toString() == "app_not_running")
+    }
+
     @Test func testAPIRoutesRequireBearerToken() async throws {
         let (server, _) = try await startServer()
         defer { server.stop() }
@@ -198,6 +279,18 @@ import Testing
         )
         #expect(authorizedStatus == 200)
         #expect(!body.isEmpty)
+    }
+
+    @Test func editorIndexHasFramingAndScriptPolicy() async throws {
+        let (server, _) = try await startServer()
+        defer { server.stop() }
+        let url = try #require(URL(string: "http://127.0.0.1:\(server.port)/"))
+        let (_, response) = try await URLSession.shared.data(from: url)
+        let http = try #require(response as? HTTPURLResponse)
+        let policy = try #require(http.value(forHTTPHeaderField: "Content-Security-Policy"))
+        #expect(policy.contains("frame-ancestors 'none'"))
+        #expect(policy.contains("script-src 'sha256-"))
+        #expect(policy.contains("blob:"))
     }
 
     @Test func testAgentEndpointFileIsOwnerOnly() throws {
@@ -287,6 +380,138 @@ import Testing
         let (status, raw) = try await request(method: method, path: path, body: data ?? nil, server: server)
         let parsed = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] ?? [:]
         return (status, parsed)
+    }
+
+    @Test func moveValidationAndTypedDeletionPreserveNodes() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let workspace = model.currentWorkspace.id
+        let folder = model.addFolder(name: "Folder", parentId: nil)
+        let child = model.addLink(urlString: "https://example.com", title: "Child", parentId: folder)
+        let second = model.addLink(urlString: "https://example.org", title: "Second", parentId: folder)
+        let childPath = "/api/nodes/\(child.uuidString)"
+        let (reorder, _) = try await apiRequest("POST", "\(childPath)/move", body: ["index": 2], server: server)
+        #expect(reorder == 200)
+        #expect(model.location(of: child, in: workspace)?.parentId == folder)
+        #expect(model.location(of: second, in: workspace)?.index == 0)
+        let (badId, badIdBody) = try await apiRequest("POST", "\(childPath)/move", body: ["to_parent_id": "typo"], server: server)
+        #expect(badId == 400)
+        #expect(badIdBody["code"] as? String == "bad_id")
+        let (cycle, _) = try await apiRequest("POST", "/api/nodes/\(folder.uuidString)/move", body: ["to_parent_id": folder.uuidString], server: server)
+        #expect(cycle == 409)
+        let (wrongType, _) = try await apiRequest("DELETE", "/api/nodes/\(folder.uuidString)?type=link", server: server)
+        #expect(wrongType == 409)
+        #expect(model.nodeAcrossWorkspaces(id: child) != nil)
+        let (badParent, _) = try await apiRequest("POST", "/api/notes", body: ["workspace_id": workspace.uuidString, "title": "Bad", "parent_id": "typo"], server: server)
+        #expect(badParent == 400)
+        let (badPatch, _) = try await apiRequest("PATCH", "/api/folders/\(folder.uuidString)", body: ["nam": "Changed"], server: server)
+        #expect(badPatch == 400)
+    }
+
+    @Test func noteRevisionsRejectExternalChangesAndOrderEditorSaves() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let note = model.addNote(title: "Note", parentId: nil, content: "original")
+        let path = "/api/notes/\(note.uuidString)"
+        let (_, initial) = try await apiRequest("GET", path, server: server)
+        let base = try #require(initial["revision"] as? String)
+        let client = UUID().uuidString
+        let (first, _) = try await apiRequest("PUT", path, body: ["content": "first", "revision": base, "client_id": client, "sequence": 1], server: server)
+        #expect(first == 200)
+        let (second, _) = try await apiRequest("PUT", path, body: ["content": "latest", "revision": base, "client_id": client, "sequence": 2], server: server)
+        #expect(second == 200)
+        let (late, _) = try await apiRequest("PUT", path, body: ["content": "late", "revision": base, "client_id": client, "sequence": 1], server: server)
+        #expect(late == 409)
+        #expect(model.noteStorage.read(id: note) == "latest")
+        let (_, saved) = try await apiRequest("GET", path, server: server)
+        let revision = try #require(saved["revision"] as? String)
+        _ = try await apiRequest("PUT", path, body: ["content": "agent edit"], server: server)
+        let (conflict, json) = try await apiRequest("PUT", path, body: ["content": "stale", "revision": revision, "client_id": client, "sequence": 3], server: server)
+        #expect(conflict == 409)
+        #expect(json["code"] as? String == "note_conflict")
+        #expect(model.noteStorage.read(id: note) == "agent edit")
+        let (bad, badJSON) = try await apiRequest("GET", "/api/notes/not-a-uuid", server: server)
+        #expect(bad == 400)
+        #expect(badJSON["code"] as? String == "bad_id")
+    }
+
+    @Test func rawRequestsRejectMalformedAndOversizedInput() async throws {
+        let (server, _) = try await startServer()
+        defer { server.stop() }
+        let port = server.port
+        for (request, expected) in [
+            ("BAD\r\n\r\n", "400"),
+            ("POST / HTTP/1.1\r\nContent-Length: nope\r\n\r\n", "400"),
+            ("POST / HTTP/1.1\r\nContent-Length: 8388609\r\n\r\n", "413"),
+            ("GET / HTTP/1.1\r\nX-Long: " + String(repeating: "a", count: 16384) + "\r\n\r\n", "413")
+        ] {
+            let response = try await Task.detached {
+                let fd = socket(AF_INET, SOCK_STREAM, 0)
+                guard fd >= 0 else { throw POSIXError(.EIO) }
+                defer { close(fd) }
+                var timeout = timeval(tv_sec: 5, tv_usec: 0)
+                setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+                var address = sockaddr_in()
+                address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+                address.sin_family = sa_family_t(AF_INET)
+                address.sin_port = port.bigEndian
+                address.sin_addr = in_addr(s_addr: in_addr_t(INADDR_LOOPBACK).bigEndian)
+                let connected = withUnsafePointer(to: &address) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+
+                }
+                guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
+                let bytes = Array(request.utf8)
+                let sent = bytes.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+                guard sent == bytes.count else { throw POSIXError(.EIO) }
+                var buffer = [UInt8](repeating: 0, count: 512)
+                let count = recv(fd, &buffer, buffer.count, 0)
+                guard count > 0 else { throw POSIXError(.EIO) }
+                return String(decoding: buffer.prefix(count), as: UTF8.self)
+            }.value
+            #expect(response.hasPrefix("HTTP/1.1 \(expected)"))
+        }
+    }
+
+    @Test func idleConnectionsAreLimitedAndReleased() async throws {
+        let (server, model) = try await startServer()
+        defer { server.stop() }
+        let port = server.port
+        let sockets = try await Task.detached {
+            var sockets: [Int32] = []
+            do {
+                for _ in 0..<32 {
+                    let fd = socket(AF_INET, SOCK_STREAM, 0)
+                    guard fd >= 0 else { throw POSIXError(.EIO) }
+                    sockets.append(fd)
+                    var address = sockaddr_in()
+                    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+                    address.sin_family = sa_family_t(AF_INET)
+                    address.sin_port = port.bigEndian
+                    address.sin_addr = in_addr(s_addr: in_addr_t(INADDR_LOOPBACK).bigEndian)
+                    let result = withUnsafePointer(to: &address) {
+                        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                            connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                        }
+                    }
+                    guard result == 0 else { throw POSIXError(.ECONNREFUSED) }
+                }
+                return sockets
+            } catch {
+                sockets.forEach { close($0) }
+                throw error
+            }
+        }.value
+        defer { sockets.forEach { close($0) } }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let (full, _) = try await request(method: "GET", path: "/api/state", server: server)
+        #expect(full == 503)
+        try await Task.sleep(nanoseconds: 15_500_000_000)
+        let (available, _) = try await request(method: "GET", path: "/api/state", server: server)
+        #expect(available == 200)
+        #expect(!model.workspaces.isEmpty)
     }
 
     @Test func testWorkspaceRoundTrip() async throws {

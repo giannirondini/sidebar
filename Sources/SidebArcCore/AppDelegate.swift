@@ -32,6 +32,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
             NSApp.terminate(nil)
             return
         }
+        var saveFailureShown = false
+        let dataFilePath = model.dataFileURL.path
+        model.onSaveFailure = {
+            guard !saveFailureShown else { return }
+            saveFailureShown = true
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.alertStyle = .critical
+                alert.messageText = "Could not save your library"
+                alert.informativeText = "Recent changes may not be saved. Check available disk space and permissions, then try again. Your data file is at \(dataFilePath)."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
         let mainViewController = MainViewController(model: model)
         self.mainViewController = mainViewController
 

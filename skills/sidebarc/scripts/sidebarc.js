@@ -42,7 +42,7 @@ function parseArgs(argv) {
       } else {
         key = arg.slice(2);
         const next = argv[i + 1];
-        if (next === undefined || next.startsWith('--')) {
+        if (next === undefined || /^--[a-z]/i.test(next)) {
           value = true;
         } else {
           value = next;
@@ -145,6 +145,9 @@ async function request(method, route, body) {
   try {
     res = await fetch(url, init);
   } catch (e) {
+    if (['ECONNREFUSED', 'ECONNRESET'].includes(e.cause?.code)) {
+      fail('app_not_running', 'SidebArc does not appear to be running. Ask the user to launch SidebArc.app, then retry.');
+    }
     fail('http_failed', `Could not reach SidebArc at ${url}: ${e.message}`);
   }
   const text = await res.text();
@@ -189,19 +192,19 @@ const COMMANDS = {
 
   'folders:create': cmdFoldersCreate,
   'folders:rename': cmdFoldersRename,
-  'folders:delete': cmdNodesDelete,
+  'folders:delete': (args) => cmdNodesDelete(args, 'folder'),
 
   'links:create': cmdLinksCreate,
   'links:rename': cmdLinksRename,
   'links:set-url': cmdLinksSetUrl,
   'links:set-browser': cmdLinksSetBrowser,
-  'links:delete': cmdNodesDelete,
+  'links:delete': (args) => cmdNodesDelete(args, 'link'),
 
   'notes:create': cmdNotesCreate,
   'notes:rename': cmdNotesRename,
   'notes:read': cmdNotesRead,
   'notes:write': cmdNotesWrite,
-  'notes:delete': cmdNodesDelete,
+  'notes:delete': (args) => cmdNodesDelete(args, 'note'),
 
   'nodes:move': cmdNodesMove,
   'nodes:delete': cmdNodesDelete,
@@ -448,18 +451,18 @@ async function cmdNodesMove(args) {
   }
   const index = getFlag(args.flags, 'index');
   if (index !== undefined && index !== true) {
-    const n = parseInt(index, 10);
-    if (Number.isNaN(n)) fail('bad_index', '--index must be an integer');
+    const n = Number(index);
+    if (!/^-?\d+$/.test(index) || !Number.isSafeInteger(n)) fail('bad_index', '--index must be an integer');
     body.index = n;
   }
   await request('POST', `/api/nodes/${id}/move`, body);
   printJSON({ ok: true });
 }
 
-async function cmdNodesDelete(args) {
+async function cmdNodesDelete(args, type) {
   const id = args.positional[0];
   if (!id) fail('missing_arg', 'Usage: <type>:delete ID');
-  await request('DELETE', `/api/nodes/${id}`);
+  await request('DELETE', `/api/nodes/${id}${type ? `?type=${type}` : ''}`);
   printJSON({ ok: true });
 }
 

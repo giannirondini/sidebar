@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 import os
 import Security
@@ -17,6 +18,13 @@ final class NoteServer {
     let token: String
     private var listener: NWListener?
     private(set) var port: UInt16 = 0
+    private struct NoteWrite {
+        let client: String
+        let sequence: Int
+        let bases: [String]
+        let result: String
+    }
+    private var noteWrites: [UUID: NoteWrite] = [:]
 
     init(model: AppModel, resourcesURL: URL? = NoteServer.resolveBundledResourcesURL()) throws {
         self.model = model
@@ -69,6 +77,8 @@ final class NoteServer {
     func stop() {
         listener?.cancel()
         listener = nil
+        for connection in connections.values { connection.cancel() }
+        connections.removeAll()
         port = 0
     }
 
@@ -86,31 +96,69 @@ final class NoteServer {
 
     // MARK: - Connection handling
 
-    private func handleConnection(_ connection: NWConnection) {
-        connection.start(queue: .main)
-        receive(on: connection, accumulated: Data())
+    private static let maxHeaderBytes = 16 * 1024
+    private static let maxBodyBytes = 8 * 1024 * 1024
+    private static let idleTimeout: TimeInterval = 15
+    private static let maxConnections = 32
+    private var connections: [UUID: NWConnection] = [:]
+
+    @MainActor
+    private final class ConnectionState {
+        let connection: NWConnection
+        var buffer = Data()
+        var timeout: DispatchWorkItem?
+
+        init(_ connection: NWConnection) {
+            self.connection = connection
+        }
     }
 
-    private func receive(on connection: NWConnection, accumulated: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+    private func handleConnection(_ connection: NWConnection) {
+        connection.start(queue: .main)
+        guard connections.count < Self.maxConnections else {
+            sendStatus(503, message: "Too Many Connections", on: connection)
+            return
+        }
+        let id = UUID()
+        connections[id] = connection
+        connection.stateUpdateHandler = { [weak self] state in
+            if case .cancelled = state {
+                MainActor.assumeIsolated { _ = self?.connections.removeValue(forKey: id) }
+            } else if case .failed = state {
+                MainActor.assumeIsolated { _ = self?.connections.removeValue(forKey: id) }
+            }
+        }
+        receive(ConnectionState(connection))
+    }
+
+    private func receive(_ state: ConnectionState) {
+        state.timeout?.cancel()
+        let connection = state.connection
+        let timeout = DispatchWorkItem { connection.cancel() }
+        state.timeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleTimeout, execute: timeout)
+        state.connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             MainActor.assumeIsolated {
-                var buffer = accumulated
+                state.timeout?.cancel()
                 if let data, !data.isEmpty {
-                    buffer.append(data)
+                    state.buffer.append(data)
                 }
-
-                if let request = self.tryParseRequest(buffer: buffer) {
-                    self.respond(to: request, on: connection)
+                switch self.tryParseRequest(buffer: state.buffer) {
+                case .request(let request):
+                    self.respond(to: request, on: state.connection)
                     return
+                case .invalid(let status):
+                    self.sendStatus(status, message: status == 413 ? "Payload Too Large" : "Bad Request", on: state.connection)
+                    return
+                case .incomplete:
+                    break
                 }
-
                 if isComplete || error != nil {
-                    connection.cancel()
+                    state.connection.cancel()
                     return
                 }
-
-                self.receive(on: connection, accumulated: buffer)
+                self.receive(state)
             }
         }
     }
@@ -125,40 +173,51 @@ final class NoteServer {
         let body: Data
     }
 
-    private func tryParseRequest(buffer: Data) -> ParsedRequest? {
-        guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+    private enum ParseResult {
+        case incomplete
+        case invalid(Int)
+        case request(ParsedRequest)
+    }
+
+    private func tryParseRequest(buffer: Data) -> ParseResult {
+        guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+            return buffer.count > Self.maxHeaderBytes ? .invalid(413) : .incomplete
+        }
+        guard headerEnd.upperBound <= Self.maxHeaderBytes else { return .invalid(413) }
         let headerData = buffer.subdata(in: 0..<headerEnd.lowerBound)
-        guard let headerString = String(data: headerData, encoding: .utf8) else { return nil }
+        guard let headerString = String(data: headerData, encoding: .utf8) else { return .invalid(400) }
 
         var lines = headerString.components(separatedBy: "\r\n")
-        guard !lines.isEmpty else { return nil }
+        guard !lines.isEmpty else { return .invalid(400) }
         let requestLine = lines.removeFirst()
         let parts = requestLine.components(separatedBy: " ")
-        guard parts.count >= 2 else { return nil }
+        guard parts.count == 3, !parts[0].isEmpty, parts[1].hasPrefix("/"),
+              parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0" else { return .invalid(400) }
         let method = parts[0]
         let target = parts[1]
 
         var headers: [String: String] = [:]
         for line in lines {
-            guard let colon = line.firstIndex(of: ":") else { continue }
+            guard let colon = line.firstIndex(of: ":"), colon != line.startIndex else { return .invalid(400) }
             let name = String(line[..<colon]).lowercased()
             let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            guard headers[name] == nil else { return .invalid(400) }
             headers[name] = value
         }
-
-        // Treat malformed or negative Content-Length as zero so the body
-        // slice below cannot be inverted (which would trap).
-        let contentLength = max(0, Int(headers["content-length"] ?? "0") ?? 0)
+        guard headers["transfer-encoding"] == nil else { return .invalid(400) }
+        let rawLength = headers["content-length"] ?? "0"
+        guard !rawLength.isEmpty, rawLength.utf8.allSatisfy({ (48...57).contains($0) }) else { return .invalid(400) }
+        guard let contentLength = Int(rawLength), contentLength <= Self.maxBodyBytes else { return .invalid(413) }
         let bodyStart = headerEnd.upperBound
         let bodyAvailable = buffer.count - bodyStart
         if bodyAvailable < contentLength {
-            return nil
+            return .incomplete
         }
 
         let body = buffer.subdata(in: bodyStart..<(bodyStart + contentLength))
 
         let (path, query) = Self.splitTarget(target)
-        return ParsedRequest(method: method, path: path, query: query, headers: headers, body: body)
+        return .request(ParsedRequest(method: method, path: path, query: query, headers: headers, body: body))
     }
 
     private static func splitTarget(_ target: String) -> (String, [String: String]) {
@@ -222,6 +281,7 @@ final class NoteServer {
                 return
             }
         }
+        if request.method == "PATCH", !validatePatch(request, on: connection) { return }
 
         if request.method == "GET" && request.path == "/favicon.ico" {
             sendResponse(status: 204, statusMessage: "No Content", contentType: "image/x-icon", body: Data(), on: connection)
@@ -307,7 +367,7 @@ final class NoteServer {
         // Generic node ops
         case ("DELETE", let path) where path.hasPrefix("/api/nodes/"):
             let idString = String(path.dropFirst("/api/nodes/".count))
-            handleDeleteNode(idString: idString, on: connection)
+            handleDeleteNode(idString: idString, expectedType: request.query["type"], on: connection)
         case ("POST", let path) where path.hasPrefix("/api/nodes/") && path.hasSuffix("/move"):
             let middle = path.dropFirst("/api/nodes/".count).dropLast("/move".count)
             handleMoveNode(idString: String(middle), body: request.body, on: connection)
@@ -334,43 +394,88 @@ final class NoteServer {
 
     private func handleGetNote(idString: String, on connection: NWConnection) {
         guard let id = UUID(uuidString: idString) else {
-            sendStatus(400, message: "Bad Note Id", on: connection)
+            sendError(status: 400, code: "bad_id", message: "Invalid note id", on: connection)
             return
         }
         guard let title = noteTitle(id: id) else {
-            sendStatus(404, message: "Note Not Found", on: connection)
+            sendError(status: 404, code: "note_not_found", message: "Note not found", on: connection)
             return
         }
         let content = noteStorage.read(id: id)
         let payload: [String: Any] = [
             "id": id.uuidString,
             "title": title,
-            "content": content
+            "content": content,
+            "revision": Self.noteRevision(content)
         ]
         sendJSON(payload, on: connection)
     }
 
     private func handlePutNote(idString: String, body: Data, on connection: NWConnection) {
         guard let id = UUID(uuidString: idString) else {
-            sendStatus(400, message: "Bad Note Id", on: connection)
+            sendError(status: 400, code: "bad_id", message: "Invalid note id", on: connection)
             return
         }
         guard noteTitle(id: id) != nil else {
             // The sidebar entry is gone; do not resurrect the .md file.
-            sendStatus(404, message: "Note Not Found", on: connection)
+            sendError(status: 404, code: "note_not_found", message: "Note not found", on: connection)
             return
         }
         guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let content = json["content"] as? String else {
-            sendStatus(400, message: "Bad Body", on: connection)
+            sendError(status: 400, code: "bad_body", message: "content must be a string", on: connection)
+            return
+        }
+        let current = Self.noteRevision(noteStorage.read(id: id))
+        var client: String?
+        var sequence: Int?
+        var priorBases: [String] = []
+        if let value = json["revision"] {
+            guard let revision = value as? String else {
+                sendError(status: 400, code: "bad_revision", message: "revision must be a string", on: connection)
+                return
+            }
+            if json["client_id"] != nil || json["sequence"] != nil {
+                guard let id = json["client_id"] as? String, UUID(uuidString: id) != nil,
+                      let number = json["sequence"] as? Int, number > 0 else {
+                    sendError(status: 400, code: "bad_revision", message: "Invalid editor write sequence", on: connection)
+                    return
+                }
+                client = id
+                sequence = number
+            }
+            let last = noteWrites[id]
+            let sameClient = last?.client == client && last?.result == current
+            let newer = sequence.map { $0 > (last?.sequence ?? 0) } ?? false
+            let canFollow = sameClient && newer && (last?.bases.contains(revision) ?? false)
+            guard (revision == current && !(sameClient && !newer)) || canFollow else {
+                sendError(status: 409, code: "note_conflict", message: "Note changed since it was loaded", on: connection)
+                return
+            }
+            if sameClient { priorBases = last?.bases ?? [] }
+        } else if json["client_id"] != nil || json["sequence"] != nil {
+            sendError(status: 400, code: "bad_revision", message: "revision is required with an editor write sequence", on: connection)
             return
         }
         do {
             try noteStorage.write(id: id, content: content)
-            sendJSON(["ok": true], on: connection)
+            let revision = Self.noteRevision(content)
+            if let client, let sequence, let base = json["revision"] as? String {
+                priorBases.append(base)
+                priorBases.append(current)
+                noteWrites[id] = NoteWrite(client: client, sequence: sequence, bases: Array(priorBases.suffix(128)), result: revision)
+            } else {
+                noteWrites.removeValue(forKey: id)
+            }
+            sendJSON(["ok": true, "revision": revision], on: connection)
         } catch {
-            sendStatus(500, message: "Write Failed", on: connection)
+            logger.error("Note write failed: \(error.localizedDescription, privacy: .public)")
+            sendError(status: 500, code: "write_failed", message: "Could not write note", on: connection)
         }
+    }
+
+    private static func noteRevision(_ content: String) -> String {
+        SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - Agent API handlers
@@ -573,6 +678,10 @@ final class NoteServer {
             sendError(status: 400, code: "bad_name", message: "name is required", on: connection)
             return
         }
+        guard Self.validOptionalUUID(json["parent_id"]) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid parent_id", on: connection)
+            return
+        }
         let parentId = Self.parseOptionalUUID(json["parent_id"])
         if let parentResult = validateParent(workspaceId: wsId, parentId: parentId, expectFolder: true) {
             switch parentResult {
@@ -635,6 +744,10 @@ final class NoteServer {
         }
         guard BrowserManager.validatedLinkURL(from: url) != nil else {
             sendError(status: 400, code: "bad_url", message: "url must be an HTTP or HTTPS URL with a host", on: connection)
+            return
+        }
+        guard Self.validOptionalUUID(json["parent_id"]) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid parent_id", on: connection)
             return
         }
         let parentId = Self.parseOptionalUUID(json["parent_id"])
@@ -914,6 +1027,10 @@ final class NoteServer {
             sendError(status: 400, code: "bad_title", message: "title is required", on: connection)
             return
         }
+        guard Self.validOptionalUUID(json["parent_id"]) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid parent_id", on: connection)
+            return
+        }
         let parentId = Self.parseOptionalUUID(json["parent_id"])
         if let result = validateParent(workspaceId: wsId, parentId: parentId, expectFolder: true) {
             switch result {
@@ -954,7 +1071,7 @@ final class NoteServer {
         sendOk([:], on: connection)
     }
 
-    private func handleDeleteNode(idString: String, on connection: NWConnection) {
+    private func handleDeleteNode(idString: String, expectedType: String?, on connection: NWConnection) {
         guard let model else {
             sendError(status: 503, code: "model_unavailable", message: "App model not available", on: connection)
             return
@@ -963,11 +1080,25 @@ final class NoteServer {
             sendError(status: 400, code: "bad_id", message: "Invalid id", on: connection)
             return
         }
-        guard model.nodeAcrossWorkspaces(id: id) != nil else {
+        guard let node = model.nodeAcrossWorkspaces(id: id) else {
             sendError(status: 404, code: "node_not_found", message: "Node not found", on: connection)
             return
         }
-        model.deleteNode(id: id)
+        if let expectedType {
+            let matches: Bool
+            switch (expectedType, node) {
+            case ("link", .link), ("folder", .folder), ("note", .note): matches = true
+            default: matches = false
+            }
+            guard matches else {
+                sendError(status: 409, code: "node_type_mismatch", message: "Node has a different type", on: connection)
+                return
+            }
+        }
+        guard model.deleteNode(id: id) else {
+            sendError(status: 500, code: "save_failed", message: "Could not save the deletion", on: connection)
+            return
+        }
         sendOk([:], on: connection)
     }
 
@@ -988,16 +1119,31 @@ final class NoteServer {
             sendError(status: 400, code: "bad_body", message: "Body must be a JSON object", on: connection)
             return
         }
+        guard Self.validOptionalUUID(json["to_workspace_id"], allowRoot: false),
+              Self.validOptionalUUID(json["to_parent_id"]) else {
+            sendError(status: 400, code: "bad_id", message: "Invalid destination id", on: connection)
+            return
+        }
+        if let value = json["index"], !(value is Int) {
+            sendError(status: 400, code: "bad_index", message: "index must be an integer", on: connection)
+            return
+        }
         let toWsId = Self.parseOptionalUUID(json["to_workspace_id"])
-        let toParentId = Self.parseOptionalUUID(json["to_parent_id"])
+        let destWsId = toWsId ?? sourceWsId
+        let toParentId = json["to_parent_id"] == nil && destWsId == sourceWsId
+            ? model.location(of: id, in: sourceWsId)?.parentId
+            : Self.parseOptionalUUID(json["to_parent_id"])
         let index = json["index"] as? Int
 
+        guard Set(json.keys).isSubset(of: ["to_workspace_id", "to_parent_id", "index"]) else {
+            sendError(status: 400, code: "bad_body", message: "Unknown move field", on: connection)
+            return
+        }
         if json["to_workspace_id"] == nil, json["to_parent_id"] == nil, json["index"] == nil {
             sendError(status: 400, code: "no_move_params", message: "Provide at least one of to_workspace_id, to_parent_id, or index", on: connection)
             return
         }
 
-        let destWsId = toWsId ?? sourceWsId
         guard model.workspaces.contains(where: { $0.id == destWsId }) else {
             sendError(status: 404, code: "workspace_not_found", message: "Destination workspace not found", on: connection)
             return
@@ -1014,7 +1160,10 @@ final class NoteServer {
         }
 
         if destWsId == sourceWsId {
-            model.moveNode(id: id, toParentId: toParentId, index: index ?? Int.max)
+            guard model.moveNode(id: id, toParentId: toParentId, index: index ?? Int.max) else {
+                sendError(status: 409, code: "invalid_move", message: "Cannot move a folder into itself or its descendants", on: connection)
+                return
+            }
         } else {
             model.moveNodeToWorkspace(id: id, workspaceId: destWsId, parentId: toParentId, index: index)
         }
@@ -1022,6 +1171,46 @@ final class NoteServer {
     }
 
     // MARK: - Agent API helpers
+
+    private func validatePatch(_ request: ParsedRequest, on connection: NWConnection) -> Bool {
+        let allowed: Set<String>
+        switch request.path {
+        case let path where path.hasPrefix("/api/workspaces/"):
+            allowed = ["name", "colorId", "profile_id"]
+        case let path where path.hasPrefix("/api/profiles/"):
+            allowed = ["name", "browser_bundle_id"]
+        case let path where path.hasPrefix("/api/folders/"):
+            allowed = ["name", "expanded"]
+        case let path where path.hasPrefix("/api/links/"):
+            allowed = ["title", "url", "browser_bundle_id"]
+        case let path where path.hasPrefix("/api/notes/"):
+            allowed = ["title"]
+        default:
+            return true
+        }
+        guard let json = parseJSONObject(request.body), !json.isEmpty,
+              Set(json.keys).isSubset(of: allowed) else {
+            sendError(status: 400, code: "bad_body", message: "Invalid or unknown patch fields", on: connection)
+            return false
+        }
+        for (key, value) in json {
+            if key == "expanded" {
+                guard CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else {
+                    sendError(status: 400, code: "bad_body", message: "expanded must be a boolean", on: connection)
+                    return false
+                }
+            } else if key == "browser_bundle_id", value is NSNull {
+                continue
+            } else {
+                guard let string = value as? String,
+                      key == "browser_bundle_id" || !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    sendError(status: 400, code: "bad_body", message: "\(key) must be a valid string", on: connection)
+                    return false
+                }
+            }
+        }
+        return true
+    }
 
     private enum ParentValidation {
         case success
@@ -1055,6 +1244,13 @@ final class NoteServer {
     private static func parseOptionalUUID(_ value: Any?) -> UUID? {
         guard let s = value as? String, !s.isEmpty else { return nil }
         return UUID(uuidString: s)
+    }
+
+    private static func validOptionalUUID(_ value: Any?, allowRoot: Bool = true) -> Bool {
+        guard let value else { return true }
+        if value is NSNull { return true }
+        if allowRoot, let string = value as? String, string == "root" { return true }
+        return parseUUID(value) != nil
     }
 
     private static func resolveColor(_ raw: String) -> WorkspaceColorId? {
@@ -1162,7 +1358,14 @@ final class NoteServer {
             sendStatus(404, message: "Asset Missing", on: connection)
             return
         }
-        sendResponse(status: 200, statusMessage: "OK", contentType: "text/html; charset=utf-8", body: Data(html.utf8), on: connection)
+        guard let start = html.range(of: "<script>"), let end = html.range(of: "</script>", range: start.upperBound..<html.endIndex) else {
+            sendStatus(500, message: "Invalid Editor", on: connection)
+            return
+        }
+        let script = Data(html[start.upperBound..<end.lowerBound].utf8)
+        let hash = Data(SHA256.hash(data: script)).base64EncodedString()
+        let policy = "default-src 'none'; script-src 'sha256-\(hash)' blob:; style-src 'unsafe-inline'; connect-src 'self'; img-src https: http: data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        sendResponse(status: 200, statusMessage: "OK", contentType: "text/html; charset=utf-8", body: Data(html.utf8), on: connection, contentSecurityPolicy: policy)
     }
 
     private func serveEditorAsset(relative: String, on connection: NWConnection) {
@@ -1230,13 +1433,16 @@ final class NoteServer {
         sendResponse(status: 200, statusMessage: "OK", contentType: "application/json; charset=utf-8", body: data, on: connection)
     }
 
-    private func sendResponse(status: Int, statusMessage: String, contentType: String, body: Data, on connection: NWConnection) {
+    private func sendResponse(status: Int, statusMessage: String, contentType: String, body: Data, on connection: NWConnection, contentSecurityPolicy: String? = nil) {
         var headers = ""
         headers += "HTTP/1.1 \(status) \(statusMessage)\r\n"
         headers += "Content-Type: \(contentType)\r\n"
         headers += "Content-Length: \(body.count)\r\n"
         headers += "Cache-Control: no-store\r\n"
         headers += "X-Content-Type-Options: nosniff\r\n"
+        if let contentSecurityPolicy {
+            headers += "Content-Security-Policy: \(contentSecurityPolicy)\r\n"
+        }
         headers += "Connection: close\r\n"
         headers += "\r\n"
 

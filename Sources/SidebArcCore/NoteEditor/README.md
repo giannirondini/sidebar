@@ -16,7 +16,12 @@ and served by `NoteServer` over a token-authenticated loopback HTTP listener.
 | File              | Package    | Version | Source                                                              |
 | ----------------- | ---------- | ------- | ------------------------------------------------------------------- |
 | `marked.min.js`   | marked     | 13.0.3  | https://cdn.jsdelivr.net/npm/marked@13.0.3/marked.min.js            |
-| `purify.min.js`   | dompurify  | 3.1.6   | https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js     |
+| `purify.min.js`   | dompurify  | 3.4.18  | https://registry.npmjs.org/dompurify/-/dompurify-3.4.18.tgz        |
 
 To update, replace the file in `vendor/` with a newer minified build from npm
 and update the table above. There is no build step — the file is shipped as-is.
+
+The editor flushes pending edits on page hide using keepalive requests. Writes
+include a content revision; if another client changed the note, the editor
+keeps the local text visible and reports a conflict rather than overwriting it.
+Keepalive is best effort and browser request size limits still apply.

@@ -19,6 +19,11 @@
   let serverTitle = "";
   let noteDeleted = false;
   let serverDisconnected = false;
+  let revision = null;
+  let conflict = false;
+  const clientId = crypto.randomUUID();
+  let nextSequence = 0;
+  let latestAcknowledged = 0;
 
   // Reads/writes against the contenteditable node go through these two
   // helpers so future iterations can layer syntax-aware visual styling
@@ -120,20 +125,7 @@
     document.body.classList.add("server-disconnected");
     editor.setAttribute("contenteditable", "false");
 
-    const main = document.querySelector("main.content");
-    if (main) {
-      main.innerHTML = "";
-      const card = document.createElement("div");
-      card.className = "empty-state";
-      const heading = document.createElement("h2");
-      heading.textContent = "Editor disconnected";
-      const blurb = document.createElement("p");
-      blurb.textContent = "SidebArc restarted, so this tab can no longer reach the editor. Reopen this note from SidebArc to continue editing.";
-      card.appendChild(heading);
-      card.appendChild(blurb);
-      main.appendChild(card);
-    }
-    setStatus("disconnected");
+    setStatus("disconnected — copy your text before reopening");
     document.title = "Disconnected — SidebArc";
   }
 
@@ -157,6 +149,8 @@
       }
       const data = await response.json();
       setContent(data.content || "");
+      revision = data.revision;
+      editor.setAttribute("contenteditable", "plaintext-only");
       serverTitle = data.title || "";
       refreshTitle();
       lastSavedAt = Date.now();
@@ -167,8 +161,12 @@
     }
   }
 
-  async function saveNote() {
-    if (!noteId || noteDeleted || serverDisconnected) return;
+  async function saveNote(onPageHide = false) {
+    saveTimer = null;
+    if (!noteId || noteDeleted || serverDisconnected || conflict || !revision) return;
+    const sequence = ++nextSequence;
+    const content = getContent();
+    const body = JSON.stringify({ content, revision, client_id: clientId, sequence });
     setStatus("saving…");
     try {
       const response = await fetch(`/api/notes/${noteId}`, {
@@ -177,32 +175,55 @@
           Authorization: authorization,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ content: getContent() }),
-        cache: "no-store"
+        body,
+        cache: "no-store",
+        keepalive: onPageHide && new Blob([body]).size <= 60 * 1024
       });
       if (response.status === 404) {
+        if (sequence < nextSequence) return;
         enterDeletedState();
         return;
       }
+      if (response.status === 409) {
+        if (sequence < nextSequence) return;
+        conflict = true;
+        stopSavedTicker();
+        setStatus("conflict — copy your edits and reopen the note");
+        return;
+      }
       if (!response.ok) {
+        if (sequence < nextSequence) return;
         stopSavedTicker();
         setStatus(`save failed (${response.status})`);
         return;
       }
+      const data = await response.json();
+      if (sequence < latestAcknowledged) return;
+      latestAcknowledged = sequence;
+      revision = data.revision;
+      if (sequence < nextSequence || saveTimer) return;
       lastSavedAt = Date.now();
       setStatus("saved");
       scheduleSavedTicker();
     } catch (err) {
+      if (sequence < nextSequence) return;
       enterDisconnectedState();
     }
   }
 
   function scheduleSave() {
-    if (noteDeleted || serverDisconnected) return;
+    if (noteDeleted || serverDisconnected || conflict) return;
     if (saveTimer) clearTimeout(saveTimer);
     setStatus("editing…");
     saveTimer = setTimeout(saveNote, 500);
   }
+
+  window.addEventListener("pagehide", function () {
+    if (saveTimer || nextSequence > latestAcknowledged) {
+      clearTimeout(saveTimer);
+      saveNote(true);
+    }
+  });
 
   function showEdit() {
     editPane.hidden = false;

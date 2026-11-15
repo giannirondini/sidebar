@@ -144,6 +144,52 @@ import Testing
 
     // MARK: - Import
 
+    @Test func importStagesFilesBeforeChangingLiveNotes() throws {
+        let source = try makeSource()
+        let folder = try DataTransfer.export(store: source.store, to: exports)
+        let package = try DataTransfer.readPackage(at: folder)
+        let store = DataStore(baseDirectory: macB)
+        let model = AppModel(store: store)
+        try model.noteStorage.write(id: source.noteId, content: "local")
+        let previousData = try Data(contentsOf: store.dataFileURL)
+        let icons = folder.appendingPathComponent("Icons")
+        try FileManager.default.removeItem(at: icons)
+        try Data("not a folder".utf8).write(to: icons)
+        do {
+            try model.applyDataImport(package)
+            Issue.record("Expected staging to fail")
+        } catch {
+            #expect(error.localizedDescription.contains("pre-import-"))
+        }
+        #expect(model.noteStorage.read(id: source.noteId) == "local")
+        #expect(try Data(contentsOf: store.dataFileURL) == previousData)
+    }
+
+    @MainActor
+    @Test func importReportsFailedFinalSaveAndKeepsPreviousState() throws {
+        let source = try makeSource()
+        let original = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
+        var state = original.state
+        var node = Node.link(Link(id: UUID(), title: "Deep", url: "https://example.com", faviconPath: nil))
+        for _ in 0..<200 {
+            node = .folder(Folder(id: UUID(), name: "Deep", children: [node], isExpanded: true))
+        }
+        state.workspaces[0].items = [node]
+        let package = DataTransfer.Package(folder: original.folder, manifest: original.manifest, state: state, summary: original.summary)
+        let store = DataStore(baseDirectory: macB)
+        let model = AppModel(store: store)
+        let previousData = try Data(contentsOf: store.dataFileURL)
+        let previousState = model.state
+        do {
+            try model.applyDataImport(package)
+            Issue.record("Expected save to fail")
+        } catch {
+            #expect(error.localizedDescription.contains("pre-import-"))
+        }
+        #expect(deeplyEqual(model.state, previousState))
+        #expect(try Data(contentsOf: store.dataFileURL) == previousData)
+    }
+
     @Test func importOnAnotherMacRestoresEverythingWithLocalIconPaths() throws {
         let source = try makeSource()
         let folder = try DataTransfer.export(store: source.store, to: exports)

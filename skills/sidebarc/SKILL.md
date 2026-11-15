@@ -121,6 +121,8 @@ content before editing.
 - `--to-parent ID` — drops the node inside that folder. Pass the literal
   `root` to move to the workspace root.
 - `--index N` — position within the parent (0-based). Omit to append.
+  When moving within the same workspace, omitting `--to-parent` keeps the
+  current parent. A cross-workspace move without it goes to the root.
 
 Combinations:
 
@@ -150,6 +152,8 @@ Combinations:
   to stderr. Inspect `code` — `app_not_running`, `workspace_not_found`,
   `parent_not_folder`, `node_not_found`, `profile_not_found`,
   `favorite_not_found` are the common ones.
+- Typed delete commands reject a node of a different type; use `nodes:delete`
+  only when deleting any node type is intended.
 
 ## Commands Reference
 

@@ -1,8 +1,10 @@
 import Foundation
+import os
 
 final class NoteStorage {
     private let store: DataStore
     private let fileManager = FileManager.default
+    private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "notes")
 
     init(store: DataStore) {
         self.store = store
@@ -21,6 +23,11 @@ final class NoteStorage {
 
     func delete(id: UUID) {
         let url = store.noteFileURL(for: id)
-        try? fileManager.removeItem(at: url)
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        do {
+            try fileManager.removeItem(at: url)
+        } catch {
+            logger.error("Could not remove note file: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

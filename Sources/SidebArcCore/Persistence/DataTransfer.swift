@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Export and import of SidebArc's data, to move it to another Mac (Phase 3b.3).
 ///
@@ -15,6 +16,7 @@ import Foundation
 /// can be restored by importing `Backups/pre-import-<ts>/`. App preferences (UserDefaults),
 /// `agent-endpoint.json` (holds a token) and `Backups/` are not exported.
 enum DataTransfer {
+    private static let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "transfer")
     static let manifestFileName = "export.json"
     static let dataFileName = "data.json"
     static let notesFolderName = "Notes"
@@ -195,8 +197,25 @@ enum DataTransfer {
     /// with the same name. Local files the export doesn't have are kept (unused notes
     /// and icons are never shown). A missing folder in the export counts as empty.
     static func copyFiles(from package: Package, into store: DataStore) throws {
-        try copyContents(of: package.folder.appendingPathComponent(notesFolderName, isDirectory: true), into: store.notesDirectory())
-        try copyContents(of: package.folder.appendingPathComponent(iconsFolderName, isDirectory: true), into: store.iconsDirectory())
+        let fileManager = FileManager.default
+        let staging = store.dataFileURL.deletingLastPathComponent()
+            .appendingPathComponent(".import-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer {
+            do {
+                try fileManager.removeItem(at: staging)
+            } catch {
+                logger.error("Could not remove import staging directory: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        let stagedNotes = staging.appendingPathComponent(notesFolderName, isDirectory: true)
+        let stagedIcons = staging.appendingPathComponent(iconsFolderName, isDirectory: true)
+        try fileManager.createDirectory(at: stagedNotes, withIntermediateDirectories: false)
+        try fileManager.createDirectory(at: stagedIcons, withIntermediateDirectories: false)
+        try copyContents(of: package.folder.appendingPathComponent(notesFolderName, isDirectory: true), into: stagedNotes)
+        try copyContents(of: package.folder.appendingPathComponent(iconsFolderName, isDirectory: true), into: stagedIcons)
+        try copyContents(of: stagedNotes, into: store.notesDirectory())
+        try copyContents(of: stagedIcons, into: store.iconsDirectory())
     }
 
     /// Points every icon path that lives in an `Icons/` folder (another Mac's, or this
@@ -320,7 +339,7 @@ enum DataTransfer {
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles]
             )
-            for file in files where (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+            for file in files where try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
                 let target = destination.appendingPathComponent(file.lastPathComponent)
                 if fileManager.fileExists(atPath: target.path) {
                     try fileManager.removeItem(at: target)
