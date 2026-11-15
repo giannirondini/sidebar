@@ -196,8 +196,13 @@ print_step "Creating release notes..."
 
 # What's New: commit subjects since the previous tag (none yet: first release).
 PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
-if [ -n "$PREVIOUS_TAG" ] && [ "$PREVIOUS_TAG" != "$TAG" ]; then
-    WHATS_NEW=$(git log "$PREVIOUS_TAG..HEAD" --no-merges --format='- %s' | grep -v '^- chore(release)' || true)
+if [ "$PREVIOUS_TAG" = "$TAG" ]; then
+    # Rerun after tagging this version: compare with the tag before it.
+    PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+fi
+if [ -n "$PREVIOUS_TAG" ]; then
+    LAST_COMMIT=$(git rev-parse -q --verify "$TAG^{commit}" 2>/dev/null || echo HEAD)
+    WHATS_NEW=$(git log "$PREVIOUS_TAG..$LAST_COMMIT" --no-merges --format='- %s' | grep -v '^- chore(release)' || true)
     WHATS_NEW_SOURCE="commits since $PREVIOUS_TAG"
 else
     WHATS_NEW="- First release."
