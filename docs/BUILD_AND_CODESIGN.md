@@ -150,7 +150,7 @@ NSAppleEventsUsageDescription  from [apps.SidebArc.plist] in Bundler.toml
 Nothing is shared with an Arcmark install on the same Mac.
 
 ```bash
-log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc"'
+/usr/bin/log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc"'
 ```
 
 ## Verification commands
@@ -208,7 +208,7 @@ The resource bundle was not unwrapped. Rebuild with `./scripts/build.sh` (not a 
    ```bash
    tccutil reset AppleEvents io.github.giannirondini.sidebarc
    ```
-4. Logs: `log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "tabs"'` shows each lookup and its timing.
+4. Logs: `/usr/bin/log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "tabs"'` shows each lookup and its timing.
 
 ## References
 

@@ -6,12 +6,12 @@ Browsers in scope: **Chrome, Brave, Safari** (corporate set). Everything else op
 
 ## Before you start
 
-1. Build with `./scripts/run.sh` or `./scripts/build.sh`, then `./scripts/verify-build.sh`. Expect `NSAppleEventsUsageDescription present` and `Designated requirement: identifier "io.github.giannirondini.sidebarc"`.
+1. Build with `./scripts/run.sh` or `./scripts/build.sh`, then `./scripts/verify-build.sh`. Expect `NSAppleEventsUsageDescription present` and a designated requirement starting with `identifier "io.github.giannirondini.sidebarc"` (followed by `and certificate leaf = H"…"` with the self-signed identity).
 2. Watch the log while testing:
    ```bash
-   log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "tabs"'
+   /usr/bin/log stream --predicate 'subsystem == "io.github.giannirondini.sidebarc" AND category == "tabs"'
    ```
-   Each click logs `Focused tab …`, `No open tab matched …`, `No Automation permission …` or `… failed …` with milliseconds, or `Opening new …` with the reason it didn't look (browser can't report tabs, switch off, list link, not running). These are kept, so after the fact `log show --last 10m --predicate '<same predicate>'` works too.
+   Each click logs `Focused tab …`, `No open tab matched …`, `No Automation permission …` or `… failed …` with milliseconds, or `Opening new …` with the reason it didn't look (browser can't report tabs, switch off, list link, not running). These are kept, so after the fact `/usr/bin/log show --last 10m --predicate '<same predicate>'` works too.
 3. **The favorite's profile must open in Chrome, Brave or Safari, with Switch to open tabs on** (Settings › Profiles). A profile with no browser follows the macOS default browser; if that's Dia or Arc, every click opens new (F2). With Chrome `Default` and `Profile 1` both in use, the switch is off by default (E1).
 4. Optional, outside the app: the counts-only probe lists a running browser's tabs with the real locator. It needs Automation already granted to the terminal and never asks.
    ```bash

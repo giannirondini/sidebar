@@ -20,15 +20,14 @@ _Moved from CLAUDE.md › "UI Component Architecture (Post-Refactoring)" on 2026
 
 **Base Classes** (located in `Components/Base/`):
 - **BaseControl** - Base class for all interactive controls with hover and pressed state management
-  - Eliminates ~40 lines of tracking area and mouse event code per subclass
+  - Owns the tracking area and mouse events; refreshes the hover state on layout and window changes
   - Provides `handleHoverStateChanged()` and `handlePressedStateChanged()` override points
-  - Used by: `IconTitleButton`, `CustomToggle`, `CustomTextButton`, `SpaceBarButton`, `PinnedTabTileView`
+  - Used by: `IconTitleButton`, `CustomToggle`, `CustomTextButton`, `SpaceBarButton`, `PinnedTabTileView`, `IconPickerItemView`, `ScheduledLinkRowView`, the scheduled-links `HeaderButton`
 - **BaseView** - Base class for custom views with hover state management (no pressed state)
   - Simpler than BaseControl, designed for non-interactive views like rows
-  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
+  - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`, the shortcut recorder's `RecorderBoxView`
 - **InlineEditableTextField** - Reusable component for inline text editing
   - Encapsulates commit/cancel logic, focus management, and callbacks
-  - Eliminates ~80 lines of duplicate editing code per component
   - Used by: `NodeRowView`, `WorkspaceRowView`, `SpaceHeaderView`
 
 **Design System** (located in `Utilities/Theme/`):
@@ -38,10 +37,9 @@ _Moved from CLAUDE.md › "UI Component Architecture (Post-Refactoring)" on 2026
   - Fonts: Typography styles (bodyRegular, bodySemibold, bodyMedium, bodyBold)
   - Spacing: Layout spacing values (tiny=4, small=6, medium=8, regular=10, large=14, extraLarge=16, huge=20)
   - CornerRadius: Rounding values (small=6, medium=8, large=12)
-  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, buttonHeight=32, rowHeight=44), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
+  - Sizing: Standard sizes (iconSmall=14, iconMedium=18, iconLarge=22, iconExtraLarge=26, buttonHeight=32, rowHeight=44), Favorites grid (`pinnedTileHeight`, `pinnedTileMinWidth`, `pinnedTileMinColumns`, `pinnedTileSpacing`) and space bar (`spaceBarHeight`, `spaceBarButtonSize`)
   - Animation: Timing values (durationFast=0.15s, durationNormal=0.2s, durationSlow=0.3s)
   - SpaceTransition: space-switch tuning (commit fraction, flick velocity, velocity window, rubber band, spring response and damping ratio)
-  - Replaces 50+ hardcoded "magic numbers" throughout the codebase
 
 **Component Patterns**:
 All interactive controls extend BaseControl or BaseView and use ThemeConstants for consistency:
@@ -678,85 +676,6 @@ private func isValidTitle(_ title: String) -> Bool {
     // Your validation logic
     return !title.isEmpty && title.count <= 100
 }
-```
-
----
-
-## Migration Guide: From Old Pattern to New Pattern
-
-### Before: Manual Hover State Management
-
-```swift
-// OLD - Don't do this anymore
-final class OldButton: NSControl {
-    private var trackingArea: NSTrackingArea?
-    private var isHovered = false
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let options: NSTrackingArea.Options = [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect]
-        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateAppearance()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        // ... appearance logic
-    }
-}
-```
-
-### After: Using BaseControl
-
-```swift
-// NEW - Much cleaner!
-final class NewButton: BaseControl {
-    override func handleHoverStateChanged() {
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        // isHovered is automatically managed by BaseControl
-        layer?.backgroundColor = isHovered
-            ? ThemeConstants.Colors.darkGray.withAlphaComponent(ThemeConstants.Opacity.minimal).cgColor
-            : NSColor.clear.cgColor
-    }
-}
-```
-
-### Before: Hardcoded Constants
-
-```swift
-// OLD - Don't do this anymore
-let color = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 1.0)
-let opacity: CGFloat = 0.8
-let font = NSFont.systemFont(ofSize: 14, weight: .regular)
-let spacing: CGFloat = 10
-let cornerRadius: CGFloat = 8
-```
-
-### After: Using ThemeConstants
-
-```swift
-// NEW - Centralized and consistent!
-let color = ThemeConstants.Colors.darkGray
-let opacity = ThemeConstants.Opacity.high
-let font = ThemeConstants.Fonts.bodyRegular
-let spacing = ThemeConstants.Spacing.regular
-let cornerRadius = ThemeConstants.CornerRadius.medium
 ```
 
 ---
