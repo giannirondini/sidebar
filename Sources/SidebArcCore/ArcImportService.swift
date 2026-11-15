@@ -544,7 +544,7 @@ final class ArcImportService: Sendable {
         return claimed
     }
 
-    /// Convert a single Arc item into an Arcmark Node, recursing into folders.
+    /// Convert a single Arc item into a SidebArc Node, recursing into folders.
     private func convertItemToNode(_ item: ArcItem, items: [String: ArcItem]) -> Node? {
         // Check if it's a folder (has non-empty childrenIds)
         if let childrenIds = item.childrenIds, !childrenIds.isEmpty {

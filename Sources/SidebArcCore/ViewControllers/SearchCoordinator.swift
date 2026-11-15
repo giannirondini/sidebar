@@ -1,6 +1,6 @@
 //
 //  SearchCoordinator.swift
-//  Arcmark
+//  SidebArc
 //
 
 import AppKit

@@ -1,8 +1,8 @@
 //
 //  WindowAttachmentService.swift
-//  Arcmark
+//  SidebArc
 //
-//  Service for attaching Arcmark window to browser windows using macOS Accessibility API.
+//  Service for attaching SidebArc window to browser windows using macOS Accessibility API.
 //
 
 import AppKit
@@ -42,7 +42,7 @@ final class WindowAttachmentService {
 
     // Frame caching to skip redundant updates
     private var lastBrowserFrame: NSRect?
-    private var lastArcmarkFrame: NSRect?
+    private var lastSidebarFrame: NSRect?
 
     // Screen caching to reduce detection overhead
     private var cachedScreen: NSScreen?
@@ -76,7 +76,7 @@ final class WindowAttachmentService {
 
     func forceUpdate() {
         guard isEnabled else { return }
-        updateArcmarkPosition(forceShow: true)
+        updateSidebarPosition(forceShow: true)
     }
 
     func disable() {
@@ -92,7 +92,7 @@ final class WindowAttachmentService {
         browserWindowElement = nil
         currentBrowserBundleId = nil
         lastBrowserFrame = nil
-        lastArcmarkFrame = nil
+        lastSidebarFrame = nil
         lastFrontmostBundleId = nil
     }
 
@@ -195,7 +195,7 @@ final class WindowAttachmentService {
 
     // MARK: - Position Calculation
 
-    private func calculateArcmarkFrame(browserFrame: NSRect, arcmarkWidth: CGFloat) -> NSRect? {
+    private func calculateSidebarFrame(browserFrame: NSRect, sidebarWidth: CGFloat) -> NSRect? {
         // Check minimum browser width requirement
         let minBrowserWidth: CGFloat = 600
         guard browserFrame.width >= minBrowserWidth else { return nil }
@@ -209,27 +209,27 @@ final class WindowAttachmentService {
         let preferredSide = sidebarPosition
         let oppositeSide: SidebarPosition = preferredSide == .left ? .right : .left
 
-        if let x = arcmarkX(for: preferredSide, browserFrame: browserFrame, arcmarkWidth: arcmarkWidth, screenFrame: screenFrame) {
-            return NSRect(x: x, y: browserFrame.minY, width: arcmarkWidth, height: browserFrame.height)
+        if let x = sidebarX(for: preferredSide, browserFrame: browserFrame, sidebarWidth: sidebarWidth, screenFrame: screenFrame) {
+            return NSRect(x: x, y: browserFrame.minY, width: sidebarWidth, height: browserFrame.height)
         }
 
-        if let x = arcmarkX(for: oppositeSide, browserFrame: browserFrame, arcmarkWidth: arcmarkWidth, screenFrame: screenFrame) {
-            return NSRect(x: x, y: browserFrame.minY, width: arcmarkWidth, height: browserFrame.height)
+        if let x = sidebarX(for: oppositeSide, browserFrame: browserFrame, sidebarWidth: sidebarWidth, screenFrame: screenFrame) {
+            return NSRect(x: x, y: browserFrame.minY, width: sidebarWidth, height: browserFrame.height)
         }
 
         // Neither side has space
         return nil
     }
 
-    /// Returns the X position for Arcmark on the given side, or nil if there isn't enough space.
-    private func arcmarkX(for side: SidebarPosition, browserFrame: NSRect, arcmarkWidth: CGFloat, screenFrame: NSRect) -> CGFloat? {
+    /// Returns the X position for SidebArc on the given side, or nil if there isn't enough space.
+    private func sidebarX(for side: SidebarPosition, browserFrame: NSRect, sidebarWidth: CGFloat, screenFrame: NSRect) -> CGFloat? {
         switch side {
         case .left:
-            let x = browserFrame.minX - arcmarkWidth
+            let x = browserFrame.minX - sidebarWidth
             return x >= screenFrame.minX ? x : nil
         case .right:
             let x = browserFrame.maxX
-            return x + arcmarkWidth <= screenFrame.maxX ? x : nil
+            return x + sidebarWidth <= screenFrame.maxX ? x : nil
         }
     }
 
@@ -268,12 +268,12 @@ final class WindowAttachmentService {
         positionUpdateTimer?.invalidate()
         positionUpdateTimer = Timer.scheduledTimer(withTimeInterval: positionDebounceInterval, repeats: false) { [weak self] _ in
             Task { @MainActor in
-                self?.updateArcmarkPosition()
+                self?.updateSidebarPosition()
             }
         }
     }
 
-    private func updateArcmarkPosition(forceShow: Bool = false) {
+    private func updateSidebarPosition(forceShow: Bool = false) {
         guard isEnabled else { return }
 
         // Find the frontmost browser window
@@ -292,19 +292,19 @@ final class WindowAttachmentService {
         let frameChanged = lastBrowserFrame != browserFrame
         lastBrowserFrame = browserFrame
 
-        // Get current Arcmark window width (user may have resized it)
-        let arcmarkWidth: CGFloat = 340 // Default width, will be updated by delegate if needed
+        // Get current SidebArc window width (user may have resized it)
+        let sidebarWidth: CGFloat = 340 // Default width, will be updated by delegate if needed
 
-        // Calculate new Arcmark frame
-        guard let newFrame = calculateArcmarkFrame(browserFrame: browserFrame, arcmarkWidth: arcmarkWidth) else {
+        // Calculate new SidebArc frame
+        guard let newFrame = calculateSidebarFrame(browserFrame: browserFrame, sidebarWidth: sidebarWidth) else {
             // Invalid frame (browser too narrow, not enough space, etc.)
             delegate?.attachmentServiceShouldHideWindow(self)
             return
         }
 
         // Check if calculated frame has changed
-        let calculatedFrameChanged = lastArcmarkFrame != newFrame
-        lastArcmarkFrame = newFrame
+        let calculatedFrameChanged = lastSidebarFrame != newFrame
+        lastSidebarFrame = newFrame
 
         // Only update if frame changed or if we're forcing show (e.g., app switch)
         if frameChanged || calculatedFrameChanged || forceShow {
@@ -359,7 +359,7 @@ final class WindowAttachmentService {
                 browserApp = frontmost
                 observeBrowserWindow()
             }
-            updateArcmarkPosition(forceShow: true)
+            updateSidebarPosition(forceShow: true)
             return
         }
 
@@ -374,7 +374,7 @@ final class WindowAttachmentService {
         observeBrowserWindow()
 
         // Perform initial position update and show window
-        updateArcmarkPosition(forceShow: true)
+        updateSidebarPosition(forceShow: true)
     }
 
     // MARK: - AX Observers
@@ -464,7 +464,7 @@ final class WindowAttachmentService {
         positionUpdateTimer?.invalidate()
         positionUpdateTimer = nil
         lastBrowserFrame = nil
-        lastArcmarkFrame = nil
+        lastSidebarFrame = nil
         cachedScreen = nil
         cachedScreenFrame = nil
         isAnimating = false
@@ -495,18 +495,18 @@ final class WindowAttachmentService {
                     self.lastFrontmostBundleId = bundleId
                     self.attachToBrowser()
                 } else if bundleId == Bundle.main.bundleIdentifier {
-                    // Arcmark itself activated
-                    // If the previous app was the browser, keep Arcmark visible
-                    // This handles clicking between browser and Arcmark
+                    // SidebArc itself activated
+                    // If the previous app was the browser, keep SidebArc visible
+                    // This handles clicking between browser and SidebArc
                     if self.lastFrontmostBundleId == self.currentBrowserBundleId {
                         print("WindowAttachmentService: \(AppIdentity.displayName) activated, but browser was previous - keeping visible")
                         return
                     }
-                    // If previous app was not the browser, hide Arcmark
+                    // If previous app was not the browser, hide SidebArc
                     print("WindowAttachmentService: \(AppIdentity.displayName) activated from non-browser app - hiding")
                     self.delegate?.attachmentServiceShouldHideWindow(self)
                 } else {
-                    // Different app became active - hide Arcmark
+                    // Different app became active - hide SidebArc
                     print("WindowAttachmentService: Different app activated - hiding")
                     self.lastFrontmostBundleId = bundleId
                     self.delegate?.attachmentServiceShouldHideWindow(self)
@@ -583,7 +583,7 @@ final class WindowAttachmentService {
 
             // Use longer debounce for screen changes
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.updateArcmarkPosition()
+                self?.updateSidebarPosition()
             }
         }
     }
