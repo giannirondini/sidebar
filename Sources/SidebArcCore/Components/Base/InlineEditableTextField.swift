@@ -111,13 +111,26 @@ final class InlineEditableTextField: NSView {
 
         addSubview(textField)
 
+        // Hosts bound the field only from above (`trailing ≤ …`). An editable
+        // NSTextField has no intrinsic width, so while editing its width was
+        // ambiguous: a row laid out in edit mode got 0 pt. This pull, just below the
+        // field's hugging, fills the space while editing and is ignored otherwise
+        // (the text's intrinsic width wins).
+        let fillWhileEditing = widthAnchor.constraint(equalToConstant: Self.fillWidth)
+        fillWhileEditing.priority = NSLayoutConstraint.Priority(
+            textField.contentHuggingPriority(for: .horizontal).rawValue - 1)
+
         NSLayoutConstraint.activate([
             textField.leadingAnchor.constraint(equalTo: leadingAnchor),
             textField.trailingAnchor.constraint(equalTo: trailingAnchor),
             textField.topAnchor.constraint(equalTo: topAnchor),
-            textField.bottomAnchor.constraint(equalTo: bottomAnchor)
+            textField.bottomAnchor.constraint(equalTo: bottomAnchor),
+            fillWhileEditing
         ])
     }
+
+    /// Wider than any host; the hosts' required `≤` constraints cap it.
+    private static let fillWidth: CGFloat = 10_000
 
     // MARK: - Inline Editing
 
