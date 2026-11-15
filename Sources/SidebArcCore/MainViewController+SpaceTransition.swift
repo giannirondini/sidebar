@@ -268,6 +268,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
             transition.favoritesSwapped = true
         }
         let endAlpha: CGFloat = commits && changesFavorites(transition) && !swapsFavoritesNow ? 0 : 1
+        // A click or ⌘⌥←/→ has no drag (the old grid is fully shown): the swapped grid
+        // fades in from nothing rather than cutting.
+        let fromAlpha: CGFloat = swapsFavoritesNow && startAlpha >= 1 ? 0 : startAlpha
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -289,8 +292,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
             }
         }
         pinnedTabsView.alphaValue = endAlpha
-        if startAlpha != endAlpha {
-            pinnedTabsView.layer?.add(springAnimation("opacity", from: Float(startAlpha), to: Float(endAlpha)),
+        if fromAlpha != endAlpha {
+            pinnedTabsView.layer?.add(springAnimation("opacity", from: Float(fromAlpha), to: Float(endAlpha)),
                                       forKey: Self.transitionAnimationKey)
         }
         CATransaction.commit()
