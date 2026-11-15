@@ -46,7 +46,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.isReleasedWhenClosed = false
-        window.backgroundColor = model.currentWorkspace.colorId.backgroundColor
+        window.backgroundColor = model.currentWorkspace.backgroundColor
         window.minSize = NSSize(width: 280, height: 420)
         window.maxSize = NSSize(width: 520, height: 10000) // Unlimited height for attachment mode
         window.collectionBehavior = [.moveToActiveSpace]

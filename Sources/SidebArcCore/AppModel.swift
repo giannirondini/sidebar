@@ -319,10 +319,19 @@ final class AppModel {
         }
     }
 
+    /// Sets a preset colour; clears a custom colour.
     func updateWorkspaceColor(id: UUID, colorId: WorkspaceColorId) {
         updateWorkspace(id: id) { workspace in
             workspace.colorId = colorId
+            workspace.customColor = nil
         }
+    }
+
+    /// Sets (or clears, nil) the space's custom colour; `colorId` stays as the fallback.
+    func setWorkspaceCustomColor(id: UUID, color: SpaceColor?) {
+        guard let workspace = state.workspaces.first(where: { $0.id == id }),
+              workspace.customColor != color else { return }
+        updateWorkspace(id: id) { $0.customColor = color }
     }
 
     /// Sets the space's icon; `nil` goes back to the colour dot.

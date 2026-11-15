@@ -203,8 +203,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
     }
 
     private func blendedBackground(_ transition: SpaceTransition, progress: CGFloat) -> NSColor {
-        let from = transition.fromWorkspace.colorId.backgroundColor
-        guard let to = transition.target?.workspace.colorId.backgroundColor, progress > 0 else { return from }
+        let from = transition.fromWorkspace.backgroundColor
+        guard let to = transition.target?.workspace.backgroundColor, progress > 0 else { return from }
         return from.usingColorSpace(.sRGB)?.blended(withFraction: progress, of: to.usingColorSpace(.sRGB) ?? to) ?? to
     }
 
@@ -238,8 +238,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
 
         let startColor = blendedBackground(transition, progress: progress(of: transition))
         let endColor = commits
-            ? transition.target?.workspace.colorId.backgroundColor ?? startColor
-            : transition.fromWorkspace.colorId.backgroundColor
+            ? transition.target?.workspace.backgroundColor ?? startColor
+            : transition.fromWorkspace.backgroundColor
         let pillSpaceId = commits ? transition.target?.workspace.id : transition.fromWorkspace.id
         let startAlpha = pinnedTabsView.alphaValue
         // Another profile's Favorites fade out with the page and fade in on landing.
@@ -303,8 +303,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
         pageStage.outgoing.opacity = 0
         pageStage.outgoing.add(fade("opacity", from: 1, to: 0), forKey: Self.transitionAnimationKey)
 
-        let startColor = transition.fromWorkspace.colorId.backgroundColor
-        let endColor = target.colorId.backgroundColor
+        let startColor = transition.fromWorkspace.backgroundColor
+        let endColor = target.backgroundColor
         view.layer?.backgroundColor = endColor.cgColor
         view.layer?.add(fade("backgroundColor", from: startColor.cgColor, to: endColor.cgColor), forKey: Self.transitionAnimationKey)
 
@@ -342,8 +342,8 @@ extension MainViewController: SwipeGestureServiceDelegate {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let landedColor = commits
-            ? transition.target?.workspace.colorId.backgroundColor ?? transition.fromWorkspace.colorId.backgroundColor
-            : transition.fromWorkspace.colorId.backgroundColor
+            ? transition.target?.workspace.backgroundColor ?? transition.fromWorkspace.backgroundColor
+            : transition.fromWorkspace.backgroundColor
         view.layer?.backgroundColor = landedColor.cgColor
         CATransaction.commit()
         pinnedTabsView.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
@@ -447,7 +447,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         } else {
             scheduledLinksAccordion.update(entries: model.scheduledLinks(in: workspace.id))
         }
-        nodeListViewController.workspaceColor = workspace.colorId
+        nodeListViewController.workspaceBackgroundColor = workspace.backgroundColor
         let items = searching ? workspace.items : ScheduledLinkFiltering.hideScheduled(workspace.items)
         nodeListViewController.reloadData(with: searchCoordinator.filter(nodes: items), forceExpand: searching, animated: false)
     }

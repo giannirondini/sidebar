@@ -489,7 +489,7 @@ final class MainViewController: NSViewController {
     private func reloadWorkspaceMenu() {
         spaceBar.update(
             items: model.workspaces.map {
-                SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, colorId: $0.colorId)
+                SpaceBarView.Item(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color)
             },
             selectedId: model.currentWorkspace.id,
             isSettingsShown: model.isSettingsShown
@@ -499,12 +499,12 @@ final class MainViewController: NSViewController {
     }
 
     func configureSpaceHeader(for workspace: Workspace) {
-        spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.colorId.color)
+        spaceHeader.configure(name: workspace.name, icon: workspace.icon, color: workspace.color)
     }
 
     private func applyWorkspaceStyling() {
-        let newColor = model.currentWorkspace.colorId.backgroundColor
-        nodeListViewController.workspaceColor = model.currentWorkspace.colorId
+        let newColor = model.currentWorkspace.backgroundColor
+        nodeListViewController.workspaceBackgroundColor = newColor
 
         // A space transition animates the colour itself and lands on this value.
         view.layer?.backgroundColor = newColor.cgColor

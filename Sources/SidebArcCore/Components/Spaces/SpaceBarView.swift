@@ -17,7 +17,8 @@ final class SpaceBarView: NSView {
         let id: UUID
         let name: String
         let icon: CustomIcon?
-        let colorId: WorkspaceColorId
+        /// `Workspace.color` (opaque).
+        let color: NSColor
     }
 
     var onSpaceSelected: ((UUID) -> Void)?
@@ -125,7 +126,7 @@ final class SpaceBarView: NSView {
     private func rebuildSpaceButtons() {
         spaceButtons.forEach { $0.removeFromSuperview() }
         spaceButtons = items.map { item in
-            let button = SpaceBarButton(spaceIcon: item.icon, color: item.colorId.color, label: item.name)
+            let button = SpaceBarButton(spaceIcon: item.icon, color: item.color, label: item.name)
             button.onTap = { [weak self] in self?.onSpaceSelected?(item.id) }
             button.onRightClick = { [weak self] event in self?.onSpaceContextMenu?(item.id, event) }
             documentView.addSubview(button)

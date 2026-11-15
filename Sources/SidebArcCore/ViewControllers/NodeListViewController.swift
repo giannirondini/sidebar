@@ -70,7 +70,8 @@ final class NodeListViewController: NSViewController {
 
     // State
     var isSearchActive: Bool = false
-    var workspaceColor: WorkspaceColorId = .defaultColor() {
+    /// The space's background (`Workspace.backgroundColor`): scroll shadows, badges.
+    var workspaceBackgroundColor: NSColor = WorkspaceColorId.defaultColor().backgroundColor {
         didSet {
             updateShadows()
         }
@@ -244,7 +245,7 @@ final class NodeListViewController: NSViewController {
         let canScrollUp = visibleRect.origin.y > 0
         let canScrollDown = visibleRect.origin.y + visibleRect.height < contentHeight
 
-        let baseColor = workspaceColor.backgroundColor
+        let baseColor = workspaceBackgroundColor
         let shadowOpacity = ThemeConstants.Opacity.high
 
         if canScrollUp {
@@ -647,7 +648,7 @@ extension NodeListViewController: NSCollectionViewDataSource {
                 },
                 isSelected: isSelected,
                 isScheduled: link.scheduledOpenAt != nil,
-                scheduleBadgeBackgroundColor: workspaceColor.backgroundColor,
+                scheduleBadgeBackgroundColor: workspaceBackgroundColor,
                 tooltipURL: link.url,
                 browserBadge: BrowserManager.overrideBadge(for: link.browserBundleId)
             )

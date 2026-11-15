@@ -122,6 +122,10 @@ struct Workspace: Codable, Identifiable, Equatable {
     /// Emoji or SF Symbol shown in the space bar and the space header; `nil` shows
     /// the colour dot. Optional so v2 files decode (synthesized Codable has no defaults).
     var icon: CustomIcon?
+    /// A colour picked in the colour panel; wins over `colorId` while set. Picking a
+    /// preset clears it. Optional so existing files decode. Read through
+    /// `Workspace.color` / `Workspace.backgroundColor`.
+    var customColor: SpaceColor?
 }
 
 enum CustomIcon: Codable, Equatable, Sendable {
