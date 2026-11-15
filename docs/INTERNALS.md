@@ -1,10 +1,10 @@
 # Internals
 
-_Moved from CLAUDE.md on 2026-11-15. The rules most tasks need are summarised in [CLAUDE.md](../CLAUDE.md)._ [ARCHITECTURE.md](ARCHITECTURE.md) covers some of the same ground (data model, data flow) in its own words; merging the two is a follow-up.
+_Data flow and data model moved from CLAUDE.md on 2026-11-15 and merged with the matching parts of [ARCHITECTURE.md](ARCHITECTURE.md), which is now the overview (project structure, design decisions). The rules most tasks need are in [CLAUDE.md](../CLAUDE.md)._
 
 ## Data Flow Architecture
 
-The application follows a unidirectional data flow pattern:
+The application follows a unidirectional data flow pattern (diagram in [ARCHITECTURE.md › Data flow](ARCHITECTURE.md#data-flow)):
 
 1. **AppModel** - Central state manager that owns `AppState` and coordinates all mutations
    - Single source of truth for application state
@@ -14,49 +14,87 @@ The application follows a unidirectional data flow pattern:
 
 2. **DataStore** - Handles persistence layer
    - Saves/loads JSON to `~/Library/Application Support/io.github.giannirondini.sidebarc/data.json` (folder named after the bundle id, `AppIdentity.dataDirectoryName`)
-   - Manages favicon storage in `Icons/` subdirectory
+   - Keeps favicons in `Icons/`, note bodies in `Notes/<id>.md`, rotating backups in `Backups/` (10 files, once per session) and the agent endpoint in `agent-endpoint.json`
    - Provides default state initialization
 
 3. **MainViewController** - Primary UI controller
-   - Observes AppModel via `onChange` callback
-   - Manages NSCollectionView for hierarchical node display
-   - Handles drag-and-drop, inline editing, and context menus
+   - Observes AppModel via `onChange` callback and lays out search, Favorites, the space page, the space bar and Settings
+   - Delegates the list (collection view, drag-and-drop, inline editing, context menus) to `NodeListViewController`
    - Never directly mutates state - always calls AppModel methods
 
 ## Core Data Model
 
 The data model is defined in `Models.swift`:
 
-- **AppState** - Root container: `schemaVersion` (currently 2), `profiles`, `workspaces`, selected workspace ID. Whether Settings is shown is runtime state (`AppModel.isSettingsShown`), not saved; older files' `isSettingsSelected` key is ignored
-- **Profile** - Groups spaces that share a browser setup and the Favorites grid: `name`, `browserBundleId` (nil = global default browser), `browserProfiles` (browser bundle id → browser profile dir), `favorites: [Link]` (max `Profile.maxFavorites` = 12), `focusesOpenTabs: Bool?` (nil = automatic)
-- **Workspace** - Named, colored container with hierarchical `items`, a `profileId` (every space belongs to exactly one profile) and an optional `icon: CustomIcon?` (emoji or SF Symbol; nil shows the colour dot). The UI says "Space"; code, data keys and the agent API keep `workspace`
-- **Node** - Enum of `Folder`, `Link` or `Note`
-  - `Folder` - Contains nested children and isExpanded state
-  - `Link` - URL, title, optional favicon path, custom icon, schedule, `browserBundleId` (per-link browser override) and `exactTabMatch: Bool?`
-  - `Note` - Title and custom icon; the body is a `.md` file in `Notes/`
+```swift
+AppState                      // Root of data.json
+├── schemaVersion: Int        // 2
+├── profiles: [Profile]       // At least one
+├── workspaces: [Workspace]
+└── selectedWorkspaceId: UUID?
+                              // Settings shown: runtime only (AppModel.isSettingsShown)
 
-All models are Codable and use UUID-based identification. The Node enum uses custom encoding to serialize the tagged union structure.
+Profile                       // Spaces sharing a browser setup and Favorites
+├── id: UUID
+├── name: String              // "Default", "Work", …
+├── browserBundleId: String?  // nil → global default browser
+├── browserProfiles: [String: String]  // browser bundle id → browser profile dir
+├── favorites: [Link]         // Tile grid, max Profile.maxFavorites (12), shared by the profile's spaces
+└── focusesOpenTabs: Bool?    // nil = automatic (see TAB_FOCUS.md)
 
-**Schema versions.** `DataStore.load()` reads `schemaVersion` first (`SchemaVersionProbe`). A v1 file is decoded by the read-only `SchemaV1` mirror and upgraded by the pure `SchemaMigration.v1ToV2` (`Persistence/SchemaMigration.swift`); the bytes are first copied to `Backups/pre-v2-migration-<ts>.json`, which the 10-file backup rotation never prunes, then the result is saved. Every load runs `AppState.repaired()` (at least one profile; dangling `profileId`s fall back to the first). The v2 model carries no legacy fields; add a new `SchemaVn` mirror + migration for the next change instead.
+Workspace                     // A space
+├── id: UUID
+├── name: String
+├── colorId: WorkspaceColorId
+├── items: [Node]             // Root-level items (the pinned list)
+├── profileId: UUID           // Every space belongs to exactly one profile
+└── icon: CustomIcon?         // nil = colour dot
+
+Node                          // Recursive tree (tagged union, custom Codable)
+├── .folder(Folder)
+│   ├── id: UUID
+│   ├── name: String
+│   ├── children: [Node]
+│   └── isExpanded: Bool
+├── .link(Link)
+│   ├── id: UUID
+│   ├── title: String
+│   ├── url: String
+│   ├── faviconPath: String?
+│   ├── customIcon: CustomIcon?
+│   ├── scheduledOpenAt: Date?
+│   ├── browserBundleId: String?  // Per-link browser override
+│   └── exactTabMatch: Bool?      // "Match Exact URL" for tab focus
+└── .note(Note)
+    ├── id: UUID
+    ├── title: String
+    └── customIcon: CustomIcon?   // Body in Notes/<id>.md
+
+CustomIcon                    // .emoji(String) | .sfSymbol(String) | .cachedFavicon(String)
+```
+
+- The UI says "Space"; code, data keys and the agent API keep `workspace`.
+- All models are Codable and use UUID-based identification.
+- Files written before Phase 3a still carry an `isSettingsSelected` key; it is ignored.
+
+### Schema versions
+
+`DataStore.load()` reads `schemaVersion` first (`SchemaVersionProbe`). A v1 file (Arcmark 0.1.x layout: `pinnedLinks` and `browserProfiles` on each workspace) is decoded by the read-only `SchemaV1` mirror and upgraded by the pure `SchemaMigration.v1ToV2` (`Persistence/SchemaMigration.swift`):
+
+1. Spaces with an identical `browserProfiles` dictionary share one profile ("Default", "Profile 2", …), `browserBundleId = nil`, so every space opens links where it did before.
+2. A profile's favorites are its spaces' pinned links in space order, deduplicated by normalised URL (`URLNormalization`) and capped at 12.
+3. Duplicates and overflow go into a "Favorites (migrated)" folder at the top of the space they came from. No link is dropped.
+
+The original bytes are first copied to `Backups/pre-v2-migration-<ts>.json`, which the 10-file backup rotation never prunes, then the result is saved. Every load runs `AppState.repaired()` (at least one profile; dangling `profileId`s fall back to the first). The v2 model carries no legacy fields; add a new `SchemaVn` mirror + migration for the next change instead.
 
 ## Key Components
 
-**Services** (all MainActor singletons):
-- **FaviconService** - Async favicon fetching with disk caching and failure cooldown
-- **LinkTitleService** - HTML title extraction from URLs
-- **BrowserManager** - Browser resolution (`resolveTarget`), URL opening, installed browsers, browser-profile detection (Chrome, Chrome Canary, Helium)
-- **TabFocusService** - Click → focus an open tab or open new (`TabFocus`, `TabLocator`, `TabURLMatcher`)
+The file-by-file map is in [ARCHITECTURE.md › Project structure](ARCHITECTURE.md#project-structure). Details not listed there:
 
-**UI Components**:
-- **MainViewController** - Layout, model binding, menus (~1000 lines; the space transition is in `MainViewController+SpaceTransition`)
-- **NodeListViewController** - Manages collection view, drag-drop, context menus (extracted from MainViewController)
-- **SearchCoordinator** - Handles search/filtering logic (extracted from MainViewController)
+- **FaviconService**, **LinkTitleService** - `shared` singletons; favicons are cached on disk with a cooldown after failures
 - **SettingsContentViewController** - Settings page: space list (drag to reorder), default browser, profiles (`ProfileSettingsView`), permissions, import
 - **NodeCollectionViewItem** - Reusable cell with icon, title, hover states, delete button
-- **SearchBarView** - Search field that filters nodes
 - **IconTitleButton** - Icon + title button; `.listRow` style is the "+ Add from Clipboard" row
-- **SpaceBarView**, **SpaceHeaderView**, **SpaceIconView**, **SpaceMenu** - Space bar, header, icon/colour dot and space menu (`Components/Spaces`, `Components/Menus`)
-- **ListFlowLayout** - Custom NSCollectionViewLayout for vertical list
 
 ## State Mutation Pattern
 
