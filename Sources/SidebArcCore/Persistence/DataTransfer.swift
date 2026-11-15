@@ -1,0 +1,295 @@
+import Foundation
+
+/// Export and import of SidebArc's data, to move it to another Mac (Phase 3b.3).
+///
+/// An export is a folder:
+///
+///     SidebArc Export <date>/
+///     ├── export.json   manifest: format, formatVersion, schemaVersion, exportedAt
+///     ├── data.json     exact copy of the data file
+///     ├── Notes/        note bodies (<id>.md)
+///     └── Icons/        favicons; custom favicon icons point into it
+///
+/// Import accepts only such a folder (the manifest is required) and replaces all
+/// data after a backup (`AppModel.applyDataImport`). App preferences (UserDefaults),
+/// `agent-endpoint.json` (holds a token) and `Backups/` are not exported.
+enum DataTransfer {
+    static let manifestFileName = "export.json"
+    static let dataFileName = "data.json"
+    static let notesFolderName = "Notes"
+    static let iconsFolderName = "Icons"
+    /// Identifies a SidebArc export; checked on import.
+    static let format = "\(AppIdentity.bundleIdentifier).export"
+    static let formatVersion = 1
+
+    struct Manifest: Codable, Equatable {
+        var format: String
+        var formatVersion: Int
+        /// `schemaVersion` of the exported `data.json`.
+        var schemaVersion: Int
+        var exportedAt: Date
+        var appVersion: String?
+    }
+
+    enum TransferError: Error, Equatable, LocalizedError {
+        /// No readable `export.json` with SidebArc's format.
+        case notAnExport
+        case unsupportedFormatVersion(Int)
+        case missingDataFile
+        case unreadableDataFile(String)
+        /// The data was written by a newer SidebArc; importing would drop what this version doesn't know.
+        case newerSchema(Int)
+        case fileOperationFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notAnExport:
+                return "This folder isn't a \(AppIdentity.displayName) export. Choose a folder created with Export Data…."
+            case .unsupportedFormatVersion(let version):
+                return "This export uses format version \(version), which this version of \(AppIdentity.displayName) can't read. Update \(AppIdentity.displayName) and try again."
+            case .missingDataFile:
+                return "The export has no \(DataTransfer.dataFileName)."
+            case .unreadableDataFile(let detail):
+                return "The export's \(DataTransfer.dataFileName) can't be read: \(detail)"
+            case .newerSchema(let version):
+                return "The export was made by a newer \(AppIdentity.displayName) (data version \(version)). Update \(AppIdentity.displayName) and try again."
+            case .fileOperationFailed(let detail):
+                return detail
+            }
+        }
+    }
+
+    /// What an import would bring in, for the confirmation.
+    struct Summary: Equatable {
+        var profiles: Int
+        var spaces: Int
+        var links: Int
+        var favorites: Int
+        var notes: Int
+    }
+
+    /// A validated export, read but not applied.
+    struct Package {
+        let folder: URL
+        let manifest: Manifest
+        let state: AppState
+        let summary: Summary
+    }
+
+    // MARK: - Export
+
+    /// Writes a new export folder inside `parent` and returns it. The name carries the
+    /// local date and time; an existing folder is never overwritten (" 2", " 3", … is
+    /// appended instead).
+    static func export(
+        store: DataStore,
+        to parent: URL,
+        now: Date = Date(),
+        appVersion: String? = nil
+    ) throws -> URL {
+        let fileManager = FileManager.default
+        let source = store.dataFileURL
+        guard fileManager.fileExists(atPath: source.path) else { throw TransferError.missingDataFile }
+
+        let data: Data
+        let schemaVersion: Int
+        do {
+            data = try Data(contentsOf: source)
+            schemaVersion = try DataStore.decodeState(from: data).schemaVersion
+        } catch {
+            throw TransferError.unreadableDataFile(error.localizedDescription)
+        }
+
+        let folder = uniqueFolder(in: parent, baseName: "\(AppIdentity.displayName) Export \(folderDateFormatter.string(from: now))")
+        do {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: false)
+            try data.write(to: folder.appendingPathComponent(dataFileName), options: [.atomic])
+            try copyFolder(store.notesDirectory(), to: folder.appendingPathComponent(notesFolderName, isDirectory: true))
+            try copyFolder(store.iconsDirectory(), to: folder.appendingPathComponent(iconsFolderName, isDirectory: true))
+            let manifest = Manifest(
+                format: format,
+                formatVersion: formatVersion,
+                schemaVersion: schemaVersion,
+                exportedAt: now,
+                appVersion: appVersion
+            )
+            try manifestEncoder.encode(manifest).write(to: folder.appendingPathComponent(manifestFileName), options: [.atomic])
+        } catch {
+            // Don't leave a half-written export that looks complete.
+            try? fileManager.removeItem(at: folder)
+            throw TransferError.fileOperationFailed("Export failed: \(error.localizedDescription)")
+        }
+        return folder
+    }
+
+    // MARK: - Import
+
+    /// Reads and validates an export folder without changing anything.
+    static func readPackage(at folder: URL) throws -> Package {
+        let manifestURL = folder.appendingPathComponent(manifestFileName)
+        guard let manifestData = try? Data(contentsOf: manifestURL),
+              let manifest = try? manifestDecoder.decode(Manifest.self, from: manifestData),
+              manifest.format == format else {
+            throw TransferError.notAnExport
+        }
+        guard manifest.formatVersion <= formatVersion else {
+            throw TransferError.unsupportedFormatVersion(manifest.formatVersion)
+        }
+
+        let dataURL = folder.appendingPathComponent(dataFileName)
+        guard FileManager.default.fileExists(atPath: dataURL.path) else { throw TransferError.missingDataFile }
+        let decoded: (state: AppState, schemaVersion: Int)
+        do {
+            decoded = try DataStore.decodeState(from: try Data(contentsOf: dataURL))
+        } catch {
+            throw TransferError.unreadableDataFile(error.localizedDescription)
+        }
+        guard decoded.schemaVersion <= AppState.currentSchemaVersion else {
+            throw TransferError.newerSchema(decoded.schemaVersion)
+        }
+
+        let state = decoded.state.repaired()
+        return Package(folder: folder, manifest: manifest, state: state, summary: summary(of: state))
+    }
+
+    /// Copies the export's `Notes/` and `Icons/` files into `store`, replacing files
+    /// with the same name. Local files the export doesn't have are kept (unused notes
+    /// and icons are never shown). A missing folder in the export counts as empty.
+    static func copyFiles(from package: Package, into store: DataStore) throws {
+        try copyContents(of: package.folder.appendingPathComponent(notesFolderName, isDirectory: true), into: store.notesDirectory())
+        try copyContents(of: package.folder.appendingPathComponent(iconsFolderName, isDirectory: true), into: store.iconsDirectory())
+    }
+
+    /// Points every icon path that lives in an `Icons/` folder (another Mac's, or this
+    /// one's) at the same file in `iconsDirectory`. A `Link.faviconPath` elsewhere is
+    /// dropped (the favicon is fetched again); a custom icon elsewhere is kept as is.
+    /// Covers the space trees, space icons and every profile's favorites.
+    static func remapIconPaths(in state: AppState, iconsDirectory: URL) -> AppState {
+        func localPath(_ path: String) -> String? {
+            let url = URL(fileURLWithPath: path)
+            guard url.deletingLastPathComponent().lastPathComponent == iconsFolderName else { return nil }
+            return iconsDirectory.appendingPathComponent(url.lastPathComponent).path
+        }
+        func remapIcon(_ icon: CustomIcon?) -> CustomIcon? {
+            guard case .cachedFavicon(let path)? = icon else { return icon }
+            return .cachedFavicon(localPath(path) ?? path)
+        }
+        func remapLink(_ link: Link) -> Link {
+            var link = link
+            link.faviconPath = link.faviconPath.flatMap(localPath)
+            link.customIcon = remapIcon(link.customIcon)
+            return link
+        }
+        func remapNode(_ node: Node) -> Node {
+            switch node {
+            case .link(let link):
+                return .link(remapLink(link))
+            case .note(var note):
+                note.customIcon = remapIcon(note.customIcon)
+                return .note(note)
+            case .folder(var folder):
+                folder.children = folder.children.map(remapNode)
+                return .folder(folder)
+            }
+        }
+
+        var state = state
+        for index in state.workspaces.indices {
+            state.workspaces[index].items = state.workspaces[index].items.map(remapNode)
+            state.workspaces[index].icon = remapIcon(state.workspaces[index].icon)
+        }
+        for index in state.profiles.indices {
+            state.profiles[index].favorites = state.profiles[index].favorites.map(remapLink)
+        }
+        return state
+    }
+
+    static func summary(of state: AppState) -> Summary {
+        func count(_ nodes: [Node]) -> (links: Int, notes: Int) {
+            nodes.reduce(into: (0, 0)) { total, node in
+                switch node {
+                case .link: total.0 += 1
+                case .note: total.1 += 1
+                case .folder(let folder):
+                    let inner = count(folder.children)
+                    total.0 += inner.links
+                    total.1 += inner.notes
+                }
+            }
+        }
+        let trees = state.workspaces.map { count($0.items) }
+        return Summary(
+            profiles: state.profiles.count,
+            spaces: state.workspaces.count,
+            links: trees.reduce(0) { $0 + $1.links },
+            favorites: state.profiles.reduce(0) { $0 + $1.favorites.count },
+            notes: trees.reduce(0) { $0 + $1.notes }
+        )
+    }
+
+    // MARK: - Helpers
+
+    private static let folderDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH.mm"   // no ':' (Finder shows it as '/')
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    private static var manifestEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private static var manifestDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    private static func uniqueFolder(in parent: URL, baseName: String) -> URL {
+        var candidate = parent.appendingPathComponent(baseName, isDirectory: true)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = parent.appendingPathComponent("\(baseName) \(suffix)", isDirectory: true)
+            suffix += 1
+        }
+        return candidate
+    }
+
+    /// Copies `source` to `destination` (which must not exist); a missing source
+    /// becomes an empty folder, so every export has the same layout.
+    private static func copyFolder(_ source: URL, to destination: URL) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: source.path) {
+            try fileManager.copyItem(at: source, to: destination)
+        } else {
+            try fileManager.createDirectory(at: destination, withIntermediateDirectories: false)
+        }
+    }
+
+    /// Copies the regular files directly inside `source` into `destination`,
+    /// replacing files with the same name.
+    private static func copyContents(of source: URL, into destination: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: source.path) else { return }
+        do {
+            let files = try fileManager.contentsOfDirectory(
+                at: source,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+            for file in files where (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                let target = destination.appendingPathComponent(file.lastPathComponent)
+                if fileManager.fileExists(atPath: target.path) {
+                    try fileManager.removeItem(at: target)
+                }
+                try fileManager.copyItem(at: file, to: target)
+            }
+        } catch {
+            throw TransferError.fileOperationFailed("Copying \(source.lastPathComponent) failed: \(error.localizedDescription)")
+        }
+    }
+}

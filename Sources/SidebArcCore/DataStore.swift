@@ -38,22 +38,20 @@ final class DataStore {
 
         do {
             let data = try Data(contentsOf: dataURL)
-            let decoder = JSONDecoder()
-            let version = try decoder.decode(SchemaVersionProbe.self, from: data).schemaVersion
+            let (decoded, version) = try Self.decodeState(from: data)
             if version < 2 {
-                let migrated = SchemaMigration.v1ToV2(try decoder.decode(SchemaV1.AppState.self, from: data))
                 // Persist right away so profile ids are stable across launches, but only
                 // once a copy of the v1 file is safe outside the rotating backups.
                 if writePreMigrationCopy(data, fromVersion: version) {
-                    save(migrated)
+                    save(decoded)
                     logger.info("Migrated data.json from schema v\(version) to v2")
                 }
-                return migrated
+                return decoded
             }
             if version > AppState.currentSchemaVersion {
                 logger.warning("data.json has schema v\(version), newer than v\(AppState.currentSchemaVersion); unknown fields will be lost on save")
             }
-            return try decoder.decode(AppState.self, from: data).repaired()
+            return decoded.repaired()
         } catch {
             // Leave data.json untouched so a newer-schema or corrupt file can be
             // recovered (e.g. by re-upgrading); it is only overwritten on the
@@ -62,6 +60,21 @@ final class DataStore {
             return Self.defaultState()
         }
     }
+
+    /// Decodes a `data.json` of any known schema and returns it with the file's
+    /// `schemaVersion`. A v1 file is migrated in memory (`SchemaMigration.v1ToV2`);
+    /// v2 and later are decoded as they are. Doesn't repair or write anything.
+    static func decodeState(from data: Data) throws -> (state: AppState, schemaVersion: Int) {
+        let decoder = JSONDecoder()
+        let version = try decoder.decode(SchemaVersionProbe.self, from: data).schemaVersion
+        if version < 2 {
+            return (SchemaMigration.v1ToV2(try decoder.decode(SchemaV1.AppState.self, from: data)), version)
+        }
+        return (try decoder.decode(AppState.self, from: data), version)
+    }
+
+    /// The `data.json` this store reads and writes.
+    var dataFileURL: URL { dataURL }
 
     func save(_ state: AppState) {
         backupDataFileIfNeeded()
@@ -139,6 +152,24 @@ final class DataStore {
             logger.error("Failed to write pre-migration copy; keeping the migrated state in memory only: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    /// Copies `data.json` and `Notes/` into a new `Backups/pre-import-<ts>/` folder
+    /// before an import replaces them, and returns the folder. The name doesn't start
+    /// with `data-`, so `pruneBackups` never rotates it away. Throws if any copy fails,
+    /// so the import can stop before changing anything.
+    func writePreImportBackup() throws -> URL {
+        let timestamp = backupTimestampFormatter.string(from: Date())
+        let folder = backupsDirectory().appendingPathComponent("pre-import-\(timestamp)", isDirectory: true)
+        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: dataURL.path) {
+            try fileManager.copyItem(at: dataURL, to: folder.appendingPathComponent("data.json"))
+        }
+        let notes = baseDirectory.appendingPathComponent("Notes", isDirectory: true)
+        if fileManager.fileExists(atPath: notes.path) {
+            try fileManager.copyItem(at: notes, to: folder.appendingPathComponent("Notes", isDirectory: true))
+        }
+        return folder
     }
 
     private func backupsDirectory() -> URL {

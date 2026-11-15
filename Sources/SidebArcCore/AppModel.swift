@@ -208,6 +208,40 @@ final class AppModel {
         persist()
     }
 
+    // MARK: - Data export and import (Phase 3b.3)
+
+    /// Writes an export folder of the saved data inside `parent` (`DataTransfer.export`).
+    /// Every mutation is saved right away, so `data.json` is the current state.
+    func exportData(to parent: URL, appVersion: String?) throws -> URL {
+        try DataTransfer.export(store: store, to: parent, appVersion: appVersion)
+    }
+
+
+    /// Replaces all data with a validated export (`DataTransfer.readPackage`), in one
+    /// mutation. Order: back up the current `data.json` and `Notes/` to
+    /// `Backups/pre-import-<ts>/` (nothing changes if that fails), copy the export's
+    /// notes and icons in, point icon paths at this Mac's `Icons/`, then replace the
+    /// state. Selects the export's selected space (or the first). Returns the backup.
+    @discardableResult
+    func applyDataImport(_ package: DataTransfer.Package) throws -> URL {
+        let backup = try store.writePreImportBackup()
+        try DataTransfer.copyFiles(from: package, into: store)
+        var next = DataTransfer.remapIconPaths(in: package.state, iconsDirectory: store.iconsDirectory()).repaired()
+        if next.workspaces.isEmpty {
+            next.workspaces = [Workspace(id: UUID(), name: "Inbox", colorId: .defaultColor(), items: [], profileId: next.profiles[0].id)]
+        }
+        if !next.workspaces.contains(where: { $0.id == next.selectedWorkspaceId }) {
+            next.selectedWorkspaceId = next.workspaces[0].id
+        }
+        if let selected = next.selectedWorkspaceId {
+            UserDefaults.standard.set(selected.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+        }
+        state = next
+        persist()
+        logger.info("Imported data from an export; previous data backed up to \(backup.lastPathComponent, privacy: .public)")
+        return backup
+    }
+
     /// Sets or clears (nil) the per-link browser override, for a link in any
     /// space's list or in any profile's favorites.
     func setLinkBrowserOverride(id: UUID, bundleId: String?) {

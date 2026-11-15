@@ -87,6 +87,16 @@ CustomIcon                    // .emoji(String) | .sfSymbol(String) | .cachedFav
 
 The original bytes are first copied to `Backups/pre-v2-migration-<ts>.json`, which the 10-file backup rotation never prunes, then the result is saved. Every load runs `AppState.repaired()` (at least one profile; dangling `profileId`s fall back to the first). The v2 model carries no legacy fields; add a new `SchemaVn` mirror + migration for the next change instead.
 
+## Export and import (Phase 3b.3)
+
+Settings › Import & Export › **Export Data…** / **Import Data…** move everything to another Mac (`Persistence/DataTransfer.swift`, `AppModel.exportData`, `AppModel.applyDataImport`).
+
+- **Export** creates `SidebArc Export <yyyy-MM-dd HH.mm>/` in a chosen folder (never overwriting: " 2", " 3", … is appended) with `export.json` (manifest: `format` = `io.github.giannirondini.sidebarc.export`, `formatVersion` 1, `schemaVersion`, `exportedAt`, `appVersion`), an exact copy of `data.json`, `Notes/` and `Icons/`. Not exported: app preferences (UserDefaults), `agent-endpoint.json` (it holds a token), `Backups/`.
+- **Import** accepts only such a folder. `DataTransfer.readPackage` validates without changing anything: a missing or foreign manifest, a newer `formatVersion` or schema, or a missing or unreadable `data.json` is refused. A v1 `data.json` is migrated (`DataStore.decodeState`, shared with `load()`). After a confirmation with counts, `applyDataImport` backs up the current `data.json` and `Notes/` to `Backups/pre-import-<ts>/` (never pruned; nothing changes if the backup fails), copies the export's `Notes/` and `Icons/` in (same-name files are replaced, others kept), then replaces the state in one mutation and selects the export's selected space.
+- **Icon paths** are absolute. `DataTransfer.remapIconPaths` points every `Link.faviconPath` and `CustomIcon.cachedFavicon` inside an `Icons/` folder at this Mac's `Icons/` (space trees, space icons, favorites); a `faviconPath` elsewhere is dropped and re-fetched. Without it, custom favicon icons would show a globe forever on a Mac with another home folder.
+- **Per-Mac settings in the data:** `Profile.browserProfiles` (browser profile folder names) and browser choices come over as they are; check Settings › Profiles after importing on another Mac.
+- Tests: `DataTransferTests` (two temp data folders as two Macs).
+
 ## Key Components
 
 The file-by-file map is in [ARCHITECTURE.md › Project structure](ARCHITECTURE.md#project-structure). Details not listed there:
