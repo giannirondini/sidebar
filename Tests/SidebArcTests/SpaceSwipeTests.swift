@@ -143,6 +143,28 @@ import Testing
         }
     }
 
+    /// The Favorites' height follows `position(at:)`; it must be the same curve the
+    /// pages run (checked against the simulation behind `visualDuration`).
+    @Test func positionIsTheSpringCurve() {
+        for v0 in [0.0, 3.0] {
+            #expect(spring.position(at: 0, initialVelocity: v0) == 0)
+            let t = spring.visualDuration(initialVelocity: v0, distance: 340, tolerance: 0.5)
+            #expect(abs(1 - spring.position(at: t + 0.001, initialVelocity: v0)) * 340 < 0.5)
+            #expect(abs(1 - spring.position(at: t - 0.02, initialVelocity: v0)) * 340 >= 0.5)
+            var previous = 0.0
+            for step in 1...100 {      // critically damped from rest or toward the target: never goes back
+                let x = spring.position(at: Double(step) * 0.005, initialVelocity: v0)
+                #expect(x >= previous)
+                previous = x
+            }
+        }
+        // Other damping ratios use their own closed forms; all end at 1.
+        for ratio in [0.7, 1.5] {
+            let other = SpaceSwipe.Spring(response: 0.32, dampingRatio: ratio)
+            #expect(abs(other.position(at: 3, initialVelocity: 0) - 1) < 0.001)
+        }
+    }
+
     @Test func noTravelNeedsNoTime() {
         #expect(spring.visualDuration(initialVelocity: 0, distance: 0.2, tolerance: 0.5) == 0)
     }

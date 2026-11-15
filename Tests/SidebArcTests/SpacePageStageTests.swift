@@ -44,6 +44,26 @@ import Testing
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
     }
 
+    /// The Favorites above can change height during a switch; the pages stay pinned
+    /// to the stage's top (the page moves with the clip's top edge) and keep their offset.
+    @Test func pagesStayPinnedToTheTopWhenTheStageResizes() {
+        stage.begin(outgoing: image())
+        stage.setIncoming(image(), baseX: 320)
+        stage.setOffset(-120)
+        let pageHeight = stage.outgoing.bounds.height
+
+        for height: CGFloat in [440, 520] {        // the Favorites grow, then shrink
+            window.setContentSize(NSSize(width: 320, height: height))
+            window.contentView?.layoutSubtreeIfNeeded()
+            for page in [stage.outgoing, stage.incoming] {
+                #expect(page.bounds.height == pageHeight)
+                #expect(abs(page.position.y - (stage.bounds.maxY - pageHeight / 2)) < 0.001)
+                #expect(page.transform.m41 == -120)
+            }
+        }
+        window.orderOut(nil)
+    }
+
     @Test func pageOffsetsSurviveDisplayPassesAndResizes() {
         stage.begin(outgoing: image())
         stage.setIncoming(image(), baseX: 320)

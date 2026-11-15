@@ -90,6 +90,25 @@ enum SpaceSwipe {
             return speed / Double(remaining)
         }
 
+        /// Fraction of the travel done at `t` seconds (0 at the start, → 1), for a start
+        /// at `initialVelocity` (travels per second, as above). Closed form, so other
+        /// things (the Favorites' height) can follow the pages' spring exactly.
+        func position(at t: Double, initialVelocity v0: Double) -> Double {
+            guard t > 0 else { return 0 }
+            let w = omega, z = dampingRatio
+            if abs(z - 1) < 1e-9 {
+                return 1 - (1 + (w - v0) * t) * exp(-w * t)
+            }
+            if z < 1 {
+                let wd = w * (1 - z * z).squareRoot()
+                return 1 - exp(-z * w * t) * (cos(wd * t) + (z * w - v0) / wd * sin(wd * t))
+            }
+            let root = (z * z - 1).squareRoot()
+            let r1 = -w * (z - root), r2 = -w * (z + root)
+            let c1 = (-v0 - r2) / (r1 - r2)
+            return 1 - (c1 * exp(r1 * t) + (1 - c1) * exp(r2 * t))
+        }
+
         /// Seconds until the motion stays within `tolerance` points of the end, for a
         /// travel of `distance` points starting at `initialVelocity` (as above). The
         /// spring is visually done by then; `CASpringAnimation.settlingDuration` waits

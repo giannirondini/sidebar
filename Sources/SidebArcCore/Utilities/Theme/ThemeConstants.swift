@@ -299,6 +299,10 @@ struct ThemeConstants {
         /// of the spring is invisible, so waiting for it to stop only delays the
         /// live page and another profile's Favorites.
         static let landingTolerance: Double = 0.5
+
+        /// How often a layout that follows the spring (the Favorites' height during a
+        /// switch across profiles) is updated: 120 Hz, ProMotion's rate.
+        static let layoutFrameInterval: TimeInterval = 1.0 / 120
     }
 
     // MARK: - Animation

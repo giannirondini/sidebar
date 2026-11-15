@@ -11,6 +11,24 @@ final class PinnedTabsView: NSView {
     /// Columns used by the last layout; the height depends on it.
     private var layoutColumns = ThemeConstants.Sizing.pinnedTileMinColumns
 
+    /// While set, the grid's height (a space switch animates it between two
+    /// profiles' grids); the tiles are clipped to it, so rows are revealed or hidden
+    /// smoothly. nil: the height of the rows.
+    var heightOverride: CGFloat? {
+        didSet {
+            guard heightOverride != oldValue else { return }
+            layer?.masksToBounds = heightOverride != nil
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    /// Height of a grid of `count` tiles at `width` (0 for none: it is hidden).
+    static func height(tiles count: Int, width: CGFloat) -> CGFloat {
+        let rows = rowCount(tiles: count, columns: columnCount(forWidth: width))
+        guard rows > 0 else { return 0 }
+        return CGFloat(rows) * ThemeConstants.Sizing.pinnedTileHeight + CGFloat(rows - 1) * ThemeConstants.Sizing.pinnedTileSpacing
+    }
+
     /// Columns that fit `width` with tiles at least `pinnedTileMinWidth` wide,
     /// never fewer than `pinnedTileMinColumns`.
     static func columnCount(forWidth width: CGFloat) -> Int {
@@ -112,6 +130,9 @@ final class PinnedTabsView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
+        if let heightOverride {
+            return NSSize(width: NSView.noIntrinsicMetric, height: heightOverride)
+        }
         let count = currentLinks.count
         guard count > 0 else { return NSSize(width: NSView.noIntrinsicMetric, height: 0) }
 

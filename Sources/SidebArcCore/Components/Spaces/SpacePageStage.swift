@@ -51,6 +51,17 @@ final class SpacePageStage: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// The stage resizes when the Favorites above change height during a switch:
+    /// keep the pages pinned to its top, so the page moves with the clip's top edge
+    /// (the bottom is clipped, or left empty, until the switch lands). Moved by
+    /// `position`, which a transform doesn't affect (unlike `frame`, see `place`).
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        for page in [outgoing, incoming] {
+            page.position.y = bounds.maxY - page.bounds.height / 2
+        }
+    }
+
     /// Shows the stage with `image` (the current page) in place; no incoming page yet.
     func begin(outgoing image: NSImage?) {
         generation += 1

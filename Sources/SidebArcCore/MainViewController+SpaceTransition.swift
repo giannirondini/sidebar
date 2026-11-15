@@ -29,9 +29,12 @@ final class SpaceTransition {
     var phase: Phase = .tracking
     /// System "Reduce motion": nothing slides; a switch crossfades instead.
     let reducesMotion: Bool
-    /// The target profile's Favorites went in when the settle started (same grid
-    /// height), so landing doesn't fade them in again.
+    /// The target profile's Favorites went in when the settle started, so landing
+    /// doesn't fade them in again.
     var favoritesSwapped = false
+    /// Drives the Favorites' height from the old grid's to the new one's on the
+    /// pages' spring; stopped on landing.
+    var favoritesHeightTimer: Timer?
 
     init(fromWorkspace: Workspace, fromIndex: Int) {
         self.fromWorkspace = fromWorkspace
@@ -255,17 +258,26 @@ extension MainViewController: SwipeGestureServiceDelegate {
         // Another profile's Favorites: when its grid is as tall as this one, it goes
         // in now and fades in with the page; otherwise the old grid fades out and the
         // new one fades in on landing (a height change would move the sliding page).
-        let targetFavorites = transition.target.map { model.profile(for: $0.workspace).favorites }
-        let swapsFavoritesNow = commits && changesFavorites(transition) && targetFavorites.map {
-            PinnedTabsView.hasSameHeight(
-                tiles: model.profile(for: transition.fromWorkspace).favorites.count,
-                tiles: $0.count,
-                width: pinnedTabsView.bounds.width
-            )
-        } == true
-        if swapsFavoritesNow, let targetFavorites {
+        let targetFavorites = transition.target.map { model.profile(for: $0.workspace).favorites } ?? []
+        let currentCount = model.profile(for: transition.fromWorkspace).favorites.count
+        let gridWidth = pinnedTabsView.bounds.width
+        // An empty grid is hidden by the stack together with its spacing, which
+        // can't be animated: those switches keep the fade on landing.
+        let swapsFavoritesNow = commits && changesFavorites(transition)
+            && (PinnedTabsView.hasSameHeight(tiles: currentCount, tiles: targetFavorites.count, width: gridWidth)
+                || (currentCount > 0 && !targetFavorites.isEmpty))
+        if swapsFavoritesNow {
+            let fromHeight = PinnedTabsView.height(tiles: currentCount, width: gridWidth)
+            let toHeight = PinnedTabsView.height(tiles: targetFavorites.count, width: gridWidth)
+            if fromHeight != toHeight {
+                pinnedTabsView.heightOverride = fromHeight
+            }
             pinnedTabsView.update(pinnedLinks: targetFavorites)
             transition.favoritesSwapped = true
+            if fromHeight != toHeight {
+                animateFavoritesHeight(of: transition, from: fromHeight, to: toHeight,
+                                       spring: spring, initialVelocity: initialVelocity, duration: visualDuration)
+            }
         }
         let endAlpha: CGFloat = commits && changesFavorites(transition) && !swapsFavoritesNow ? 0 : 1
         // A click or ⌘⌥←/→ has no drag (the old grid is fully shown): the swapped grid
@@ -342,6 +354,36 @@ extension MainViewController: SwipeGestureServiceDelegate {
         CATransaction.commit()
     }
 
+    /// The Favorites' height follows the pages' spring (same curve and start speed),
+    /// so the page below glides to its new place instead of jumping on landing.
+    /// Layout can't ride a Core Animation spring, so a timer sets each frame.
+    private func animateFavoritesHeight(
+        of transition: SpaceTransition,
+        from: CGFloat,
+        to: CGFloat,
+        spring: SpaceSwipe.Spring,
+        initialVelocity: Double,
+        duration: TimeInterval
+    ) {
+        let start = CACurrentMediaTime()
+        let timer = Timer(timeInterval: ThemeConstants.SpaceTransition.layoutFrameInterval, repeats: true) { [weak self, weak transition] timer in
+            // Timers on the main run loop fire on the main thread.
+            let done = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let transition, self.spaceTransition === transition else { return true }
+                let elapsed = CACurrentMediaTime() - start
+                let fraction = elapsed >= duration ? 1 : spring.position(at: elapsed, initialVelocity: initialVelocity)
+                self.pinnedTabsView.heightOverride = from + (to - from) * CGFloat(fraction)
+                self.view.layoutSubtreeIfNeeded()
+                return elapsed >= duration
+            }
+            if done {
+                timer.invalidate()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        transition.favoritesHeightTimer = timer
+    }
+
     // MARK: - Landing
 
     /// Lands the current transition immediately (a new click or gesture arrived):
@@ -362,6 +404,9 @@ extension MainViewController: SwipeGestureServiceDelegate {
         if case .settling(let value) = transition.phase { commits = value } else { commits = false }
 
         pageStage.removeAllPageAnimations()
+        transition.favoritesHeightTimer?.invalidate()
+        transition.favoritesHeightTimer = nil
+        pinnedTabsView.heightOverride = nil
         // Cut short (a click, a new gesture): the pages jump to where they were going.
         pageStage.setOffset(commits ? transition.side * swipeClipContainer.bounds.width : 0)
         view.layer?.removeAnimation(forKey: Self.transitionAnimationKey)

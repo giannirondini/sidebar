@@ -28,6 +28,30 @@ import Testing
         #expect(Profile.maxFavorites == 12)
     }
 
+    @Test func gridHeightPerTileCount() {
+        let tile = ThemeConstants.Sizing.pinnedTileHeight, gap = ThemeConstants.Sizing.pinnedTileSpacing
+        #expect(PinnedTabsView.height(tiles: 0, width: 320) == 0)
+        #expect(PinnedTabsView.height(tiles: 3, width: 320) == tile)
+        #expect(PinnedTabsView.height(tiles: 4, width: 320) == 2 * tile + gap)
+        #expect(PinnedTabsView.height(tiles: 12, width: 320) == 4 * tile + 3 * gap)
+    }
+
+    /// During a switch the height is driven from outside; the tiles are clipped to it.
+    @Test func heightOverrideWinsAndClips() {
+        let grid = PinnedTabsView(frame: NSRect(x: 0, y: 0, width: 320, height: 0))
+        grid.wantsLayer = true
+        grid.update(pinnedLinks: (0..<4).map { Link(id: UUID(), title: "\($0)", url: "https://\($0).example", faviconPath: nil) })
+        #expect(grid.intrinsicContentSize.height == PinnedTabsView.height(tiles: 4, width: 320))
+
+        grid.heightOverride = 20
+        #expect(grid.intrinsicContentSize.height == 20)
+        #expect(grid.layer?.masksToBounds == true)
+
+        grid.heightOverride = nil
+        #expect(grid.intrinsicContentSize.height == PinnedTabsView.height(tiles: 4, width: 320))
+        #expect(grid.layer?.masksToBounds == false)
+    }
+
     /// A space switch to another profile swaps the grid early only when it keeps its height.
     @Test func sameHeightMeansSameRowCount() {
         #expect(PinnedTabsView.hasSameHeight(tiles: 1, tiles: 3, width: 320))    // 1 row each
