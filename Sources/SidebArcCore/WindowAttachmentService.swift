@@ -47,6 +47,14 @@ final class WindowAttachmentService {
 
     // Debouncing - reduced from 0.05 to 0.016 (~60fps) for smoother tracking
     private var positionUpdateTimer: Timer?
+
+    /// Waits for the first window of a browser that came to the front without one
+    /// (it is still launching). Its "focused window changed" notification can't be
+    /// relied on: the observer is registered before the app is ready (log
+    /// 2026-11-15: Chrome launched from a favorite never re-attached).
+    private var windowRetryTimer: Timer?
+    private static let windowRetryInterval: TimeInterval = 0.25
+    private static let windowRetryTimeout: TimeInterval = 10
     private let positionDebounceInterval: TimeInterval = 0.016
 
     // Frame caching to skip redundant updates
@@ -104,6 +112,7 @@ final class WindowAttachmentService {
     }
 
     func disable() {
+        cancelWindowRetry()
         logger.notice("Disabled")
 
         isEnabled = false
@@ -134,6 +143,36 @@ final class WindowAttachmentService {
     }
 
     // MARK: - Browser Window Discovery
+
+    /// Polls until `app` (frontmost, attachable, no window yet) shows a window, then
+    /// attaches with a fresh window-focus observer. Gives up after the timeout, or as
+    /// soon as `app` is no longer frontmost (another activation decides then).
+    private func waitForFirstWindow(of app: NSRunningApplication) {
+        let pid = app.processIdentifier
+        let deadline = Date().addingTimeInterval(Self.windowRetryTimeout)
+        let timer = Timer(timeInterval: Self.windowRetryInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isEnabled,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                      Date() < deadline else {
+                    self?.cancelWindowRetry()
+                    return
+                }
+                guard self.findFrontmostBrowserWindow(activeApp: app) != nil else { return }
+                self.logger.notice("First window of pid \(pid) appeared: attach")
+                // Registered while the app was launching, the observer may be dead.
+                self.cleanupAppObserver()
+                self.attachToBrowser()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        windowRetryTimer = timer
+    }
+
+    private func cancelWindowRetry() {
+        windowRetryTimer?.invalidate()
+        windowRetryTimer = nil
+    }
 
     /// Hides the sidebar, logging why (the reason helps with flicker reports).
     private func hide(_ reason: String) {
@@ -197,6 +236,7 @@ final class WindowAttachmentService {
 
     /// Drops the followed browser's window and app observers.
     private func detachFromBrowser() {
+        cancelWindowRetry()
         cleanupObservers()
         cleanupAppObserver()
         browserApp = nil
@@ -426,6 +466,7 @@ final class WindowAttachmentService {
     /// Attaches to the frontmost app if it is a browser in the set, switching from
     /// the previously followed browser when it is a different one.
     private func attachToBrowser() {
+        cancelWindowRetry()
         guard !browserBundleIds.isEmpty else {
             logger.notice("No browsers configured")
             return
@@ -470,6 +511,7 @@ final class WindowAttachmentService {
         // Find browser window
         guard let windowElement = findFrontmostBrowserWindow(activeApp: frontmost) else {
             hide("no window found for \(frontmost.bundleIdentifier ?? "?") pid \(frontmost.processIdentifier) (active \(frontmost.isActive), launched \(frontmost.isFinishedLaunching))")
+            waitForFirstWindow(of: frontmost)
             return
         }
 
@@ -563,7 +605,10 @@ final class WindowAttachmentService {
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        AXObserverAddNotification(observer, appElement, kAXFocusedWindowChangedNotification as CFString, selfPtr)
+        let added = AXObserverAddNotification(observer, appElement, kAXFocusedWindowChangedNotification as CFString, selfPtr)
+        if added != .success {
+            logger.notice("Window-focus observer for pid \(newPid) not added (AXError \(added.rawValue)); waiting for a window instead")
+        }
         CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(observer), .defaultMode)
 
         self.appObserver = observer
@@ -629,6 +674,7 @@ final class WindowAttachmentService {
                     if bundleId != ownBundleId {
                         self.lastFrontmostBundleId = bundleId
                     }
+                    self.cancelWindowRetry()
                     self.hide("activated \(bundleId ?? "?") pid \(app.processIdentifier), not a browser of the set")
                 }
             }
