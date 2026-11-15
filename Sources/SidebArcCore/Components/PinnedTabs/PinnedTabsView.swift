@@ -25,6 +25,14 @@ final class PinnedTabsView: NSView {
         return (count + columns - 1) / columns
     }
 
+    /// Whether grids of `a` and `b` tiles are equally tall at `width` (the same number
+    /// of rows; an empty grid is hidden, 0 rows). Then a space switch can swap them
+    /// in place without moving the page below.
+    static func hasSameHeight(tiles a: Int, tiles b: Int, width: CGFloat) -> Bool {
+        let columns = columnCount(forWidth: width)
+        return rowCount(tiles: a, columns: columns) == rowCount(tiles: b, columns: columns)
+    }
+
     override var isFlipped: Bool { true }
 
     override init(frame frameRect: NSRect) {

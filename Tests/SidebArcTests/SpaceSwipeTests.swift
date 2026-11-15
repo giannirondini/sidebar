@@ -121,3 +121,35 @@ import Testing
         #expect(abs(e.velocity(at: last) - 500) < 1)   // 10 pt in 20 ms
     }
 }
+
+/// The spring lands once it's visually done (Favorites of another profile and the
+/// live page come sooner), not when CASpringAnimation considers it stopped.
+@Suite struct SpringLandingTests {
+    private let spring = SpaceSwipe.Spring.standard
+
+    /// Remaining distance (points) of a critically damped spring, closed form.
+    private func remaining(at t: Double, distance: Double, v0: Double) -> Double {
+        let w = spring.omega
+        return abs(distance * (1 + (w - v0) * t) * exp(-w * t))
+    }
+
+    @Test func aPageLandsBeforeTheSpringStopsAndWithinTolerance() {
+        let tolerance = ThemeConstants.SpaceTransition.landingTolerance
+        for v0 in [0.0, 2.0, 5.0] {
+            let t = spring.visualDuration(initialVelocity: v0, distance: 340, tolerance: tolerance)
+            #expect(t > 0.25 && t < 0.5, "v0 \(v0): \(t)")
+            #expect(remaining(at: t + 0.001, distance: 340, v0: v0) < tolerance)
+            #expect(remaining(at: t - 0.02, distance: 340, v0: v0) >= tolerance)
+        }
+    }
+
+    @Test func noTravelNeedsNoTime() {
+        #expect(spring.visualDuration(initialVelocity: 0, distance: 0.2, tolerance: 0.5) == 0)
+    }
+
+    @Test func aLooserToleranceLandsSooner() {
+        let tight = spring.visualDuration(initialVelocity: 0, distance: 340, tolerance: 0.5)
+        let loose = spring.visualDuration(initialVelocity: 0, distance: 340, tolerance: 5)
+        #expect(loose < tight)
+    }
+}

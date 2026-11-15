@@ -294,6 +294,11 @@ struct ThemeConstants {
 
         /// 1 = critically damped: no bounce past the target.
         static let springDampingRatio: Double = 1.0
+
+        /// A switch lands once the pages are this close to the end (points): the rest
+        /// of the spring is invisible, so waiting for it to stop only delays the
+        /// live page and another profile's Favorites.
+        static let landingTolerance: Double = 0.5
     }
 
     // MARK: - Animation

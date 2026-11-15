@@ -27,4 +27,14 @@ import Testing
     @Test func capIsIndependentOfTheGrid() {
         #expect(Profile.maxFavorites == 12)
     }
+
+    /// A space switch to another profile swaps the grid early only when it keeps its height.
+    @Test func sameHeightMeansSameRowCount() {
+        #expect(PinnedTabsView.hasSameHeight(tiles: 1, tiles: 3, width: 320))    // 1 row each
+        #expect(PinnedTabsView.hasSameHeight(tiles: 4, tiles: 6, width: 320))    // 2 rows each
+        #expect(!PinnedTabsView.hasSameHeight(tiles: 3, tiles: 4, width: 320))   // 1 vs 2 rows
+        #expect(PinnedTabsView.hasSameHeight(tiles: 3, tiles: 4, width: 400))    // 4 columns: 1 row each
+        #expect(!PinnedTabsView.hasSameHeight(tiles: 0, tiles: 1, width: 320))   // hidden vs 1 row
+        #expect(PinnedTabsView.hasSameHeight(tiles: 0, tiles: 0, width: 320))
+    }
 }

@@ -89,6 +89,29 @@ enum SpaceSwipe {
             }
             return speed / Double(remaining)
         }
+
+        /// Seconds until the motion stays within `tolerance` points of the end, for a
+        /// travel of `distance` points starting at `initialVelocity` (as above). The
+        /// spring is visually done by then; `CASpringAnimation.settlingDuration` waits
+        /// for it to stop entirely (0.5 s vs ~0.4 s for a 340-pt page), and only
+        /// then does the transition land.
+        func visualDuration(initialVelocity: Double, distance: Double, tolerance: Double) -> Double {
+            let span = abs(distance)
+            guard span > tolerance else { return 0 }
+            // Simulate x'' = -k(x - 1) - c x' (x: fraction of the travel) and keep
+            // the last moment the remaining distance is above tolerance.
+            let step = 0.0005
+            let horizon = 3.0
+            var x = 0.0, v = initialVelocity, t = 0.0, last = 0.0
+            while t < horizon {
+                let a = -stiffness * (x - 1) - damping * v
+                v += a * step
+                x += v * step
+                t += step
+                if abs(1 - x) * span > tolerance { last = t }
+            }
+            return last
+        }
     }
 }
 

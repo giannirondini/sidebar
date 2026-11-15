@@ -29,6 +29,9 @@ final class SpaceTransition {
     var phase: Phase = .tracking
     /// System "Reduce motion": nothing slides; a switch crossfades instead.
     let reducesMotion: Bool
+    /// The target profile's Favorites went in when the settle started (same grid
+    /// height), so landing doesn't fade them in again.
+    var favoritesSwapped = false
 
     init(fromWorkspace: Workspace, fromIndex: Int) {
         self.fromWorkspace = fromWorkspace
@@ -223,6 +226,13 @@ extension MainViewController: SwipeGestureServiceDelegate {
         let end = commits ? transition.side * width : 0
         let spring = SpaceSwipe.Spring.standard
         let initialVelocity = spring.initialVelocity(releaseVelocity: releaseVelocity, remaining: end - start)
+        // Land once the pages are visually there, not when the spring has fully
+        // stopped: the live page (and another profile's Favorites) come sooner.
+        let visualDuration = spring.visualDuration(
+            initialVelocity: initialVelocity,
+            distance: Double(end - start),
+            tolerance: ThemeConstants.SpaceTransition.landingTolerance
+        )
 
         func springAnimation(_ keyPath: String, from: Any, to: Any) -> CASpringAnimation {
             let animation = CASpringAnimation(keyPath: keyPath)
@@ -232,7 +242,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
             animation.initialVelocity = initialVelocity
             animation.fromValue = from
             animation.toValue = to
-            animation.duration = animation.settlingDuration
+            animation.duration = min(animation.settlingDuration, max(visualDuration, ThemeConstants.Animation.durationFast))
             return animation
         }
 
@@ -242,8 +252,22 @@ extension MainViewController: SwipeGestureServiceDelegate {
             : transition.fromWorkspace.backgroundColor
         let pillSpaceId = commits ? transition.target?.workspace.id : transition.fromWorkspace.id
         let startAlpha = pinnedTabsView.alphaValue
-        // Another profile's Favorites fade out with the page and fade in on landing.
-        let endAlpha: CGFloat = commits && changesFavorites(transition) ? 0 : 1
+        // Another profile's Favorites: when its grid is as tall as this one, it goes
+        // in now and fades in with the page; otherwise the old grid fades out and the
+        // new one fades in on landing (a height change would move the sliding page).
+        let targetFavorites = transition.target.map { model.profile(for: $0.workspace).favorites }
+        let swapsFavoritesNow = commits && changesFavorites(transition) && targetFavorites.map {
+            PinnedTabsView.hasSameHeight(
+                tiles: model.profile(for: transition.fromWorkspace).favorites.count,
+                tiles: $0.count,
+                width: pinnedTabsView.bounds.width
+            )
+        } == true
+        if swapsFavoritesNow, let targetFavorites {
+            pinnedTabsView.update(pinnedLinks: targetFavorites)
+            transition.favoritesSwapped = true
+        }
+        let endAlpha: CGFloat = commits && changesFavorites(transition) && !swapsFavoritesNow ? 0 : 1
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -348,7 +372,7 @@ extension MainViewController: SwipeGestureServiceDelegate {
         CATransaction.commit()
         pinnedTabsView.layer?.removeAnimation(forKey: Self.transitionAnimationKey)
         spaceBar.endSelectionTransition()
-        let fadeInFavorites = commits && changesFavorites(transition)
+        let fadeInFavorites = commits && changesFavorites(transition) && !transition.favoritesSwapped
 
         // Unless something else changed the selection meanwhile (a new space, the
         // agent API): that change wins. Still "in transition" here, so the
