@@ -6,9 +6,9 @@ final class IconPickerGridView: NSView {
     private let scrollView = NSScrollView()
     private let contentView = FlippedContentView()
 
-    private let cellSize: CGFloat = 34
-    private let cellSpacing: CGFloat = 4
-    private let columns = 8
+    /// Smallest cell; the column count is however many of these fit the width.
+    private static let minCellSize: CGFloat = 34
+    private static let cellSpacing: CGFloat = 4
 
     private var itemViews: [IconPickerItemView] = []
 
@@ -70,10 +70,20 @@ final class IconPickerGridView: NSView {
         layoutGrid()
     }
 
+    /// Columns and cell size for `width`: as many columns of at least `minCellSize`
+    /// as fit, with the leftover width shared by the cells. A fixed column count
+    /// with a minimum cell size would push the last column outside the view, where
+    /// it is clipped and can't be clicked.
+    static func metrics(forWidth width: CGFloat) -> (columns: Int, cellSize: CGFloat) {
+        let columns = max(1, Int((width + cellSpacing) / (minCellSize + cellSpacing)))
+        let available = width - CGFloat(columns - 1) * cellSpacing
+        return (columns, max(minCellSize, floor(available / CGFloat(columns))))
+    }
+
     private func layoutGrid() {
         let totalWidth = bounds.width
-        let availableWidth = totalWidth - CGFloat(columns - 1) * cellSpacing
-        let actualCellSize = max(cellSize, floor(availableWidth / CGFloat(columns)))
+        let (columns, actualCellSize) = Self.metrics(forWidth: totalWidth)
+        let cellSpacing = Self.cellSpacing
 
         let rows = (itemViews.count + columns - 1) / columns
         let contentHeight = CGFloat(rows) * actualCellSize + CGFloat(max(0, rows - 1)) * cellSpacing

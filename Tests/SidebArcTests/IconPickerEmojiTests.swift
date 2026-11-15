@@ -50,4 +50,19 @@ import Testing
         // a list or grid change making the picker an order of magnitude slower to open.
         #expect(Date().timeIntervalSince(start) < 2)
     }
+
+    /// The popover's grid (280 − 2 × 8 = 264 pt) used to force 8 columns of 34 pt,
+    /// which put the 8th column at x = 266: clipped, so every 8th icon was unclickable.
+    @Test func gridColumnsFitInsideTheWidth() {
+        let popoverGrid = IconPickerGridView.metrics(forWidth: 264)
+        #expect(popoverGrid.columns == 7)
+        #expect(popoverGrid.cellSize == 34)
+
+        for width in stride(from: CGFloat(34), through: 600, by: 1) {
+            let (columns, cellSize) = IconPickerGridView.metrics(forWidth: width)
+            let used = CGFloat(columns) * cellSize + CGFloat(columns - 1) * 4
+            #expect(used <= width, "width \(width): \(columns) × \(cellSize) needs \(used)")
+            #expect(cellSize >= 34)
+        }
+    }
 }
