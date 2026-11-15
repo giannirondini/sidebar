@@ -104,7 +104,8 @@ Settings › Import & Export › **Export Data…** / **Import Data…** move ev
 
 The file-by-file map is in [ARCHITECTURE.md › Project structure](ARCHITECTURE.md#project-structure). Details not listed there:
 
-- **FaviconService**, **LinkTitleService** - `shared` singletons; favicons are cached on disk with a cooldown after failures
+- **FaviconService** - `shared` singleton. Tries the site's `/favicon.ico`, then Google's service (public hosts only, `isPrivateHost`; Settings switch). An answer counts only when it's a 2xx whose body decodes as an image (`fetchFaviconData`), so a `200 text/html` "not found" page moves on to the fallback. Icons are cached on disk; when both fail, the host waits 5 minutes before the next try. The fetch is injectable (`Fetch`), so tests never touch the network.
+- **LinkTitleService** - `shared` singleton. Streams the page with `URLSession.bytes(for:)` and stops reading at 200 KB (`maxHTMLBytes`); finds `<title>` caselessly in the decoded text itself, decodes entities (`HTMLEntities`), collapses whitespace and cuts at 300 characters. At most 4 fetches run at once (a paste of many URLs queues the rest). Tests inject the fetch (`init(fetch:)`).
 - **SettingsContentViewController** - Settings page: space list (drag to reorder), default browser, profiles (`ProfileSettingsView`), permissions, import
 - **NodeCollectionViewItem** - Reusable cell with icon, title, hover states, delete button
 - **IconTitleButton** - Icon + title button; `.listRow` style is the "+ Add from Clipboard" row
@@ -138,6 +139,8 @@ When moving nodes, the system:
 2. Removes node from old location
 3. Adjusts target index if needed (accounts for removal in same parent)
 4. Inserts at new location
+
+**Bulk actions** (⌘-click selection: Move to…, Group in New Folder, Delete, Open N Links, Copy N Links, and a folder's Open All Links) never depend on the selection's `Set` order: they go through `AppModel.selectedNodes`, which returns the selected nodes in list order and leaves out a node whose ancestor is also selected (it travels with that ancestor). Opening uses `linksToOpen(forSelection:)`: each selected link and the links directly inside each selected folder, each link once; the menu's count comes from the same function.
 
 ## UI Update Strategy
 

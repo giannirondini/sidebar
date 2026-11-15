@@ -565,9 +565,7 @@ final class ArcImportService: Sendable {
         }
         // Check if it's a link (has tab data with a valid URL)
         else if let tabData = item.data?.tab {
-            guard let urlString = tabData.savedURL,
-                  !urlString.isEmpty,
-                  URL(string: urlString) != nil else {
+            guard let urlString = tabData.savedURL.flatMap(ImportedURL.normalized) else {
                 return nil
             }
 

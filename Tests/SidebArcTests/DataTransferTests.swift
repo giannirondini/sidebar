@@ -5,13 +5,15 @@ import Testing
 /// Export and import. Two temporary data folders stand in for two Macs
 /// with different home folders; nothing touches the real data directory.
 @Suite struct DataTransferTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
     private let root: URL
     private let macA: URL
     private let macB: URL
     private let exports: URL
 
     init() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("DataTransferTests-\(UUID().uuidString)")
+        root = scratch.url.appendingPathComponent("DataTransferTests-\(UUID().uuidString)")
         macA = root.appendingPathComponent("A/Application Support/sidebarc", isDirectory: true)
         macB = root.appendingPathComponent("B/Application Support/sidebarc", isDirectory: true)
         exports = root.appendingPathComponent("Exports", isDirectory: true)
@@ -33,7 +35,7 @@ import Testing
     /// with a body and an icon, a space icon, a favorite with a favicon.
     private func makeSource() throws -> Source {
         let store = DataStore(baseDirectory: macA)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let icons = store.iconsDirectory()
         for name in ["example.com.ico", "custom.ico", "note.ico", "space.ico", "favorite.ico"] {
             try Data([1, 2, 3]).write(to: icons.appendingPathComponent(name))
@@ -149,7 +151,7 @@ import Testing
         let folder = try DataTransfer.export(store: source.store, to: exports)
         let package = try DataTransfer.readPackage(at: folder)
         let store = DataStore(baseDirectory: macB)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         try model.noteStorage.write(id: source.noteId, content: "local")
         let previousData = try Data(contentsOf: store.dataFileURL)
         let icons = folder.appendingPathComponent("Icons")
@@ -177,7 +179,7 @@ import Testing
         state.workspaces[0].items = [node]
         let package = DataTransfer.Package(folder: original.folder, manifest: original.manifest, state: state, summary: original.summary)
         let store = DataStore(baseDirectory: macB)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let previousData = try Data(contentsOf: store.dataFileURL)
         let previousState = model.state
         do {
@@ -196,7 +198,7 @@ import Testing
         let package = try DataTransfer.readPackage(at: folder)
 
         let storeB = DataStore(baseDirectory: macB)
-        let modelB = AppModel(store: storeB)
+        let modelB = AppModel(store: storeB, defaults: testDefaults.suite)
         var changes = 0
         modelB.onChange = { changes += 1 }
         try modelB.applyDataImport(package)
@@ -213,7 +215,7 @@ import Testing
         #expect(linkB.customIcon == .cachedFavicon(iconsB.appendingPathComponent("custom.ico").path))
         #expect(link(source.nestedLinkId, in: state)?.faviconPath == iconsB.appendingPathComponent("example.com.ico").path)
         #expect(note(source.noteId, in: state)?.customIcon == .cachedFavicon(iconsB.appendingPathComponent("note.ico").path))
-        #expect(state.workspaces[0].icon == .cachedFavicon(iconsB.appendingPathComponent("space.ico").path))
+        #expect(state.workspaces[safe: 0]?.icon == .cachedFavicon(iconsB.appendingPathComponent("space.ico").path))
         let favorite = try #require(state.profiles.flatMap(\.favorites).first { $0.id == source.favoriteId })
         #expect(favorite.faviconPath == iconsB.appendingPathComponent("favorite.ico").path)
 
@@ -231,7 +233,7 @@ import Testing
         let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
 
         let storeB = DataStore(baseDirectory: macB)
-        let modelB = AppModel(store: storeB)
+        let modelB = AppModel(store: storeB, defaults: testDefaults.suite)
         let localNote = modelB.addNote(title: "Local", parentId: nil, content: "local body")
         let previousData = try Data(contentsOf: storeB.dataFileURL)
 
@@ -250,7 +252,7 @@ import Testing
         let source = try makeSource()
         let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
         let store = DataStore(baseDirectory: macB)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let localNote = model.addNote(title: "Local", parentId: nil, content: "keep body")
         let original: Data
         if hasSchemaVersion {
@@ -279,7 +281,7 @@ import Testing
         let original = Data("invalid json".utf8)
         let store = DataStore(baseDirectory: macB)
         try original.write(to: store.dataFileURL)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         #expect(throws: (any Error).self) { try model.applyDataImport(package) }
         #expect(try Data(contentsOf: store.dataFileURL) == original)
     }
@@ -289,7 +291,7 @@ import Testing
         let package = try DataTransfer.readPackage(at: try DataTransfer.export(store: source.store, to: exports))
 
         let storeB = DataStore(baseDirectory: macB)
-        let modelB = AppModel(store: storeB)
+        let modelB = AppModel(store: storeB, defaults: testDefaults.suite)
         let folder = modelB.addFolder(name: "Local folder", parentId: nil)
         _ = modelB.addLink(urlString: "https://local.example", title: "Local", parentId: folder)
         let before = modelB.state
@@ -326,7 +328,7 @@ import Testing
         let folder = try makeFolder(manifest: validManifest(schemaVersion: 1), data: try JSONSerialization.data(withJSONObject: v1))
 
         let package = try DataTransfer.readPackage(at: folder)
-        let modelB = AppModel(store: DataStore(baseDirectory: macB))
+        let modelB = AppModel(store: DataStore(baseDirectory: macB), defaults: testDefaults.suite)
         try modelB.applyDataImport(package)
 
         #expect(modelB.state.schemaVersion == AppState.currentSchemaVersion)
@@ -336,7 +338,7 @@ import Testing
 
     @Test func refusalsLeaveTheDataUntouched() throws {
         let storeB = DataStore(baseDirectory: macB)
-        let modelB = AppModel(store: storeB)
+        let modelB = AppModel(store: storeB, defaults: testDefaults.suite)
         _ = modelB.addLink(urlString: "https://keep.example", title: "Keep", parentId: nil)
         let before = try Data(contentsOf: storeB.dataFileURL)
         let valid = try currentData()
@@ -387,13 +389,13 @@ import Testing
         state.workspaces[0].items = [.folder(Folder(id: UUID(), name: "Folder", children: [.link(legacy)], isExpanded: true))]
         let store = DataStore(baseDirectory: macB)
         store.save(state)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
 
         let backup = try model.applyDataImport(package)
         try model.applyDataImport(DataTransfer.readPackage(at: backup))
 
-        let restored = AppModel(store: store).state
-        #expect(restored.profiles[0].favorites.first?.url == favorite.url)
+        let restored = AppModel(store: store, defaults: testDefaults.suite).state
+        #expect(restored.profiles[safe: 0]?.favorites.first?.url == favorite.url)
         #expect(link(legacy.id, in: restored)?.url == legacy.url)
         #expect(BrowserManager.validatedLinkURL(from: favorite.url) == nil)
         #expect(BrowserManager.validatedLinkURL(from: legacy.url) != nil)

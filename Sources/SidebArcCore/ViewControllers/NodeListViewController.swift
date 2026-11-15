@@ -68,7 +68,9 @@ final class NodeListViewController: NSViewController {
     var currentWorkspaceIdProvider: (() -> UUID?)?
     var findNodeById: ((UUID) -> Node?)?
     var findNodeLocation: ((UUID) -> NodeLocation?)?
-    var findNodeInNodes: ((UUID, [Node]) -> Node?)?
+    /// What the bulk "Open N Links" / "Copy N Links" act on (`AppModel.linksToOpen`, `linksToCopy`).
+    var linksToOpenProvider: (([UUID]) -> [Link])?
+    var linksToCopyProvider: (([UUID]) -> [Link])?
 
     // State
     var isSearchActive: Bool = false
@@ -1211,11 +1213,6 @@ extension NodeListViewController: NSMenuDelegate {
     private func populateBulkContextMenu(_ menu: NSMenu) {
         let count = selectedNodeIds.count
 
-        // Resolve selected nodes
-        let nodes = selectedNodeIds.compactMap { id in
-            findNodeInNodes?(id, nodeProvider?() ?? [])
-        }
-
         // 1. Move to Workspace submenu
         let moveItem = NSMenuItem(title: "Move to…", action: nil, keyEquivalent: "")
         let moveSubmenu = NSMenu()
@@ -1235,31 +1232,16 @@ extension NodeListViewController: NSMenuDelegate {
         groupItem.target = self
         menu.addItem(groupItem)
 
-        // 3. Open Links (selected links + root-level links from selected folders)
-        var openableLinkCount = 0
-        for node in nodes {
-            switch node {
-            case .link:
-                openableLinkCount += 1
-            case .note:
-                break
-            case .folder(let folder):
-                openableLinkCount += folder.children.filter { if case .link = $0 { return true } else { return false } }.count
-            }
-        }
-
+        // 3. Open Links (selected links + links directly inside selected folders)
+        let openableLinkCount = linksToOpenProvider?(Array(selectedNodeIds)).count ?? 0
         if openableLinkCount > 0 {
             let openItem = NSMenuItem(title: "Open \(openableLinkCount) Link\(openableLinkCount > 1 ? "s" : "")", action: #selector(bulkOpenLinks), keyEquivalent: "")
             openItem.target = self
             menu.addItem(openItem)
         }
 
-        // 4. Copy Links (only if there are direct links)
-        let linkCount = nodes.filter { node in
-            if case .link = node { return true }
-            return false
-        }.count
-
+        // 4. Copy Links (only the selected links themselves)
+        let linkCount = linksToCopyProvider?(Array(selectedNodeIds)).count ?? 0
         if linkCount > 0 {
             let copyItem = NSMenuItem(title: "Copy \(linkCount) Link\(linkCount > 1 ? "s" : "")", action: #selector(bulkCopyLinks), keyEquivalent: "")
             copyItem.target = self

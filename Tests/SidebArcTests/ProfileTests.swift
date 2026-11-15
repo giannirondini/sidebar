@@ -4,14 +4,16 @@ import Testing
 
 /// Profile CRUD in `AppModel`.
 @Suite struct ProfileTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
     private let model: AppModel
     private let store: DataStore
 
     init() {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let temp = scratch.url.appendingPathComponent(UUID().uuidString)
         store = DataStore(baseDirectory: temp)
         store.save(DataStore.defaultState())
-        model = AppModel(store: store)
+        model = AppModel(store: store, defaults: testDefaults.suite)
     }
 
     private func pinNewLink(_ url: String) -> UUID {

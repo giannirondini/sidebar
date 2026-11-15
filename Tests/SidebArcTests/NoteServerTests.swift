@@ -6,15 +6,17 @@ import Testing
 
 @MainActor
 @Suite struct NoteServerTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
     private func makeStore() -> DataStore {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let temp = scratch.url.appendingPathComponent(UUID().uuidString)
         return DataStore(baseDirectory: temp)
     }
 
     private func startServer(idleTimeout: TimeInterval = NoteServer.defaultIdleTimeout) async throws -> (NoteServer, AppModel) {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let server = try NoteServer(model: model, idleTimeout: idleTimeout)
         server.start()
 
@@ -590,12 +592,21 @@ import Testing
             }
         }.value
         defer { sockets.forEach { close($0) } }
-        try await Task.sleep(nanoseconds: 500_000_000)
-        let (full, _) = try await request(method: "GET", path: "/api/state", server: server)
-        #expect(full == 503)
-        try await Task.sleep(nanoseconds: 1_500_000_000)
-        let (available, _) = try await request(method: "GET", path: "/api/state", server: server)
-        #expect(available == 200)
+        // Poll instead of fixed sleeps: under a loaded parallel run a fixed 0.5 s
+        // could land after the 1 s idle timeout had already freed the slots.
+        let clock = ContinuousClock()
+        func status(becoming wanted: Int, within limit: Duration) async throws -> Int {
+            let deadline = clock.now + limit
+            while true {
+                let (status, _) = try await request(method: "GET", path: "/api/state", server: server)
+                if status == wanted || clock.now >= deadline { return status }
+                try await Task.sleep(for: .milliseconds(25))
+            }
+        }
+        // Full while the 32 idle connections are held (well inside the timeout)…
+        #expect(try await status(becoming: 503, within: .milliseconds(700)) == 503)
+        // …and available again once the idle timeout has released them.
+        #expect(try await status(becoming: 200, within: .seconds(5)) == 200)
         #expect(!model.workspaces.isEmpty)
     }
 

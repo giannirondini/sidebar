@@ -3,8 +3,10 @@ import Testing
 @testable import SidebArcCore
 
 @Suite struct DataStoreBackupTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
     private func makeTempDirectory() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        scratch.url.appendingPathComponent(UUID().uuidString)
     }
 
     private func makeState(name: String) -> AppState {
@@ -37,7 +39,7 @@ import Testing
 
         let backups = backupURLs(in: directory)
         #expect(backups.count == 1)
-        let backupData = try Data(contentsOf: backups[0])
+        let backupData = try Data(contentsOf: #require(backups.first))
         let liveData = try Data(contentsOf: dataURL(in: directory))
         #expect(backupData == liveData)
     }
@@ -54,7 +56,7 @@ import Testing
         #expect((try Data(contentsOf: dataURL(in: directory))) == corruptBytes)
         let backups = backupURLs(in: directory)
         #expect(backups.count == 1)
-        #expect((try Data(contentsOf: backups[0])) == corruptBytes)
+        #expect((try Data(contentsOf: #require(backups.first))) == corruptBytes)
     }
 
     @Test(arguments: ["future", "node", "icon", "invalid"])
@@ -80,7 +82,7 @@ import Testing
         try original.write(to: dataURL(in: directory))
 
         let store = DataStore(baseDirectory: directory)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         if kind == "future" {
             guard case .newerSchema(let version) = model.dataLoadIssue else {
                 Issue.record("Expected newer schema warning")
@@ -172,7 +174,10 @@ import Testing
         for index in 0..<12 {
             DataStore(baseDirectory: directory).save(makeState(name: "Workspace \(index)"))
             backupURLs(in: directory).forEach { allNames.insert($0.lastPathComponent) }
-            Thread.sleep(forTimeInterval: 0.005)
+            // Backup names carry millisecond timestamps: two saves in the same
+            // millisecond would share one. 20 ms leaves room for a coarse or
+            // slewing clock without making the test slow.
+            Thread.sleep(forTimeInterval: 0.02)
         }
         _ = DataStore(baseDirectory: directory).load()
         backupURLs(in: directory).forEach { allNames.insert($0.lastPathComponent) }
@@ -192,7 +197,7 @@ import Testing
 
         let backups = backupURLs(in: directory)
         #expect(backups.count == 1)
-        #expect((try Data(contentsOf: backups[0])) == originalData)
+        #expect((try Data(contentsOf: #require(backups.first))) == originalData)
     }
 
     @Test func testFirstLaunchCreatesNoBackup() {

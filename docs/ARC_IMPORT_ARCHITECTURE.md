@@ -48,7 +48,7 @@ The importer uses the **first container that has both `spaces` and `items`**, wh
 |---|---|---|
 | Container | the id a space or `topAppsContainerIDs` points to; may be missing from `items` | `childrenIds` |
 | Folder | non-empty `childrenIds` | `title`, `parentID`, `childrenIds` |
-| Link | `data.tab` with a non-empty `savedURL` that `URL(string:)` accepts | `data.tab.savedTitle`, `data.tab.savedURL` |
+| Link | `data.tab` with a non-empty `savedURL` that `URL(string:)` accepts once `ImportedURL.normalized` has percent-encoded spaces and other invalid characters (the encoded string is stored, so the result doesn't depend on the macOS version) | `data.tab.savedTitle`, `data.tab.savedURL` |
 
 ```json
 { "id": "folder-uuid", "title": "Development", "parentID": "pinned-container-id", "childrenIds": ["link-uuid"] }

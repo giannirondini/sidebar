@@ -4,15 +4,17 @@ import Testing
 @testable import SidebArcCore
 
 @Suite struct ModelTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
     private func makeStore() -> DataStore {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let temp = scratch.url.appendingPathComponent(UUID().uuidString)
         return DataStore(baseDirectory: temp)
     }
 
     @Test func unusedLegacyFaviconsAreRemovedOnlyAfterACleanLoad() throws {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let icons = store.iconsDirectory()
         try FileManager.default.createDirectory(at: icons, withIntermediateDirectories: true)
         let hashed = FaviconService.cacheFileName(for: "new.example.com")
@@ -29,7 +31,7 @@ import Testing
         // An unreadable library loads as an empty stand-in: nothing may be deleted.
         try Data(#"{"schemaVersion": 99}"#.utf8).write(to: store.dataFileURL)
         try Data([0]).write(to: icons.appendingPathComponent("orphan.example.org.ico"))
-        let blocked = AppModel(store: DataStore(baseDirectory: store.dataFileURL.deletingLastPathComponent()))
+        let blocked = AppModel(store: DataStore(baseDirectory: store.dataFileURL.deletingLastPathComponent()), defaults: testDefaults.suite)
         #expect(blocked.dataLoadIssue != nil)
         #expect(blocked.removeUnusedLegacyFavicons() == 0)
         #expect(FileManager.default.fileExists(atPath: icons.appendingPathComponent("orphan.example.org.ico").path))
@@ -37,7 +39,7 @@ import Testing
         // After "Start Empty Library" the next launch loads cleanly, but the
         // preserved library's icons must stay while its file is there.
         _ = try blocked.startEmptyLibrary()
-        let nextLaunch = AppModel(store: DataStore(baseDirectory: store.dataFileURL.deletingLastPathComponent()))
+        let nextLaunch = AppModel(store: DataStore(baseDirectory: store.dataFileURL.deletingLastPathComponent()), defaults: testDefaults.suite)
         #expect(nextLaunch.dataLoadIssue == nil)
         #expect(nextLaunch.removeUnusedLegacyFavicons() == 0)
         #expect(FileManager.default.fileExists(atPath: icons.appendingPathComponent("orphan.example.org.ico").path))
@@ -45,25 +47,25 @@ import Testing
 
     @Test func chromeImportNotifiesOnlyAfterTheWholeSpaceIsSaved() throws {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         model.showSettings()
         let profileId = model.currentProfile.id
         let link = Link(id: UUID(), title: "Imported", url: "https://example.com", faviconPath: nil)
         let workspace = ImportWorkspace(name: "Imported", colorId: .moss, nodes: [.link(link)])
         var observedNodeCounts: [Int] = []
         model.onChange = {
-            observedNodeCounts.append(AppModel(store: store).currentWorkspace.items.count)
+            observedNodeCounts.append(AppModel(store: store, defaults: testDefaults.suite).currentWorkspace.items.count)
         }
         model.applyChromeImport(workspace)
         #expect(observedNodeCounts == [1])
         #expect(model.currentWorkspace.profileId == profileId)
         #expect(model.isSettingsShown)
-        #expect(AppModel(store: store).currentWorkspace.items.first?.id == link.id)
+        #expect(AppModel(store: store, defaults: testDefaults.suite).currentWorkspace.items.first?.id == link.id)
     }
 
     @Test func invalidMoveDestinationsPreserveNodes() throws {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let folder = model.addFolder(name: "Folder", parentId: nil)
         let link = model.addLink(urlString: "https://example.com", title: "Link", parentId: folder)
         let otherLink = model.addLink(urlString: "https://example.org", title: "Other", parentId: nil)
@@ -78,7 +80,7 @@ import Testing
     @Test(arguments: [false, true])
     func deletionDoesNotRemoveNotesWhenSaveFails(deleteSpace: Bool) throws {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let workspace = model.createWorkspace(name: "Disposable", colorId: .moss)
         let folder = model.addFolder(name: "Folder", parentId: nil)
         let note = model.addNote(title: "Note", parentId: folder, content: "important")
@@ -100,7 +102,7 @@ import Testing
 
     @Test func deletingWorkspaceRemovesNestedNotesAfterSave() {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let workspace = model.createWorkspace(name: "Disposable", colorId: .moss)
         let folder = model.addFolder(name: "Folder", parentId: nil)
         let note = model.addNote(title: "Note", parentId: folder, content: "private")
@@ -126,7 +128,7 @@ import Testing
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
         #expect(deeplyEqual(state, decoded))
-        guard case .folder(let decodedFolder) = decoded.workspaces[0].items.first,
+        guard case .folder(let decodedFolder) = decoded.workspaces.first?.items.first,
               case .link(let decodedLink) = decodedFolder.children.first else {
             Issue.record("Expected nested link")
             return
@@ -157,7 +159,7 @@ import Testing
     @Test func invalidLinkURLsAreRejectedByModelMutations() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let workspaceId = model.currentWorkspace.id
 
@@ -180,7 +182,7 @@ import Testing
     @Test @MainActor func pastingHostlessURLCreatesNoteInsteadOfCrashing() {
         _ = NSApplication.shared
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let controller = MainViewController(model: model)
 
@@ -196,7 +198,7 @@ import Testing
     @Test @MainActor func pastingAnAppURLCreatesALink() throws {
         _ = NSApplication.shared
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let controller = MainViewController(model: model)
 
@@ -214,7 +216,7 @@ import Testing
     @Test @MainActor func newLinkAddsIntoAFolderAndOpensIt() throws {
         _ = NSApplication.shared
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let controller = MainViewController(model: model)
         let folder = model.addFolder(name: "Reading", parentId: nil, isExpanded: false)
@@ -265,13 +267,13 @@ import Testing
 
     @Test func updatingLinkInAnotherSpacePersists() {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let id = model.addLink(urlString: "https://old.example", title: "Link", parentId: nil)
         _ = model.createWorkspace(name: "Other", colorId: .moss)
 
         #expect(model.updateLinkUrl(id: id, newUrl: "https://new.example"))
-        guard case .link(let link) = AppModel(store: store).nodeAcrossWorkspaces(id: id) else {
+        guard case .link(let link) = AppModel(store: store, defaults: testDefaults.suite).nodeAcrossWorkspaces(id: id) else {
             Issue.record("Expected link in the original space")
             return
         }
@@ -297,31 +299,32 @@ import Testing
          "isSettingsSelected": false}
         """
         let old = try JSONDecoder().decode(AppState.self, from: Data(json.utf8))
-        #expect(old.workspaces[0].icon == nil)
+        let workspace = try #require(old.workspaces.first)
+        #expect(workspace.icon == nil)
     }
 
     @Test func setWorkspaceIconPersistsAndClears() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let id = model.currentWorkspace.id
 
         model.setWorkspaceIcon(id: id, icon: .emoji("📚"))
         #expect(model.currentWorkspace.icon == .emoji("📚"))
-        #expect(AppModel(store: store).currentWorkspace.icon == .emoji("📚"))
+        #expect(AppModel(store: store, defaults: testDefaults.suite).currentWorkspace.icon == .emoji("📚"))
         expectPersisted(model, in: store)
 
         model.setWorkspaceIcon(id: id, icon: nil)
-        #expect(AppModel(store: store).currentWorkspace.icon == nil)
+        #expect(AppModel(store: store, defaults: testDefaults.suite).currentWorkspace.icon == nil)
     }
 
     @Test func settingsIsRuntimeStateAndKeepsTheSelectedSpace() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let directory = scratch.url.appendingPathComponent(UUID().uuidString)
         let dataFile = directory.appendingPathComponent("data.json")
         let store = DataStore(baseDirectory: directory)
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         let spaceId = model.createWorkspace(name: "Second", colorId: .moss)
         let before = try Data(contentsOf: dataFile)
@@ -349,7 +352,7 @@ import Testing
     @Test func testMoveNodeReorderAndNest() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         model.addFolder(name: "Folder", parentId: nil)
@@ -394,7 +397,7 @@ import Testing
 
     @Test func groupingAndMovingNodesBetweenSpacesPersist() throws {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let source = model.currentWorkspace.id
         let first = model.addLink(urlString: "https://first.example", title: "First", parentId: nil)
         let second = model.addLink(urlString: "https://second.example", title: "Second", parentId: nil)
@@ -422,7 +425,7 @@ import Testing
 
     @Test func folderAndLinkEditsPersistIndividually() {
         let store = makeStore()
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         let linkId = model.addLink(urlString: "https://example.com", title: "example.com", parentId: folderId)
 
@@ -459,7 +462,7 @@ import Testing
 
         let results = NodeFiltering.filter(nodes: nodes, query: "blog")
         #expect(results.count == 1)
-        if case .folder(let filteredFolder) = results[0] {
+        if case .folder(let filteredFolder)? = results[safe: 0] {
             #expect(filteredFolder.children.count == 1)
         } else {
             Issue.record("Expected folder to remain for matching child")
@@ -469,7 +472,7 @@ import Testing
     @Test func testWorkspaceReordering() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         // Create three workspaces
@@ -479,36 +482,36 @@ import Testing
 
         // Initial order should be: Inbox (default), First, Second, Third
         #expect(model.workspaces.count == 4)
-        #expect(model.workspaces[0].name == "Inbox")
-        #expect(model.workspaces[1].name == "First")
-        #expect(model.workspaces[2].name == "Second")
-        #expect(model.workspaces[3].name == "Third")
+        #expect(model.workspaces[safe: 0]?.name == "Inbox")
+        #expect(model.workspaces[safe: 1]?.name == "First")
+        #expect(model.workspaces[safe: 2]?.name == "Second")
+        #expect(model.workspaces[safe: 3]?.name == "Third")
 
         // Move "Second" to the right (swap with "Third")
         model.moveWorkspace(id: id2, direction: .right)
         expectPersisted(model, in: store)
-        #expect(model.workspaces[2].name == "Third")
-        #expect(model.workspaces[3].name == "Second")
+        #expect(model.workspaces[safe: 2]?.name == "Third")
+        #expect(model.workspaces[safe: 3]?.name == "Second")
 
         // Move "Second" to the left (swap back with "Third")
         model.moveWorkspace(id: id2, direction: .left)
-        #expect(model.workspaces[2].name == "Second")
-        #expect(model.workspaces[3].name == "Third")
+        #expect(model.workspaces[safe: 2]?.name == "Second")
+        #expect(model.workspaces[safe: 3]?.name == "Third")
 
         // Move "First" to the left (swap with "Inbox")
         model.moveWorkspace(id: id1, direction: .left)
-        #expect(model.workspaces[0].name == "First")
-        #expect(model.workspaces[1].name == "Inbox")
+        #expect(model.workspaces[safe: 0]?.name == "First")
+        #expect(model.workspaces[safe: 1]?.name == "Inbox")
 
         // Try to move "First" to the left again (should not move, already at start)
         model.moveWorkspace(id: id1, direction: .left)
-        #expect(model.workspaces[0].name == "First")
-        #expect(model.workspaces[1].name == "Inbox")
+        #expect(model.workspaces[safe: 0]?.name == "First")
+        #expect(model.workspaces[safe: 1]?.name == "Inbox")
 
         // Try to move "Third" to the right (should not move, already at end)
         model.moveWorkspace(id: id3, direction: .right)
-        #expect(model.workspaces[2].name == "Second")
-        #expect(model.workspaces[3].name == "Third")
+        #expect(model.workspaces[safe: 2]?.name == "Second")
+        #expect(model.workspaces[safe: 3]?.name == "Third")
     }
 
     // MARK: - Favorites (pinned links, shared per profile)
@@ -516,7 +519,7 @@ import Testing
     @Test func testPinLink() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -526,14 +529,14 @@ import Testing
         model.pinLink(id: linkId)
         #expect(model.currentWorkspace.items.count == 0)
         #expect(model.currentProfile.favorites.count == 1)
-        #expect(model.currentProfile.favorites[0].id == linkId)
-        #expect(model.currentProfile.favorites[0].title == "A")
+        #expect(model.currentProfile.favorites[safe: 0]?.id == linkId)
+        #expect(model.currentProfile.favorites[safe: 0]?.title == "A")
     }
 
     @Test func testUnpinLink() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -558,7 +561,7 @@ import Testing
     @Test func testPinningAScheduledLinkCancelsTheSchedule() throws {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -592,7 +595,7 @@ import Testing
         link.scheduledOpenAt = Date(timeIntervalSinceNow: -3600)
         state.profiles[0].favorites = [link]
         store.save(state)
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         model.unpinLink(id: linkId)
@@ -609,7 +612,7 @@ import Testing
     @Test func testPinLinkMaximum() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let max = Profile.maxFavorites
@@ -636,19 +639,17 @@ import Testing
     @Test func testPinLinkFromNestedFolder() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         let linkId = model.addLink(urlString: "https://nested.com", title: "Nested", parentId: folderId)
 
-        if let folderNode = model.nodeById(folderId), case .folder(let folder) = folderNode {
-            #expect(folder.children.count == 1)
-        }
+        #expect(model.nodeById(folderId)?.asFolder?.children.count == 1)
 
         model.pinLink(id: linkId)
         #expect(model.currentProfile.favorites.count == 1)
-        #expect(model.currentProfile.favorites[0].title == "Nested")
+        #expect(model.currentProfile.favorites[safe: 0]?.title == "Nested")
 
         // Verify link was removed from the folder
         if let folderNode = model.nodeById(folderId), case .folder(let folder) = folderNode {
@@ -661,7 +662,7 @@ import Testing
     @Test func testCannotPinFolder() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
@@ -673,7 +674,7 @@ import Testing
     @Test func testNewWorkspaceJoinsCurrentProfile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let firstProfileId = model.currentProfile.id
@@ -685,7 +686,7 @@ import Testing
     @Test func testFavoritesAreSharedBySpacesInTheSameProfile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let spaceA = model.currentWorkspace.id
@@ -710,7 +711,7 @@ import Testing
         let spaceB = Workspace(id: UUID(), name: "B", colorId: .ocean, items: [], profileId: work.id)
         let store = makeStore()
         store.save(AppState(profiles: [personal, work], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id))
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         model.selectWorkspace(id: spaceA.id)
 
@@ -735,7 +736,7 @@ import Testing
         let spaceB = Workspace(id: UUID(), name: "B", colorId: .ocean, items: [], profileId: work.id)
         let store = makeStore()
         store.save(AppState(profiles: [personal, workWithFavorite], workspaces: [spaceA, spaceB], selectedWorkspaceId: spaceA.id))
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
         model.selectWorkspace(id: spaceA.id)
 
@@ -760,8 +761,8 @@ import Testing
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
 
         #expect(decoded.schemaVersion == AppState.currentSchemaVersion)
-        #expect(decoded.profiles[0].favorites.map(\.title) == ["Pinned"])
-        #expect(decoded.profiles[0].browserProfiles["com.google.chrome"] == "Profile 1")
+        #expect(decoded.profiles[safe: 0]?.favorites.map(\.title) == ["Pinned"])
+        #expect(decoded.profiles[safe: 0]?.browserProfiles["com.google.chrome"] == "Profile 1")
         #expect(deeplyEqual(state, decoded))
     }
 
@@ -800,13 +801,13 @@ import Testing
         let orphan = Workspace(id: UUID(), name: "Orphan", colorId: .ember, items: [], profileId: UUID())
         let repaired = AppState(profiles: [], workspaces: [orphan], selectedWorkspaceId: orphan.id).repaired()
         #expect(repaired.profiles.count == 1)
-        #expect(repaired.workspaces[0].profileId == repaired.profiles[0].id)
+        #expect(repaired.workspaces[safe: 0]?.profileId == repaired.profiles[safe: 0]?.id)
 
         let keep = Profile(name: "Keep")
         let second = Workspace(id: UUID(), name: "Dangling", colorId: .ember, items: [], profileId: UUID())
         let fixed = AppState(profiles: [keep], workspaces: [second], selectedWorkspaceId: nil).repaired()
         #expect(fixed.profiles == [keep])
-        #expect(fixed.workspaces[0].profileId == keep.id)
+        #expect(fixed.workspaces[safe: 0]?.profileId == keep.id)
     }
 
     // MARK: - Browser Profile Tests
@@ -814,7 +815,7 @@ import Testing
     @Test func testUpdateBrowserProfileAppliesToEverySpaceInProfile() throws {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
@@ -830,7 +831,7 @@ import Testing
     @Test func testClearBrowserProfile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
@@ -845,7 +846,7 @@ import Testing
     @Test func testUpdateBrowserProfileTrimsWhitespace() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id
@@ -859,12 +860,17 @@ import Testing
         #expect(model.currentProfile.browserProfiles["com.google.chrome"] == "Profile 1")
     }
 
-    // MARK: - Open Folder Links Tests
+    // MARK: - Open Links (a folder's "Open All Links", bulk "Open N Links")
 
-    @Test func testFolderRootLinksWithOnlyLinks() {
+    /// A model on a fresh default library, and its store.
+    private func makeModel() -> (AppModel, DataStore) {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        return (AppModel(store: store, defaults: testDefaults.suite), store)
+    }
+
+    @Test func testFolderRootLinksWithOnlyLinks() {
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
@@ -872,66 +878,35 @@ import Testing
         model.addLink(urlString: "https://b.com", title: "B", parentId: folderId)
         model.addLink(urlString: "https://c.com", title: "C", parentId: folderId)
 
-        guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            Issue.record("Expected folder"); return
-        }
-
-        let rootLinks = folder.children.compactMap { child -> Link? in
-            if case .link(let link) = child { return link }
-            return nil
-        }
-        #expect(rootLinks.count == 3)
-        #expect(rootLinks.map(\.title) == ["A", "B", "C"])
+        #expect(model.linksToOpen(forSelection: [folderId]).map(\.title) == ["A", "B", "C"])
     }
 
     @Test func testFolderRootLinksWithMixedContent() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Parent", parentId: nil)
         model.addLink(urlString: "https://root1.com", title: "Root Link 1", parentId: folderId)
         let nestedFolderId = model.addFolder(name: "Nested", parentId: folderId)
         model.addLink(urlString: "https://nested.com", title: "Nested Link", parentId: nestedFolderId)
+        model.addNote(title: "Note", parentId: folderId)
         model.addLink(urlString: "https://root2.com", title: "Root Link 2", parentId: folderId)
 
-        guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            Issue.record("Expected folder"); return
-        }
-
-        let rootLinks = folder.children.compactMap { child -> Link? in
-            if case .link(let link) = child { return link }
-            return nil
-        }
-        // Only root-level links, not the one inside the nested folder
-        #expect(rootLinks.count == 2)
-        #expect(rootLinks.map(\.title) == ["Root Link 1", "Root Link 2"])
+        // Only the folder's own links: not the nested folder's, never a note.
+        #expect(model.linksToOpen(forSelection: [folderId]).map(\.title) == ["Root Link 1", "Root Link 2"])
     }
 
     @Test func testFolderRootLinksWithEmptyFolder() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Empty", parentId: nil)
 
-        guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            Issue.record("Expected folder"); return
-        }
-
-        let rootLinks = folder.children.compactMap { child -> Link? in
-            if case .link(let link) = child { return link }
-            return nil
-        }
-        #expect(rootLinks.count == 0)
+        #expect(model.linksToOpen(forSelection: [folderId]).isEmpty)
     }
 
     @Test func testFolderRootLinksWithOnlyNestedFolders() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Parent", parentId: nil)
@@ -940,90 +915,35 @@ import Testing
         model.addLink(urlString: "https://deep1.com", title: "Deep 1", parentId: childFolder1)
         model.addLink(urlString: "https://deep2.com", title: "Deep 2", parentId: childFolder2)
 
-        guard let node = model.nodeById(folderId), case .folder(let folder) = node else {
-            Issue.record("Expected folder"); return
-        }
-
-        let rootLinks = folder.children.compactMap { child -> Link? in
-            if case .link(let link) = child { return link }
-            return nil
-        }
-        // No root-level links, even though nested folders contain links
-        #expect(rootLinks.count == 0)
+        #expect(model.linksToOpen(forSelection: [folderId]).isEmpty)
     }
 
-    // MARK: - Bulk Open Links Tests
-
     @Test func testBulkOpenLinksWithOnlyLinks() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let linkId1 = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
         let linkId2 = model.addLink(urlString: "https://b.com", title: "B", parentId: nil)
         let linkId3 = model.addLink(urlString: "https://c.com", title: "C", parentId: nil)
 
-        let selectedIds: [UUID] = [linkId1, linkId2, linkId3]
-        var collectedLinks: [Link] = []
-
-        for nodeId in selectedIds {
-            guard let node = model.nodeById(nodeId) else { continue }
-            switch node {
-            case .link(let link):
-                collectedLinks.append(link)
-            case .note:
-                break
-            case .folder(let folder):
-                for child in folder.children {
-                    if case .link(let link) = child {
-                        collectedLinks.append(link)
-                    }
-                }
-            }
-        }
-
-        #expect(collectedLinks.count == 3)
-        #expect(Set(collectedLinks.map(\.url)) == Set(["https://a.com", "https://b.com", "https://c.com"]))
+        // List order, whatever the selection's order.
+        #expect(model.linksToOpen(forSelection: [linkId3, linkId1, linkId2]).map(\.url)
+                == ["https://a.com", "https://b.com", "https://c.com"])
     }
 
     @Test func testBulkOpenLinksWithFolders() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Folder", parentId: nil)
         model.addLink(urlString: "https://inside1.com", title: "Inside 1", parentId: folderId)
         model.addLink(urlString: "https://inside2.com", title: "Inside 2", parentId: folderId)
 
-        let selectedIds: [UUID] = [folderId]
-        var collectedLinks: [Link] = []
-
-        for nodeId in selectedIds {
-            guard let node = model.nodeById(nodeId) else { continue }
-            switch node {
-            case .link(let link):
-                collectedLinks.append(link)
-            case .note:
-                break
-            case .folder(let folder):
-                for child in folder.children {
-                    if case .link(let link) = child {
-                        collectedLinks.append(link)
-                    }
-                }
-            }
-        }
-
-        #expect(collectedLinks.count == 2)
-        #expect(Set(collectedLinks.map(\.url)) == Set(["https://inside1.com", "https://inside2.com"]))
+        #expect(model.linksToOpen(forSelection: [folderId]).map(\.url) == ["https://inside1.com", "https://inside2.com"])
     }
 
     @Test func testBulkOpenLinksWithMixedSelection() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://direct.com", title: "Direct", parentId: nil)
@@ -1031,69 +951,26 @@ import Testing
         model.addLink(urlString: "https://inside.com", title: "Inside", parentId: folderId)
         let nestedFolderId = model.addFolder(name: "Nested", parentId: folderId)
         model.addLink(urlString: "https://deep.com", title: "Deep", parentId: nestedFolderId)
+        let noteId = model.addNote(title: "Note", parentId: nil)
 
-        let selectedIds: [UUID] = [linkId, folderId]
-        var collectedLinks: [Link] = []
-
-        for nodeId in selectedIds {
-            guard let node = model.nodeById(nodeId) else { continue }
-            switch node {
-            case .link(let link):
-                collectedLinks.append(link)
-            case .note:
-                break
-            case .folder(let folder):
-                for child in folder.children {
-                    if case .link(let link) = child {
-                        collectedLinks.append(link)
-                    }
-                }
-            }
-        }
-
-        // Direct link + root-level link from folder, NOT the deeply nested link
-        #expect(collectedLinks.count == 2)
-        #expect(Set(collectedLinks.map(\.url)) == Set(["https://direct.com", "https://inside.com"]))
+        // Direct link + the folder's own link; not the nested one, not the note.
+        #expect(model.linksToOpen(forSelection: [folderId, noteId, linkId]).map(\.url)
+                == ["https://direct.com", "https://inside.com"])
     }
 
     @Test func testBulkOpenLinksIgnoresNestedFolderLinks() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let parentFolderId = model.addFolder(name: "Parent", parentId: nil)
         let childFolderId = model.addFolder(name: "Child", parentId: parentFolderId)
         model.addLink(urlString: "https://nested.com", title: "Nested", parentId: childFolderId)
 
-        // Only select the parent folder, not the child folder
-        let selectedIds: [UUID] = [parentFolderId]
-        var collectedLinks: [Link] = []
-
-        for nodeId in selectedIds {
-            guard let node = model.nodeById(nodeId) else { continue }
-            switch node {
-            case .link(let link):
-                collectedLinks.append(link)
-            case .note:
-                break
-            case .folder(let folder):
-                for child in folder.children {
-                    if case .link(let link) = child {
-                        collectedLinks.append(link)
-                    }
-                }
-            }
-        }
-
-        // Parent folder has no root-level links, only a nested folder
-        #expect(collectedLinks.count == 0)
+        #expect(model.linksToOpen(forSelection: [parentFolderId]).isEmpty)
     }
 
     @Test func testBulkOpenLinksWithExplicitlySelectedNestedFolder() {
-        let store = makeStore()
-        store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let (model, store) = makeModel()
         defer { expectPersisted(model, in: store) }
 
         let parentFolderId = model.addFolder(name: "Parent", parentId: nil)
@@ -1101,29 +978,129 @@ import Testing
         model.addLink(urlString: "https://nested.com", title: "Nested", parentId: childFolderId)
         model.addLink(urlString: "https://root.com", title: "Root", parentId: parentFolderId)
 
-        // Explicitly select both parent and child folders
-        let selectedIds: [UUID] = [parentFolderId, childFolderId]
-        var collectedLinks: [Link] = []
+        // A folder selected inside a selected folder still adds its own links, after
+        // its parent's (each selected item in list order), whatever the selection order.
+        for selection in [[parentFolderId, childFolderId], [childFolderId, parentFolderId]] {
+            #expect(model.linksToOpen(forSelection: selection).map(\.url) == ["https://root.com", "https://nested.com"])
+        }
+    }
 
-        for nodeId in selectedIds {
-            guard let node = model.nodeById(nodeId) else { continue }
+    // MARK: - Bulk actions on a folder and one of its descendants
+
+    /// A space holding `Folder [Child link, Sub [Deep link]]` and a `Loose` link.
+    private struct NestedSelection {
+        let model: AppModel
+        let store: DataStore
+        let folderId: UUID
+        let childId: UUID
+        let subId: UUID
+        let deepId: UUID
+        let looseId: UUID
+
+        /// Both orders a `Set` may hand the bulk actions.
+        var orders: [[UUID]] { [[childId, folderId, deepId], [folderId, deepId, childId]] }
+    }
+
+    private func makeNestedSelection() -> NestedSelection {
+        let (model, store) = makeModel()
+        let folderId = model.addFolder(name: "Folder", parentId: nil)
+        let childId = model.addLink(urlString: "https://child.com", title: "Child", parentId: folderId)
+        let subId = model.addFolder(name: "Sub", parentId: folderId)
+        let deepId = model.addLink(urlString: "https://deep.com", title: "Deep", parentId: subId)
+        let looseId = model.addLink(urlString: "https://loose.com", title: "Loose", parentId: nil)
+        return NestedSelection(model: model, store: store, folderId: folderId, childId: childId,
+                               subId: subId, deepId: deepId, looseId: looseId)
+    }
+
+    /// Names of a node tree, nested: `Folder[Child, Sub[Deep]]`.
+    private func outline(_ nodes: [Node]) -> [String] {
+        nodes.map { node in
             switch node {
-            case .link(let link):
-                collectedLinks.append(link)
-            case .note:
-                break
-            case .folder(let folder):
-                for child in folder.children {
-                    if case .link(let link) = child {
-                        collectedLinks.append(link)
-                    }
-                }
+            case .link(let link): return link.title
+            case .note(let note): return note.title
+            case .folder(let folder): return "\(folder.name)[\(outline(folder.children).joined(separator: ", "))]"
             }
         }
+    }
 
-        // Root link from parent + nested link from explicitly selected child folder
-        #expect(collectedLinks.count == 2)
-        #expect(Set(collectedLinks.map(\.url)) == Set(["https://root.com", "https://nested.com"]))
+    @Test func selectedNodesDropDescendantsOfSelectedFolders() {
+        let fixture = makeNestedSelection()
+        defer { expectPersisted(fixture.model, in: fixture.store) }
+        for order in fixture.orders {
+            #expect(fixture.model.selectedNodes(order).map(\.id) == [fixture.folderId])
+        }
+        #expect(fixture.model.selectedNodes([fixture.looseId, fixture.deepId]).map(\.id) == [fixture.deepId, fixture.looseId])
+        #expect(fixture.model.selectedNodes([UUID()]).isEmpty)
+    }
+
+    @Test func movingAFolderWithItsDescendantKeepsTheTree() {
+        for index in 0..<2 {
+            let fixture = makeNestedSelection()
+            let model = fixture.model
+            let source = model.currentWorkspace.id
+            let other = model.createWorkspace(name: "Other", colorId: .defaultColor())
+            model.selectWorkspace(id: source)
+            model.moveNodesToWorkspace(nodeIds: fixture.orders[index] + [fixture.looseId], toWorkspaceId: other)
+
+            #expect(outline(model.currentWorkspace.items).isEmpty, "order \(index)")
+            let moved = model.state.workspaces.first { $0.id == other }?.items ?? []
+            #expect(outline(moved) == ["Folder[Child, Sub[Deep]]", "Loose"], "order \(index)")
+            expectPersisted(model, in: fixture.store)
+        }
+    }
+
+    @Test func groupingAFolderWithItsDescendantKeepsTheTree() throws {
+        for index in 0..<2 {
+            let fixture = makeNestedSelection()
+            let model = fixture.model
+            let groupId = try #require(model.groupNodesInNewFolder(nodeIds: fixture.orders[index], folderName: "Group"))
+
+            #expect(model.currentWorkspace.items.first?.id == groupId, "order \(index)")
+            #expect(outline(model.currentWorkspace.items) == ["Group[Folder[Child, Sub[Deep]]]", "Loose"], "order \(index)")
+            expectPersisted(model, in: fixture.store)
+        }
+    }
+
+    @Test func groupingKeepsListOrderAndTheCommonParent() throws {
+        let (model, store) = makeModel()
+        defer { expectPersisted(model, in: store) }
+        let folderId = model.addFolder(name: "Folder", parentId: nil)
+        let a = model.addLink(urlString: "https://a.com", title: "A", parentId: folderId)
+        model.addLink(urlString: "https://b.com", title: "B", parentId: folderId)
+        let c = model.addLink(urlString: "https://c.com", title: "C", parentId: folderId)
+
+        try #require(model.groupNodesInNewFolder(nodeIds: [c, a], folderName: "Group") != nil)
+
+        #expect(outline(model.currentWorkspace.items) == ["Folder[Group[A, C], B]"])
+    }
+
+    @Test func deletingAFolderWithItsDescendantDeletesBoth() {
+        for index in 0..<2 {
+            let fixture = makeNestedSelection()
+            let model = fixture.model
+            model.deleteNodes(ids: fixture.orders[index])
+
+            #expect(outline(model.currentWorkspace.items) == ["Loose"], "order \(index)")
+            expectPersisted(model, in: fixture.store)
+        }
+    }
+
+    @Test func openingAFolderWithItsChildOpensTheChildOnce() {
+        let fixture = makeNestedSelection()
+        defer { expectPersisted(fixture.model, in: fixture.store) }
+        for order in fixture.orders {
+            let selection = order + [fixture.looseId]
+            // The menu's "Open N Links" count and the action share this list.
+            #expect(fixture.model.linksToOpen(forSelection: selection).map(\.title) == ["Child", "Deep", "Loose"])
+        }
+    }
+
+    @Test func copyingLinksUsesListOrder() {
+        let fixture = makeNestedSelection()
+        defer { expectPersisted(fixture.model, in: fixture.store) }
+        let selection = [fixture.looseId, fixture.deepId, fixture.folderId, fixture.childId]
+        #expect(fixture.model.linksToCopy(forSelection: selection).map(\.url)
+                == ["https://child.com", "https://deep.com", "https://loose.com"])
     }
 
     // MARK: - Custom Icon Tests
@@ -1167,7 +1144,7 @@ import Testing
     @Test func testSetLinkCustomIcon() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -1190,10 +1167,10 @@ import Testing
         }
     }
 
-    @Test func testSetPinnedLinkCustomIcon() {
+    @Test func testSetPinnedLinkCustomIcon() throws {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -1201,10 +1178,11 @@ import Testing
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: .sfSymbol("heart.fill"))
         expectPersisted(model, in: store)
-        #expect(model.currentProfile.favorites[0].customIcon == .sfSymbol("heart.fill"))
+        #expect(model.currentProfile.favorites[safe: 0]?.customIcon == .sfSymbol("heart.fill"))
 
         model.setPinnedLinkCustomIcon(id: linkId, icon: nil)
-        #expect(model.currentProfile.favorites[0].customIcon == nil)
+        let favorite = try #require(model.currentProfile.favorites.first)
+        #expect(favorite.customIcon == nil)
     }
 
     // MARK: - Note Tests
@@ -1220,8 +1198,8 @@ import Testing
         let decoded = try JSONDecoder().decode(AppState.self, from: data)
         #expect(deeplyEqual(state, decoded))
 
-        guard case .folder(let decodedFolder) = decoded.workspaces[0].items[0],
-              case .note(let decodedNote) = decodedFolder.children[0] else {
+        guard case .folder(let decodedFolder) = decoded.workspaces.first?.items.first,
+              case .note(let decodedNote) = decodedFolder.children.first else {
             Issue.record("Expected nested note inside folder")
             return
         }
@@ -1249,8 +1227,8 @@ import Testing
         """
         let data = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(SchemaV1.AppState.self, from: data)
-        #expect(decoded.workspaces[0].items.count == 1)
-        if case .link(let link) = decoded.workspaces[0].items[0] {
+        #expect(decoded.workspaces[safe: 0]?.items.count == 1)
+        if case .link(let link)? = decoded.workspaces[0].items[safe: 0] {
             #expect(link.title == "Legacy Link")
         } else {
             Issue.record("Expected link to decode")
@@ -1260,12 +1238,12 @@ import Testing
     @Test func testAddNote() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Test Note", parentId: nil)
         #expect(model.currentWorkspace.items.count == 1)
-        if case .note(let note) = model.currentWorkspace.items[0] {
+        if case .note(let note)? = model.currentWorkspace.items[safe: 0] {
             #expect(note.id == noteId)
             #expect(note.title == "Test Note")
         } else {
@@ -1280,7 +1258,7 @@ import Testing
     @Test func testRenameNote() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Old", parentId: nil)
@@ -1293,10 +1271,10 @@ import Testing
         }
     }
 
-    @Test func testSetNoteCustomIcon() {
+    @Test func testSetNoteCustomIcon() throws {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Note", parentId: nil)
@@ -1310,15 +1288,14 @@ import Testing
         }
 
         model.setNoteCustomIcon(id: noteId, icon: nil)
-        if case .note(let note) = model.nodeById(noteId) {
-            #expect(note.customIcon == nil)
-        }
+        let cleared = try #require(model.nodeById(noteId)?.asNote)
+        #expect(cleared.customIcon == nil)
     }
 
     @Test func testDeleteNoteRemovesFile() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let noteId = model.addNote(title: "Doomed", parentId: nil)
@@ -1332,7 +1309,7 @@ import Testing
     @Test func testDeleteFolderCleansUpContainedNotes() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let folderId = model.addFolder(name: "Parent", parentId: nil)
@@ -1358,7 +1335,7 @@ import Testing
 
         let results = NodeFiltering.filter(nodes: nodes, query: "project")
         #expect(results.count == 1)
-        if case .note(let filtered) = results[0] {
+        if case .note(let filtered)? = results[safe: 0] {
             #expect(filtered.title == "Project Plan")
         } else {
             Issue.record("Expected note in filter results")
@@ -1397,7 +1374,7 @@ import Testing
     @Test func testScheduleLinkSetsDate() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -1413,7 +1390,7 @@ import Testing
     @Test func testCancelScheduleClearsDate() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -1430,7 +1407,7 @@ import Testing
     @Test func testDeleteNodeRemovesScheduledLinkFromState() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let linkId = model.addLink(urlString: "https://a.com", title: "A", parentId: nil)
@@ -1444,7 +1421,7 @@ import Testing
     @Test func testAllScheduledLinksWalksFoldersAndWorkspaces() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         // Workspace A: nested folder containing a scheduled link
@@ -1470,7 +1447,7 @@ import Testing
     @Test func testMultipleBrowserProfiles() {
         let store = makeStore()
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         defer { expectPersisted(model, in: store) }
 
         let profileId = model.currentProfile.id

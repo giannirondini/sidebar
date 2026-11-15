@@ -43,12 +43,15 @@ import Testing
 
     @Test func gridBuildsTheWholeListQuickly() {
         let grid = IconPickerGridView(frame: NSRect(x: 0, y: 0, width: 264, height: 260))
-        let start = Date()
-        grid.setItems(IconPickerConstants.emojis.map { .emoji($0) }) { _ in }
-        grid.layoutSubtreeIfNeeded()
-        // Not a benchmark: a generous bound (tests run in parallel) that still catches
-        // a list or grid change making the picker an order of magnitude slower to open.
-        #expect(Date().timeIntervalSince(start) < 2)
+        let clock = ContinuousClock()
+        let elapsed = clock.measure {
+            grid.setItems(IconPickerConstants.emojis.map { .emoji($0) }) { _ in }
+            grid.layoutSubtreeIfNeeded()
+        }
+        // Not a benchmark: a monotonic clock and a bound far above the usual time
+        // (tens of ms; tests run in parallel on loaded CI Macs) that still catches a
+        // change making the picker orders of magnitude slower to open.
+        #expect(elapsed < .seconds(5))
     }
 
     /// The popover's grid (280 − 2 × 8 = 264 pt) used to force 8 columns of 34 pt,

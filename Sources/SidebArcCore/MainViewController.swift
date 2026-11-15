@@ -285,8 +285,12 @@ final class MainViewController: NSViewController {
             self?.model.location(of: id)
         }
 
-        nodeListViewController.findNodeInNodes = { [weak self] id, nodes in
-            self?.model.findNode(id: id, in: nodes)
+        nodeListViewController.linksToOpenProvider = { [weak self] ids in
+            self?.model.linksToOpen(forSelection: ids) ?? []
+        }
+
+        nodeListViewController.linksToCopyProvider = { [weak self] ids in
+            self?.model.linksToCopy(forSelection: ids) ?? []
         }
 
         nodeListViewController.onNodeSelected = { [weak self] nodeId in
@@ -338,10 +342,7 @@ final class MainViewController: NSViewController {
         }
 
         nodeListViewController.onBulkNodesDeleted = { [weak self] nodeIds in
-            guard let self else { return }
-            for nodeId in nodeIds {
-                self.model.deleteNode(id: nodeId)
-            }
+            self?.model.deleteNodes(ids: nodeIds)
         }
 
         nodeListViewController.onNewFolderRequested = { [weak self] parentId in
@@ -361,32 +362,13 @@ final class MainViewController: NSViewController {
         }
 
         nodeListViewController.onOpenFolderLinks = { [weak self] folderId in
-            guard let self, let node = self.model.nodeById(folderId),
-                  case .folder(let folder) = node else { return }
-            for child in folder.children {
-                if case .link(let link) = child {
-                    self.openLink(link)
-                }
-            }
+            guard let self else { return }
+            self.model.linksToOpen(forSelection: [folderId]).forEach(self.openLink)
         }
 
         nodeListViewController.onBulkOpenLinks = { [weak self] nodeIds in
             guard let self else { return }
-            for nodeId in nodeIds {
-                guard let node = self.model.nodeById(nodeId) else { continue }
-                switch node {
-                case .link(let link):
-                    self.openLink(link)
-                case .note:
-                    break
-                case .folder(let folder):
-                    for child in folder.children {
-                        if case .link(let link) = child {
-                            self.openLink(link)
-                        }
-                    }
-                }
-            }
+            self.model.linksToOpen(forSelection: nodeIds).forEach(self.openLink)
         }
 
         nodeListViewController.onPinLink = { [weak self] nodeId in
@@ -1060,16 +1042,7 @@ final class MainViewController: NSViewController {
     // MARK: - Bulk Operations
 
     private func handleBulkCopyLinks(_ nodeIds: [UUID]) {
-        let nodes = nodeIds.compactMap { id in
-            model.findNode(id: id, in: model.currentWorkspace.items)
-        }
-        let urls = nodes.compactMap { node -> String? in
-            if case .link(let link) = node {
-                return link.url
-            }
-            return nil
-        }
-
+        let urls = model.linksToCopy(forSelection: nodeIds).map(\.url)
         guard !urls.isEmpty else { return }
 
         let joined = urls.joined(separator: "\n")

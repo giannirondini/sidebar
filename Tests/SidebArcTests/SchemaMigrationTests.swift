@@ -3,10 +3,12 @@ import Testing
 @testable import SidebArcCore
 
 @Suite struct SchemaMigrationTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
     // MARK: - Fixtures
 
     private func makeTempDirectory() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        scratch.url.appendingPathComponent(UUID().uuidString)
     }
 
     private func link(_ url: String, _ title: String? = nil) -> Link {
@@ -71,9 +73,9 @@ import Testing
         }
         """
         let decoded = try decodeV1(Data(json.utf8))
-        #expect(decoded.workspaces[0].pinnedLinks.isEmpty)
-        #expect(decoded.workspaces[0].browserProfiles.isEmpty)
-        #expect(decoded.workspaces[0].name == "Old Workspace")
+        #expect(decoded.workspaces[safe: 0]?.pinnedLinks.isEmpty == true)
+        #expect(decoded.workspaces[safe: 0]?.browserProfiles.isEmpty == true)
+        #expect(decoded.workspaces[safe: 0]?.name == "Old Workspace")
     }
 
     @Test func v1DecodesSingleProfileLegacyFormat() throws {
@@ -93,7 +95,7 @@ import Testing
         }
         """
         let decoded = try decodeV1(Data(json.utf8))
-        #expect(decoded.workspaces[0].browserProfiles == ["com.google.chrome": "Profile 1"])
+        #expect(decoded.workspaces[safe: 0]?.browserProfiles == ["com.google.chrome": "Profile 1"])
     }
 
     @Test func v2DecoderRejectsV1Workspaces() {
@@ -124,7 +126,7 @@ import Testing
         #expect(state.workspaces.map(\.profileId) == [ids[0], ids[1], ids[0], ids[2]])
         #expect(state.workspaces.map(\.id) == old.workspaces.map(\.id))
         #expect(state.workspaces.map(\.name) == ["A", "B", "C", "D"])
-        #expect(state.selectedWorkspaceId == old.workspaces[0].id)
+        #expect(state.selectedWorkspaceId == old.workspaces[safe: 0]?.id)
     }
 
     @Test func migrationPreservesWhereEachSpaceOpensLinks() throws {
@@ -167,17 +169,17 @@ import Testing
         let state = SchemaMigration.v1ToV2(try decodeV1(data))
 
         #expect(state.profiles.count == 1)
-        #expect(state.profiles[0].favorites.map(\.id) == [x.id, y.id, z.id])
-        #expect(state.workspaces[0].items.isEmpty)
+        #expect(state.profiles[safe: 0]?.favorites.map(\.id) == [x.id, y.id, z.id])
+        #expect(state.workspaces[safe: 0]?.items.isEmpty == true)
 
-        guard case .folder(let folder) = state.workspaces[1].items.first else {
+        guard case .folder(let folder) = state.workspaces[safe: 1]?.items.first else {
             Issue.record("Expected the migrated-favorites folder at the top of C")
             return
         }
         #expect(folder.name == SchemaMigration.migratedFavoritesFolderName)
         #expect(folder.isExpanded)
         #expect(allLinkIds(in: folder.children) == [xAgain.id])
-        #expect(state.workspaces[1].items.dropFirst().map(\.id) == [existing.id])
+        #expect(state.workspaces[safe: 1]?.items.dropFirst().map(\.id) == [existing.id])
     }
 
     @Test func overflowBeyondCapGoesToFolderInItsOwnSourceSpace() throws {
@@ -187,11 +189,11 @@ import Testing
         let data = v1Data([v1Workspace("A", pinned: first), v1Workspace("B", pinned: second)])
         let state = SchemaMigration.v1ToV2(try decodeV1(data))
 
-        #expect(state.profiles[0].favorites.count == cap)
-        #expect(state.profiles[0].favorites.map(\.id) == first.map(\.id) + second.prefix(2).map(\.id))
+        #expect(state.profiles[safe: 0]?.favorites.count == cap)
+        #expect(state.profiles[safe: 0]?.favorites.map(\.id) == first.map(\.id) + second.prefix(2).map(\.id))
         // A fitted entirely: no folder there.
-        #expect(state.workspaces[0].items.isEmpty)
-        guard case .folder(let folder) = state.workspaces[1].items.first else {
+        #expect(state.workspaces[safe: 0]?.items.isEmpty == true)
+        guard case .folder(let folder) = state.workspaces[safe: 1]?.items.first else {
             Issue.record("Expected overflow folder in B")
             return
         }
@@ -277,7 +279,7 @@ import Testing
 
         let state = DataStore(baseDirectory: directory).load()
         #expect(state.schemaVersion == 2)
-        #expect(state.profiles[0].favorites.count == 1)
+        #expect(state.profiles[safe: 0]?.favorites.count == 1)
 
         // Persisted immediately as v2.
         let onDisk = try Data(contentsOf: directory.appendingPathComponent("data.json"))
@@ -303,7 +305,8 @@ import Testing
 
     /// Without the pre-migration copy, the v1 file must stay as it is: no save may
     /// replace it (the rotating backups live in the same unwritable folder).
-    @Test func v1FileIsNeverOverwrittenWhenThePreMigrationCopyFails() throws {
+    @Test(.disabled(if: getuid() == 0, "root writes into read-only folders"))
+    func v1FileIsNeverOverwrittenWhenThePreMigrationCopyFails() throws {
         let fileManager = FileManager.default
         let directory = makeTempDirectory()
         let backups = directory.appendingPathComponent("Backups")
@@ -315,12 +318,12 @@ import Testing
 
         try fileManager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: backups.path)
         defer { try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backups.path) }
-        // Not vacuous: the folder really refuses writes (it wouldn't for root).
+        // Not vacuous: the folder really refuses writes.
         try #require(throws: (any Error).self) {
             try Data("probe".utf8).write(to: backups.appendingPathComponent("probe"))
         }
 
-        let model = AppModel(store: DataStore(baseDirectory: directory))
+        let model = AppModel(store: DataStore(baseDirectory: directory), defaults: testDefaults.suite)
         var copyFailureReported = false
         if case .migrationCopyFailed = model.dataLoadIssue { copyFailureReported = true }
         #expect(copyFailureReported, "load issue: \(String(describing: model.dataLoadIssue))")
@@ -332,9 +335,9 @@ import Testing
         // Once Backups/ is writable again, the next launch migrates and keeps the copy.
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: backups.path)
         let store = DataStore(baseDirectory: directory)
-        let relaunched = AppModel(store: store)
+        let relaunched = AppModel(store: store, defaults: testDefaults.suite)
         #expect(relaunched.dataLoadIssue == nil)
-        #expect(relaunched.state.profiles[0].favorites.map(\.url) == ["https://a.com"])
+        #expect(relaunched.state.profiles[safe: 0]?.favorites.map(\.url) == ["https://a.com"])
         let copies = try fileManager.contentsOfDirectory(at: backups, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("pre-v2-migration-") }
         #expect(copies.count == 1)
@@ -364,8 +367,8 @@ import Testing
 
         let state = DataStore(baseDirectory: directory).load()
         #expect(state.profiles.count == 1)
-        #expect(state.workspaces[0].profileId == state.profiles[0].id)
-        #expect(state.workspaces[0].name == "A")
+        #expect(state.workspaces[safe: 0]?.profileId == state.profiles[safe: 0]?.id)
+        #expect(state.workspaces[safe: 0]?.name == "A")
     }
 
     // MARK: - Opt-in acceptance check against a real v1 data.json

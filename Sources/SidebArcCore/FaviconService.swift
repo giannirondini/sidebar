@@ -6,8 +6,11 @@ import os
 final class FaviconService {
     static let shared = FaviconService()
 
+    /// One GET; tests inject it. `fetchFaviconData` decides what counts as an icon.
+    typealias Fetch = @Sendable (URL) async throws -> (Data, URLResponse)
+
     private let store = DataStore()
-    private let session: URLSession
+    private let fetch: Fetch
     private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "favicon")
     private let failureCooldown: TimeInterval = 300
     private var cache: [String: NSImage] = [:]
@@ -20,7 +23,8 @@ final class FaviconService {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 5
         config.timeoutIntervalForResource = 8
-        self.session = URLSession(configuration: config)
+        let session = URLSession(configuration: config)
+        self.fetch = { url in try await session.data(from: url) }
     }
 
     func favicon(for url: URL, cachedPath: String?, completion: @escaping (NSImage?, String?) -> Void) {
@@ -76,13 +80,9 @@ final class FaviconService {
         inFlight.insert(key)
         logger.debug("Fetching favicon for \(key, privacy: .public)")
 
+        let googleFallbackEnabled = Self.googleFallbackEnabled
         Task {
-            let (primaryURL, fallbackURL) = Self.faviconURLs(
-                for: url,
-                googleFallbackEnabled: Self.googleFallbackEnabled
-            )
-
-            let data = await fetchFaviconData(primary: primaryURL, fallback: fallbackURL)
+            let data = await Self.fetchFaviconData(for: url, googleFallbackEnabled: googleFallbackEnabled, fetch: fetch)
             defer {
                 inFlight.remove(key)
                 pendingCallbacks.removeValue(forKey: key)
@@ -145,7 +145,7 @@ final class FaviconService {
 
     /// Hosts that must never be sent to Google: single-label names, local and
     /// private suffixes, and IP literals (Google can't resolve them anyway).
-    static func isPrivateHost(_ host: String) -> Bool {
+    nonisolated static func isPrivateHost(_ host: String) -> Bool {
         let name = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]."))
         guard name.contains("."), !name.contains(":") else { return true }
         let privateSuffixes = [".local", ".localhost", ".localdomain", ".internal", ".intranet", ".corp",
@@ -158,7 +158,7 @@ final class FaviconService {
     /// The site's own `/favicon.ico`, and Google's service as a fallback only when
     /// enabled and the host is public. Both carry the origin only (no path, query,
     /// fragment or credentials).
-    static func faviconURLs(for url: URL, googleFallbackEnabled: Bool) -> (URL?, URL?) {
+    nonisolated static func faviconURLs(for url: URL, googleFallbackEnabled: Bool) -> (URL?, URL?) {
         guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
               url.host != nil, var site = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return (nil, nil)
@@ -181,27 +181,31 @@ final class FaviconService {
         return (site.url, fallback)
     }
 
-    private func fetchFaviconData(primary: URL?, fallback: URL?) async -> Data? {
-        if let primary {
-            if let data = await fetchData(from: primary) {
+    /// The site's `/favicon.ico`, else Google's (public hosts only, when enabled:
+    /// `faviconURLs`). An answer counts only when it's a 2xx whose body decodes as
+    /// an image: a `200 text/html` "not found" page moves on to the fallback instead
+    /// of being cached (or starting the failure cooldown) as the icon.
+    nonisolated static func fetchFaviconData(for url: URL, googleFallbackEnabled: Bool, fetch: Fetch) async -> Data? {
+        let (primary, fallback) = faviconURLs(for: url, googleFallbackEnabled: googleFallbackEnabled)
+        for candidate in [primary, fallback].compactMap({ $0 }) {
+            if let data = await imageData(from: candidate, fetch: fetch) {
                 return data
             }
-        }
-        if let fallback {
-            return await fetchData(from: fallback)
         }
         return nil
     }
 
-    private func fetchData(from url: URL) async -> Data? {
-        do {
-            let (data, response) = try await session.data(from: url)
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), !data.isEmpty {
-                return data
-            }
-        } catch {
-            logger.debug("Favicon fetch error for \(url.host ?? "unknown", privacy: .private)")
+    private nonisolated static func imageData(from url: URL, fetch: Fetch) async -> Data? {
+        guard let (data, response) = try? await fetch(url),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              !data.isEmpty, isDecodableImage(data) else {
+            return nil
         }
-        return nil
+        return data
+    }
+
+    nonisolated static func isDecodableImage(_ data: Data) -> Bool {
+        guard let image = NSImage(data: data), !image.representations.isEmpty else { return false }
+        return image.size.width > 0 && image.size.height > 0
     }
 }

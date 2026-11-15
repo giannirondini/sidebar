@@ -5,7 +5,9 @@ import Testing
 
 /// Space colours: presets, custom colours with opacity, lenient decoding.
 @Suite struct SpaceColorTests {
-    private let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SpaceColorTests-\(UUID().uuidString)")
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
+    private var directory: URL { scratch.url }
 
     @Test func presetsAreSixteenDistinctColoursWithoutSettings() {
         let presets = WorkspaceColorId.allCases
@@ -49,7 +51,7 @@ import Testing
     }
 
     @Test func customColorPersistsAndAPresetClearsIt() throws {
-        let model = AppModel(store: DataStore(baseDirectory: directory))
+        let model = AppModel(store: DataStore(baseDirectory: directory), defaults: testDefaults.suite)
         let id = model.currentWorkspace.id
         let custom = SpaceColor(red: 0.9, green: 0.8, blue: 0.7, alpha: 0.6)
 

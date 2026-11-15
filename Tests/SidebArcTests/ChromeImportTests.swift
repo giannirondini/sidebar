@@ -4,6 +4,8 @@ import Foundation
 
 @Suite("Chrome Import Tests")
 struct ChromeImportTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
 
     // MARK: - Helpers
 
@@ -22,7 +24,7 @@ struct ChromeImportTests {
 
     /// Write HTML string to a temp file and return its URL
     private func writeTempFile(_ content: String) throws -> URL {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = scratch.url
         let fileURL = tempDir.appendingPathComponent("test_bookmarks_\(UUID().uuidString).html")
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
         return fileURL
@@ -57,7 +59,7 @@ struct ChromeImportTests {
             let nodes = importResult.workspace.nodes
             #expect(nodes.count == 1)
 
-            if case .link(let link) = nodes[0] {
+            if case .link(let link)? = nodes[safe: 0] {
                 #expect(link.title == "Example Site")
                 #expect(link.url == "https://example.com")
             } else {
@@ -83,21 +85,23 @@ struct ChromeImportTests {
         switch result {
         case .success(let importResult):
             #expect(importResult.linksImported == 3)
-            let store = DataStore(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
-            let model = AppModel(store: store)
+            let store = DataStore(baseDirectory: scratch.url.appendingPathComponent(UUID().uuidString))
+            let model = AppModel(store: store, defaults: testDefaults.suite)
             model.showSettings()
             let profileId = model.currentProfile.id
             model.applyChromeImport(importResult.workspace)
             #expect(model.isSettingsShown)
             #expect(model.currentWorkspace.profileId == profileId)
-            let restored = AppModel(store: store).currentWorkspace.items
+            let restored = AppModel(store: store, defaults: testDefaults.suite).currentWorkspace.items
             let urls = restored.compactMap { node -> String? in
                 guard case .link(let link) = node else { return nil }
                 return link.url
             }
             #expect(urls == ["--renderer-cmd-prefix=/tmp/x", "file:///tmp/run.command", "https://example.com"])
-            #expect(BrowserManager.validatedLinkURL(from: urls[0]) == nil)
-            #expect(BrowserManager.validatedLinkURL(from: urls[1]) != nil)
+            let relative = try #require(urls[safe: 0])
+            let file = try #require(urls[safe: 1])
+            #expect(BrowserManager.validatedLinkURL(from: relative) == nil)
+            #expect(BrowserManager.validatedLinkURL(from: file) != nil)
         case .failure(let error):
             Issue.record("Import should succeed: \(error)")
         }
@@ -131,7 +135,7 @@ struct ChromeImportTests {
             let nodes = importResult.workspace.nodes
             #expect(nodes.count == 1) // One folder
 
-            if case .folder(let folder) = nodes[0] {
+            if case .folder(let folder)? = nodes[safe: 0] {
                 #expect(folder.name == "My Folder")
                 #expect(folder.children.count == 2)
             } else {
@@ -173,13 +177,13 @@ struct ChromeImportTests {
             #expect(importResult.foldersImported == 3)
 
             // Navigate down the hierarchy
-            if case .folder(let l1) = importResult.workspace.nodes[0] {
+            if case .folder(let l1)? = importResult.workspace.nodes[safe: 0] {
                 #expect(l1.name == "Level 1")
-                if case .folder(let l2) = l1.children[0] {
+                if case .folder(let l2)? = l1.children[safe: 0] {
                     #expect(l2.name == "Level 2")
-                    if case .folder(let l3) = l2.children[0] {
+                    if case .folder(let l3)? = l2.children[safe: 0] {
                         #expect(l3.name == "Level 3")
-                        if case .link(let link) = l3.children[0] {
+                        if case .link(let link)? = l3.children[safe: 0] {
                             #expect(link.url == "https://deep.com")
                         } else {
                             Issue.record("Expected link at level 3")
@@ -227,12 +231,10 @@ struct ChromeImportTests {
             let nodes = importResult.workspace.nodes
             #expect(nodes.count == 2) // Both links at root level
 
-            if case .link(let link1) = nodes[0] {
-                #expect(link1.url == "https://bar.com")
-            }
-            if case .link(let link2) = nodes[1] {
-                #expect(link2.url == "https://other.com")
-            }
+            let link1 = try #require(nodes[safe: 0]?.asLink)
+            #expect(link1.url == "https://bar.com")
+            let link2 = try #require(nodes[safe: 1]?.asLink)
+            #expect(link2.url == "https://other.com")
         case .failure(let error):
             Issue.record("Import should succeed: \(error)")
         }
@@ -294,7 +296,7 @@ struct ChromeImportTests {
 
         switch result {
         case .success(let importResult):
-            if case .link(let link) = importResult.workspace.nodes[0] {
+            if case .link(let link)? = importResult.workspace.nodes[safe: 0] {
                 #expect(link.title == "Tom & Jerry's <Site>")
             } else {
                 Issue.record("Expected a link node")
@@ -327,9 +329,12 @@ struct ChromeImportTests {
             let nodes = importResult.workspace.nodes
             #expect(nodes.count == 3)
 
-            if case .link(let l1) = nodes[0] { #expect(l1.title == "First") }
-            if case .link(let l2) = nodes[1] { #expect(l2.title == "Second") }
-            if case .link(let l3) = nodes[2] { #expect(l3.title == "Third") }
+            let l1 = try #require(nodes[safe: 0]?.asLink)
+            #expect(l1.title == "First")
+            let l2 = try #require(nodes[safe: 1]?.asLink)
+            #expect(l2.title == "Second")
+            let l3 = try #require(nodes[safe: 2]?.asLink)
+            #expect(l3.title == "Third")
         case .failure(let error):
             Issue.record("Import should succeed: \(error)")
         }
@@ -353,7 +358,7 @@ struct ChromeImportTests {
 
         switch result {
         case .success(let importResult):
-            if case .link(let link) = importResult.workspace.nodes[0] {
+            if case .link(let link)? = importResult.workspace.nodes[safe: 0] {
                 #expect(link.title == "Untitled")
             } else {
                 Issue.record("Expected a link node")
@@ -426,9 +431,8 @@ struct ChromeImportTests {
         switch result {
         case .success(let importResult):
             #expect(importResult.linksImported == 1)
-            if case .link(let link) = importResult.workspace.nodes[0] {
-                #expect(link.url == "https://valid.com")
-            }
+            let link = try #require(importResult.workspace.nodes[safe: 0]?.asLink)
+            #expect(link.url == "https://valid.com")
         case .failure(let error):
             Issue.record("Import should succeed: \(error)")
         }
@@ -455,7 +459,7 @@ struct ChromeImportTests {
 
         switch result {
         case .success(let importResult):
-            if case .folder(let folder) = importResult.workspace.nodes[0] {
+            if case .folder(let folder)? = importResult.workspace.nodes[safe: 0] {
                 #expect(folder.name == "Tom & Jerry's Folder")
             } else {
                 Issue.record("Expected a folder node")
@@ -487,13 +491,13 @@ struct ChromeImportTests {
             let nodes = importResult.workspace.nodes
             #expect(nodes.count == 2)
 
-            if case .link(let link1) = nodes[0] {
+            if case .link(let link1)? = nodes[safe: 0] {
                 #expect(link1.title == "A &lt; B")
             } else {
                 Issue.record("Expected a link node")
             }
 
-            if case .link(let link2) = nodes[1] {
+            if case .link(let link2)? = nodes[safe: 1] {
                 #expect(link2.title == "Use &amp; for ampersands")
             } else {
                 Issue.record("Expected a link node")
@@ -532,9 +536,12 @@ struct ChromeImportTests {
             let nodes = importResult.workspace.nodes
             #expect(nodes.count == 3)
 
-            if case .link(let l1) = nodes[0] { #expect(l1.title == "Standalone") }
-            if case .folder(let f) = nodes[1] { #expect(f.name == "My Folder") }
-            if case .link(let l2) = nodes[2] { #expect(l2.title == "Another") }
+            let l1 = try #require(nodes[safe: 0]?.asLink)
+            #expect(l1.title == "Standalone")
+            let f = try #require(nodes[safe: 1]?.asFolder)
+            #expect(f.name == "My Folder")
+            let l2 = try #require(nodes[safe: 2]?.asLink)
+            #expect(l2.title == "Another")
         case .failure(let error):
             Issue.record("Import should succeed: \(error)")
         }
@@ -666,6 +673,25 @@ struct ChromeImportTests {
             "Full/",
             "  In https://in.com",
             "After https://after.com"
+        ])
+    }
+
+    @Test("HREF entities are decoded and spaces encoded, in any quoting")
+    func testHrefEntitiesAndSpaces() async throws {
+        let html = """
+        <!DOCTYPE NETSCAPE-Bookmark-file-1>
+        <DL><p>
+            <DT><A HREF="https://example.com/search?a=1&amp;b=2&#38;c=3">Firefox style</A>
+            <DT><A HREF='https://example.com/my page?q=two words'>Spaces</A>
+            <DT><A HREF="https://example.com/&quot;quoted&quot;">Quoted</A>
+            <DT><A HREF="javascript:alert(1)">Bookmarklet</A>
+        </DL><p>
+        """
+        let result = try await importSucceeding(html)
+        #expect(outline(result.workspace.nodes) == [
+            "Firefox style https://example.com/search?a=1&b=2&c=3",
+            "Spaces https://example.com/my%20page?q=two%20words",
+            "Quoted https://example.com/%22quoted%22"
         ])
     }
 }

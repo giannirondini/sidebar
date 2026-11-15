@@ -3,6 +3,8 @@ import Testing
 @testable import SidebArcCore
 
 @Suite struct ArcImportTests {
+    private let scratch = TempDir()
+    private let testDefaults = TestDefaults()
 
     // MARK: - Test Data Generation
 
@@ -96,7 +98,7 @@ import Testing
         let jsonData = try createArcJSON(spaces: spaces, items: items)
 
         // Act: Write to temp file and import
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
 
@@ -112,7 +114,7 @@ import Testing
         switch result {
         case .success(let importResult):
             #expect(importResult.workspacesCreated == 1, "Should import workspace even with null title")
-            #expect(importResult.workspaces[0].name == "Untitled", "Should use 'Untitled' for null space title")
+            #expect(importResult.workspaces[safe: 0]?.name == "Untitled", "Should use 'Untitled' for null space title")
             #expect(importResult.linksImported == 1, "Should import the link")
         case .failure(let error):
             Issue.record("Import should succeed with null space title, but failed with: \(error)")
@@ -137,7 +139,7 @@ import Testing
         let jsonData = try createArcJSON(spaces: spaces, items: items)
 
         // Act
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
 
@@ -152,7 +154,7 @@ import Testing
         switch result {
         case .success(let importResult):
             #expect(importResult.linksImported == 1, "Should import link even with null savedTitle")
-            let firstNode = importResult.workspaces[0].nodes.first
+            let firstNode = try #require(importResult.workspaces.first).nodes.first
             if case .link(let link) = firstNode {
                 #expect(link.title == "Untitled", "Should use 'Untitled' for null savedTitle")
                 #expect(link.url == "https://example.com")
@@ -182,7 +184,7 @@ import Testing
         let jsonData = try createArcJSON(spaces: spaces, items: items)
 
         // Act
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
 
@@ -249,7 +251,7 @@ import Testing
         let jsonData = try createArcJSON(spaces: spaces, items: items)
 
         // Act
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
 
@@ -264,7 +266,7 @@ import Testing
         switch result {
         case .success(let importResult):
             #expect(importResult.foldersImported == 1, "Should import folder even with null title")
-            let firstNode = importResult.workspaces[0].nodes.first
+            let firstNode = try #require(importResult.workspaces.first).nodes.first
             if case .folder(let folder) = firstNode {
                 #expect(folder.name == "Untitled Folder", "Should use 'Untitled Folder' for null folder title")
                 #expect(folder.children.count == 1, "Should import child link")
@@ -324,7 +326,7 @@ import Testing
         let jsonData = try createArcJSON(spaces: spaces, items: items)
 
         // Act
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
 
@@ -344,7 +346,7 @@ import Testing
 
             // Verify space 2 has "Untitled" name
             if importResult.workspaces.count == 2 {
-                #expect(importResult.workspaces[1].name == "Untitled", "Space 2 should use 'Untitled'")
+                #expect(importResult.workspaces[safe: 1]?.name == "Untitled", "Space 2 should use 'Untitled'")
             }
         case .failure(let error):
             Issue.record("Import should succeed with mixed null fields, but failed with: \(error)")
@@ -401,7 +403,7 @@ import Testing
         ]
 
         let jsonData = try createArcJSON(spaces: spaces, items: items)
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
         try jsonData.write(to: tempURL)
@@ -417,7 +419,7 @@ import Testing
             #expect(importResult.foldersImported == 1)
 
             // The folder should contain the nested link (found via childrenIds)
-            let folderNode = importResult.workspaces[0].nodes.compactMap { node -> Folder? in
+            let folderNode = try #require(importResult.workspaces.first).nodes.compactMap { node -> Folder? in
                 if case .folder(let f) = node { return f }
                 return nil
             }.first
@@ -476,7 +478,7 @@ import Testing
         ]
 
         let jsonData = try createArcJSON(spaces: spaces, items: items)
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
         try jsonData.write(to: tempURL)
@@ -491,7 +493,7 @@ import Testing
             #expect(importResult.foldersImported == 2)
 
             // Verify the nesting: Top > Middle > Deep Link
-            guard let topFolder = importResult.workspaces[0].nodes.compactMap({ node -> Folder? in
+            guard let topFolder = try #require(importResult.workspaces.first).nodes.compactMap({ node -> Folder? in
                 if case .folder(let f) = node { return f }
                 return nil
             }).first else {
@@ -557,7 +559,7 @@ import Testing
         ]
 
         let jsonData = try createArcJSON(spaces: spaces, items: items)
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
         try jsonData.write(to: tempURL)
@@ -568,18 +570,18 @@ import Testing
 
         switch result {
         case .success(let importResult):
-            let nodes = importResult.workspaces[0].nodes
+            let nodes = try #require(importResult.workspaces.first).nodes
             #expect(nodes.count == 3)
 
             // Verify order matches childrenIds: C, A, B
-            if case .link(let first) = nodes[0] { #expect(first.title == "Charlie") }
-            else { Issue.record("Expected link at index 0") }
+            let first = try #require(nodes[safe: 0]?.asLink)
+            #expect(first.title == "Charlie")
 
-            if case .link(let second) = nodes[1] { #expect(second.title == "Alpha") }
-            else { Issue.record("Expected link at index 1") }
+            let second = try #require(nodes[safe: 1]?.asLink)
+            #expect(second.title == "Alpha")
 
-            if case .link(let third) = nodes[2] { #expect(third.title == "Beta") }
-            else { Issue.record("Expected link at index 2") }
+            let third = try #require(nodes[safe: 2]?.asLink)
+            #expect(third.title == "Beta")
         case .failure(let error):
             Issue.record("Import failed: \(error)")
         }
@@ -609,7 +611,7 @@ import Testing
         ]
 
         let jsonData = try createArcJSON(spaces: spaces, items: items)
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
         try jsonData.write(to: tempURL)
@@ -662,7 +664,7 @@ import Testing
         ]
 
         let jsonData = try createArcJSON(spaces: spaces, items: items)
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
         try jsonData.write(to: tempURL)
@@ -674,7 +676,7 @@ import Testing
         switch result {
         case .success(let importResult):
             #expect(importResult.linksImported == 1, "Should only import pinned link")
-            if case .link(let link) = importResult.workspaces[0].nodes.first {
+            if case .link(let link) = try #require(importResult.workspaces.first).nodes.first {
                 #expect(link.title == "Pinned")
             } else {
                 Issue.record("Expected pinned link")
@@ -685,32 +687,6 @@ import Testing
     }
 
     // MARK: - Integration Test with Real File
-
-    /// Test with the actual user file if it exists
-    @Test func testRealUserFile() async throws {
-        let fileURL = URL(fileURLWithPath: "/Users/ahmedsulaiman/Downloads/StorableSidebar.json")
-
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            print("⚠️  Skipping real file test - file not found at \(fileURL.path)")
-            return
-        }
-
-        let service = ArcImportService.shared
-        let result = await service.importFromArc(fileURL: fileURL)
-
-        switch result {
-        case .success(let importResult):
-            print("✅ Successfully imported user's file!")
-            print("   Workspaces: \(importResult.workspacesCreated)")
-            print("   Links: \(importResult.linksImported)")
-            print("   Folders: \(importResult.foldersImported)")
-
-            #expect(importResult.workspacesCreated > 0, "Should import at least one workspace")
-            #expect(importResult.linksImported > 0, "Should import at least one link")
-        case .failure(let error):
-            Issue.record("Failed to import user's file: \(error)")
-        }
-    }
 
     // MARK: - Regression Test for User's File
 
@@ -749,7 +725,7 @@ import Testing
         let jsonData = try createArcJSON(spaces: spaces, items: items)
 
         // Act
-        let tempURL = FileManager.default.temporaryDirectory
+        let tempURL = scratch.url
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("json")
 
@@ -768,7 +744,7 @@ import Testing
             #expect(importResult.linksImported == 3, "Should import all 3 links despite null savedTitle")
 
             // Verify the problematic link uses "Untitled"
-            let nodes = importResult.workspaces[0].nodes
+            let nodes = try #require(importResult.workspaces.first).nodes
             #expect(nodes.count == 3, "Should have 3 link nodes")
 
             // Find the problematic link by URL since order may vary
@@ -841,7 +817,7 @@ import Testing
     // MARK: - Profiles and favorites (topAppsContainerIDs)
 
     private func importJSON(_ data: Data) async throws -> ArcImportResult {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        let url = scratch.url.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
         try data.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
         switch await ArcImportService.shared.importFromArc(fileURL: url) {
@@ -868,10 +844,10 @@ import Testing
         let result = try await importJSON(createArcJSON(spaces: [space], items: items, topApps: [["default": true], "fav"]))
 
         #expect(result.workspaces.map(\.name) == ["Home"])
-        #expect(result.workspaces[0].arcProfile == .default)
+        #expect(result.workspaces[safe: 0]?.arcProfile == .default)
         #expect(result.profiles.count == 1)
-        #expect(result.profiles[0].arcProfile.name == "Default")
-        #expect(result.profiles[0].favorites.map(\.url) == ["https://mail.com", "https://docs.com"])
+        #expect(result.profiles[safe: 0]?.arcProfile.name == "Default")
+        #expect(result.profiles[safe: 0]?.favorites.map(\.url) == ["https://mail.com", "https://docs.com"])
         // Favorites are not counted as list links.
         #expect(result.linksImported == 1)
     }
@@ -907,7 +883,7 @@ import Testing
     @Test func testSpaceWithoutProfileFieldUsesDefault() async throws {
         let items = [createLinkItem(id: "l1", parentID: "container1", savedTitle: "A", savedURL: "https://a.com")]
         let result = try await importJSON(createArcJSON(spaces: [createSpace(title: "S")], items: items))
-        #expect(result.workspaces[0].arcProfile == .default)
+        #expect(result.workspaces[safe: 0]?.arcProfile == .default)
     }
 
     // MARK: - Opt-in acceptance check against a real StorableSidebar.json
@@ -942,9 +918,9 @@ import Testing
         #expect(expectedFavorites > 0)
 
         // Apply to a fresh model: nothing is dropped.
-        let store = DataStore(baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let store = DataStore(baseDirectory: scratch.url.appendingPathComponent(UUID().uuidString))
         store.save(DataStore.defaultState())
-        let model = AppModel(store: store)
+        let model = AppModel(store: store, defaults: testDefaults.suite)
         model.applyArcImport(result)
         let favoritesInModel = model.profiles.reduce(0) { $0 + $1.favorites.count }
         let migratedFolder = model.workspaces.flatMap(\.items).compactMap { node -> Int? in
@@ -953,5 +929,25 @@ import Testing
         }.reduce(0, +)
         print("Applied: \(model.profiles.count) profile(s), \(model.workspaces.count) spaces, \(favoritesInModel) favorites + \(migratedFolder) in overflow folders")
         #expect(favoritesInModel + migratedFolder == imported)
+    }
+
+    /// Arc writes Chromium's canonical URLs, but a hand-edited or other-tool file may
+    /// not: a space must not make the link depend on the macOS version.
+    @Test func savedURLsWithSpacesAreEncoded() async throws {
+        let items = [
+            createLinkItem(id: "a", parentID: "container1", savedTitle: "Spaced", savedURL: "https://example.com/a b?q=c d"),
+            createLinkItem(id: "b", parentID: "container1", savedTitle: "Plain", savedURL: "https://example.com/plain"),
+            createLinkItem(id: "c", parentID: "container1", savedTitle: "Blank", savedURL: "   ")
+        ]
+        let url = scratch.url.appendingPathComponent("spaces.json")
+        try createArcJSON(spaces: [createSpace(title: "Space")], items: items).write(to: url)
+
+        guard case .success(let result) = await ArcImportService.shared.importFromArc(fileURL: url) else {
+            Issue.record("Import failed")
+            return
+        }
+        let urls = try #require(result.workspaces.first).nodes.compactMap { $0.asLink?.url }
+        // No container childrenIds here, so the order isn't defined; the blank URL is skipped.
+        #expect(urls.sorted() == ["https://example.com/a%20b?q=c%20d", "https://example.com/plain"])
     }
 }

@@ -234,19 +234,13 @@ This ensures the user doesn't see Chrome's internal folder structure in SidebArc
 
 ## HTML Entity Decoding
 
-Bookmark titles and folder names may contain HTML entities. The parser decodes these five common entities:
+Titles, folder names **and `HREF` values** are decoded with `HTMLEntities.decode` (`Utilities/HTMLEntities.swift`, shared with the page-title fetch), in one pass: decimal and hex references (`&#39;`, `&#x27;`) and the named ones these files use (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`, dashes, quotes, `&hellip;`, …). Unknown or malformed references stay as written, and nothing is decoded twice (`&amp;lt;` → `&lt;`).
 
-| Entity | Character | Example |
-|--------|-----------|---------|
-| `&amp;` | `&` | `Tom &amp; Jerry` → `Tom & Jerry` |
-| `&lt;` | `<` | `a &lt; b` → `a < b` |
-| `&gt;` | `>` | `a &gt; b` → `a > b` |
-| `&quot;` | `"` | `&quot;hello&quot;` → `"hello"` |
-| `&#39;` | `'` | `it&#39;s` → `it's` |
-
-Chrome typically only uses `&amp;` and `&#39;` in practice, but the others are included for completeness since they're part of the HTML standard mandatory character references.
+Chrome writes `HREF` raw (only `"` becomes `&quot;`); Firefox-style files escape it, so `…?a=1&amp;b=2` is imported as `…?a=1&b=2`.
 
 ## URL Validation
+
+The decoded `HREF` goes through `ImportedURL.normalized` (`Utilities/ImportedURL.swift`, shared with the Arc import): it's trimmed, and characters a strict parser rejects (spaces, `"`, `<`, `|`, non-ASCII text, …) are percent-encoded after the scheme and host; existing `%XX` escapes and the host are left alone. `URL(string:)` is strict on macOS 13 and lenient from macOS 14, so without this a link with a space would be skipped on one and kept on the other. The encoded string is what's stored.
 
 Links are skipped if any of these conditions are true:
 
@@ -255,7 +249,9 @@ Links are skipped if any of these conditions are true:
 | URL string is empty | No valid URL |
 | Starts with `javascript:` | Bookmarklets, not navigable URLs |
 | Starts with `chrome://` | Chrome-internal pages, not accessible from other browsers |
-| `URL(string:)` returns `nil` | Malformed URL that Foundation can't parse |
+| `URL(string:)` returns `nil` after encoding | Malformed URL that Foundation can't parse |
+
+A relative string is kept (imports never drop links) but `BrowserManager.validatedLinkURL` never opens it.
 
 ## Why Not XMLParser or HTML Parsing Libraries?
 
@@ -412,12 +408,13 @@ func createBookmarksHTML(body: String) -> String {
 | File not found | Returns `.fileNotFound` |
 | Invalid URLs skipped | `javascript:`, `chrome://`, empty URLs |
 | HTML entities in folder names | Entity decoding applies to `<H3>` content too |
-| Entities not double-decoded | `&amp;lt;` stays `&lt;` (`&amp;` is decoded last) |
+| Entities not double-decoded | `&amp;lt;` stays `&lt;` (one pass) |
 | Mixed content | Folders and links at same level, correct order |
 | Missing `</DL>` | Folders left open at the end of the file keep their links, in place |
 | Minified one-line file | Every link and folder imported regardless of line breaks |
 | `HREF` in any position | After other attributes, lower case, single-quoted, unquoted, with a quoted `>` in another attribute |
 | Heading without list, stray `</DL>` | Empty folder kept; a stray close doesn't break the structure |
+| `HREF` entities and spaces | `&amp;` and `&#38;` decoded, `&quot;` and spaces percent-encoded, in any quoting; bookmarklets still skipped |
 
 ## References
 

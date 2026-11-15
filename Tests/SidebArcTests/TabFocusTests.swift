@@ -271,7 +271,8 @@ import Testing
         )
         let permission = AutomationPermission.check(pid: app.processIdentifier, ask: false)
         print("[tab probe] \(bundleId) permission: \(permission)")
-        guard permission == .granted else { return }
+        // The probe was asked for: without the grant it must fail, not pass silently.
+        try #require(permission == .granted, "Grant Automation for \(bundleId) to the process running the tests")
         let start = Date()
         let windows = try locator.tabURLs(pid: app.processIdentifier, timeout: 2)
         let ms = Int(Date().timeIntervalSince(start) * 1000)

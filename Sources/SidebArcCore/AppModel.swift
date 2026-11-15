@@ -13,12 +13,16 @@ final class AppModel {
     private(set) var isSettingsShown = false
     private let logger = Logger(subsystem: AppIdentity.logSubsystem, category: "model")
 
-    init(store: DataStore = DataStore()) {
+    /// Where the last selected space is remembered. Tests pass their own suite.
+    private let defaults: UserDefaults
+
+    init(store: DataStore = DataStore(), defaults: UserDefaults = .standard) {
         self.store = store
+        self.defaults = defaults
         self.noteStorage = NoteStorage(store: store)
         self.state = store.load()
 
-        if let savedId = UserDefaults.standard.string(forKey: UserDefaultsKeys.lastSelectedWorkspaceId),
+        if let savedId = defaults.string(forKey: UserDefaultsKeys.lastSelectedWorkspaceId),
            let uuid = UUID(uuidString: savedId),
            state.workspaces.contains(where: { $0.id == uuid }) {
             state.selectedWorkspaceId = uuid
@@ -255,7 +259,7 @@ final class AppModel {
                                  items: workspace.nodes, profileId: currentProfile.id)
         state.workspaces.append(imported)
         state.selectedWorkspaceId = imported.id
-        UserDefaults.standard.set(imported.id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+        defaults.set(imported.id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
         persist()
     }
 
@@ -303,7 +307,7 @@ final class AppModel {
             throw DataTransfer.TransferError.fileOperationFailed("Import could not save the new library. Some notes or icons may have changed. The previous data is in \(backup.path).")
         }
         if let selected = next.selectedWorkspaceId {
-            UserDefaults.standard.set(selected.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+            defaults.set(selected.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
         }
         state = next
         onChange?()
@@ -346,7 +350,7 @@ final class AppModel {
         guard state.workspaces.contains(where: { $0.id == id }) else { return }
         state.selectedWorkspaceId = id
         isSettingsShown = false
-        UserDefaults.standard.set(id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+        defaults.set(id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
         persist()
     }
 
@@ -370,7 +374,7 @@ final class AppModel {
         let workspace = Workspace(id: UUID(), name: name, colorId: colorId, items: [], profileId: currentProfile.id)
         state.workspaces.append(workspace)
         state.selectedWorkspaceId = workspace.id
-        UserDefaults.standard.set(workspace.id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+        defaults.set(workspace.id.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
         persist()
         return workspace.id
     }
@@ -427,7 +431,7 @@ final class AppModel {
         }
         if persist(notify: false) {
             if let newId = state.selectedWorkspaceId {
-                UserDefaults.standard.set(newId.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
+                defaults.set(newId.uuidString, forKey: UserDefaultsKeys.lastSelectedWorkspaceId)
             }
             removed.items.forEach { cleanupFiles(for: $0) }
         } else {
@@ -930,8 +934,76 @@ final class AppModel {
         return nil
     }
 
+    // MARK: - Bulk selection
+
+    /// The selected nodes of the current space, in list order (a selection is a
+    /// `Set`; its order must never matter). With `includingDescendantsOfSelected`
+    /// false, a node whose ancestor is also selected is left out: it travels with
+    /// that ancestor. Ids that aren't in the space are ignored. Every bulk action
+    /// (move, group, delete, open, copy) goes through here.
+    func selectedNodes(_ ids: some Collection<UUID>, includingDescendantsOfSelected: Bool = false) -> [Node] {
+        let selected = Set(ids)
+        var result: [Node] = []
+        func walk(_ nodes: [Node]) {
+            for node in nodes {
+                let isSelected = selected.contains(node.id)
+                if isSelected {
+                    result.append(node)
+                }
+                if case .folder(let folder) = node, !isSelected || includingDescendantsOfSelected {
+                    walk(folder.children)
+                }
+            }
+        }
+        if !selected.isEmpty {
+            walk(currentWorkspace.items)
+        }
+        return result
+    }
+
+    /// What "Open N Links" and a folder's "Open All Links" open, in list order:
+    /// each selected link and the links directly inside each selected folder (not
+    /// deeper; a folder selected inside a selected folder adds its own). A link
+    /// reached twice (selected, and inside a selected folder) opens once.
+    func linksToOpen(forSelection ids: some Collection<UUID>) -> [Link] {
+        var seen: Set<UUID> = []
+        var links: [Link] = []
+        func add(_ link: Link) {
+            if seen.insert(link.id).inserted { links.append(link) }
+        }
+        for node in selectedNodes(ids, includingDescendantsOfSelected: true) {
+            switch node {
+            case .link(let link):
+                add(link)
+            case .folder(let folder):
+                for case .link(let link) in folder.children {
+                    add(link)
+                }
+            case .note:
+                break
+            }
+        }
+        return links
+    }
+
+    /// What "Copy N Links" copies: the selected links themselves, in list order.
+    func linksToCopy(forSelection ids: some Collection<UUID>) -> [Link] {
+        selectedNodes(ids, includingDescendantsOfSelected: true).compactMap { node in
+            if case .link(let link) = node { return link }
+            return nil
+        }
+    }
+
+    /// Deletes the selection; a node inside a selected folder goes with the folder.
+    func deleteNodes(ids: some Collection<UUID>) {
+        for node in selectedNodes(ids) {
+            deleteNode(id: node.id)
+        }
+    }
+
     func moveNodesToWorkspace(nodeIds: [UUID], toWorkspaceId: UUID) {
         guard toWorkspaceId != currentWorkspace.id else { return }
+        let nodeIds = selectedNodes(nodeIds).map(\.id)
         guard !nodeIds.isEmpty else { return }
         guard state.workspaces.contains(where: { $0.id == toWorkspaceId }) else { return }
 
@@ -950,6 +1022,7 @@ final class AppModel {
 
     @discardableResult
     func groupNodesInNewFolder(nodeIds: [UUID], folderName: String) -> UUID? {
+        let nodeIds = selectedNodes(nodeIds).map(\.id)
         guard !nodeIds.isEmpty else { return nil }
 
         // Find locations BEFORE removal to determine correct insertion point

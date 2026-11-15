@@ -38,8 +38,11 @@ func expectPersisted(_ model: AppModel, in store: DataStore, sourceLocation: Sou
     if !deeplyEqual(model.state, store.load()) {
         Issue.record("Saved state differs from the in-memory state", sourceLocation: sourceLocation)
     }
-    let reloaded = AppModel(store: store)
+    // A fresh launch: its own empty defaults, as on a Mac that never ran the app.
+    let launchDefaults = TestDefaults()
+    let reloaded = AppModel(store: store, defaults: launchDefaults.suite)
     if !deeplyEqual(model.state, reloaded.state) {
         Issue.record("Reloaded state differs from the in-memory state", sourceLocation: sourceLocation)
     }
+    withExtendedLifetime(launchDefaults) {}
 }

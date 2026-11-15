@@ -155,20 +155,19 @@ final class ChromeImportService: Sendable {
 
             if let folderName = capture(match, 1, in: content) {
                 flushPendingFolder()
-                pendingFolderName = decodeHTMLEntities(folderName.trimmingCharacters(in: .whitespacesAndNewlines))
+                pendingFolderName = HTMLEntities.decode(folderName.trimmingCharacters(in: .whitespacesAndNewlines))
             } else if let attributeList = capture(match, 2, in: content) {
                 flushPendingFolder()
                 let attributeRange = NSRange(attributeList.startIndex..., in: attributeList)
                 guard let hrefMatch = hrefPattern.firstMatch(in: attributeList, range: attributeRange) else { continue }
-                let urlString = (1...3).lazy.compactMap { capture(hrefMatch, $0, in: attributeList) }.first ?? ""
-                var title = decodeHTMLEntities((capture(match, 3, in: content) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+                // Netscape files escape attribute values (`&amp;` in Firefox's; Chrome only `&quot;`).
+                let rawURL = HTMLEntities.decode((1...3).lazy.compactMap { capture(hrefMatch, $0, in: attributeList) }.first ?? "")
+                var title = HTMLEntities.decode((capture(match, 3, in: content) ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
                 if title.isEmpty {
                     title = "Untitled"
                 }
-                if urlString.isEmpty ||
-                    urlString.hasPrefix("javascript:") ||
-                    urlString.hasPrefix("chrome://") ||
-                    URL(string: urlString) == nil {
+                guard !rawURL.hasPrefix("javascript:"), !rawURL.hasPrefix("chrome://"),
+                      let urlString = ImportedURL.normalized(rawURL) else {
                     continue
                 }
                 let link = Link(id: UUID(), title: title, url: urlString, faviconPath: nil)
@@ -199,16 +198,6 @@ final class ChromeImportService: Sendable {
     }
 
     /// Decode common HTML entities in a string
-    private func decodeHTMLEntities(_ string: String) -> String {
-        var result = string
-        result = result.replacingOccurrences(of: "&lt;", with: "<")
-        result = result.replacingOccurrences(of: "&gt;", with: ">")
-        result = result.replacingOccurrences(of: "&quot;", with: "\"")
-        result = result.replacingOccurrences(of: "&#39;", with: "'")
-        result = result.replacingOccurrences(of: "&amp;", with: "&") // must be last to avoid double-decoding
-        return result
-    }
-
     /// Count links and folders in a node array
     private func countNodes(_ nodes: [Node]) -> (links: Int, folders: Int) {
         var links = 0

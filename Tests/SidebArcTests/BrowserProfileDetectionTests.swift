@@ -5,11 +5,12 @@ import Testing
 /// `BrowserManager.detectProfileList` against fake browser data in a temp
 /// "Application Support" root. Never touches the real browser folders.
 @Suite struct BrowserProfileDetectionTests {
+    private let scratch = TempDir()
     private let root: URL
     private let chrome = "com.google.Chrome"
 
     init() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        root = scratch.url.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
 
@@ -29,7 +30,8 @@ import Testing
         ]))
     }
 
-    @Test func unreadableLocalStateIsReportedAsDenied() throws {
+    @Test(.disabled(if: getuid() == 0, "root reads files whatever their permissions"))
+    func unreadableLocalStateIsReportedAsDenied() throws {
         let localState = try write(#"{"profile":{"info_cache":{"Default":{"name":"Personal"}}}}"#, to: "Google/Chrome/Local State")
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: localState.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: localState.path) }
@@ -112,7 +114,7 @@ import Testing
     }
 
     @Test func runnableFilesAreRevealedNotOpened() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let dir = scratch.url.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let script = dir.appendingPathComponent("run.command")

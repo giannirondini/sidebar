@@ -3,8 +3,9 @@ import Testing
 @testable import SidebArcCore
 
 @Suite struct NoteStorageTests {
+    private let scratch = TempDir()
     private func makeStore() -> DataStore {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let temp = scratch.url.appendingPathComponent(UUID().uuidString)
         return DataStore(baseDirectory: temp)
     }
 

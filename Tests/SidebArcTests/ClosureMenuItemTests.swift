@@ -21,7 +21,7 @@ import Testing
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem(title: "X") { fired += 1 })
         menu.update()
-        #expect(menu.items[0].isEnabled)
+        #expect(menu.items[safe: 0]?.isEnabled == true)
         menu.performActionForItem(at: 0)
         #expect(fired == 1)
     }
@@ -39,7 +39,7 @@ import Testing
         )
         let submenu = try #require(item.submenu)
         #expect(submenu.items.map(\.title) == ["Personal", "Work", "", "New Profile…"])
-        #expect(submenu.items[0].state == .on)
+        #expect(submenu.items[safe: 0]?.state == .on)
 
         submenu.performActionForItem(at: 1)
         #expect(assigned == work.id)
@@ -54,7 +54,7 @@ import Testing
             received.append($0)
         }
         let submenu = try #require(item.submenu)
-        #expect(submenu.items[2].state == .on)
+        #expect(submenu.items[safe: 2]?.state == .on)
         submenu.performActionForItem(at: 0)
         submenu.performActionForItem(at: 2)
         #expect(received == [nil, "com.apple.Safari"])
